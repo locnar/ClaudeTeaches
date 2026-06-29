@@ -217,38 +217,46 @@ Code & content guidelines:
     registration, work requests), RDMA read/write vs send/recv, RoCEv2 vs native
     InfiniBand, polling completions for lowest latency, registered-memory and zero-copy
     considerations; comparing RDMA to kernel bypass and where it fits intra-datacenter
-    fabrics (builds on Ch. 25 & 52; ties Ch. 55 & 57).
+    fabrics (builds on Ch. 25 & 52; ties Ch. 56 & 58).
 
 ### Part IX — Heterogeneous Computing & Hardware Acceleration
-54. **GPU Computing with CUDA** — offloading data-parallel work to the GPU: the CUDA
+54. **PCIe & the Host–Device Boundary** — the bus every accelerator and modern NIC sits
+    behind: PCIe topology, lanes and generations (Gen3/4/5) and their bandwidth, MMIO and
+    BAR-mapped device registers, DMA and the IOMMU, descriptor rings and doorbells, posted
+    vs non-posted transactions and why a device-register *read* costs a full round-trip,
+    write-combining and relaxed ordering, MSI-X interrupts vs polling for completions, and
+    peer-to-peer DMA (GPUDirect, NIC-to-GPU/FPGA); measuring round-trip latency and
+    streaming bandwidth, and why the PCIe round-trip is the floor under every offload
+    decision in this Part (builds on Ch. 6 & 25; leads into Ch. 55–58; ties Ch. 49).
+55. **GPU Computing with CUDA** — offloading data-parallel work to the GPU: the CUDA
     execution and memory model, warps/occupancy, host–device transfer cost, pinned and
     unified memory, streams and overlap; where GPUs pay off in trading (risk, options
     pricing/Greeks, Monte-Carlo, backtesting, ML inference) and why PCIe round-trip
     latency keeps them off the tick-to-trade hot path; measuring end-to-end including
     transfer overhead, not just kernel time.
-55. **Distributed Computing with MPI** — scaling across cores and hosts with OpenMPI:
+56. **Distributed Computing with MPI** — scaling across cores and hosts with OpenMPI:
     point-to-point vs collective operations, communicators, non-blocking calls and
     compute/communication overlap, RDMA/InfiniBand transports, NUMA- and topology-aware
     rank placement (builds on Ch. 15 & 53); large-scale backtesting and Monte-Carlo risk
     across a cluster, and why message latency keeps MPI off the order path.
-56. **FPGA Acceleration** — programmable hardware on the tick-to-trade fast path: HLS
+57. **FPGA Acceleration** — programmable hardware on the tick-to-trade fast path: HLS
     vs RTL, the host–FPGA boundary, NIC-integrated FPGAs and inline feed handling/order
     entry, deterministic nanosecond pipelines, partial reconfiguration; deciding what
     belongs in fabric vs software, and measuring wire-to-wire latency of a hardware path
     (builds on Ch. 48–53).
-57. **SmartNICs & DPUs** — programmable network hardware between the wire and the host:
+58. **SmartNICs & DPUs** — programmable network hardware between the wire and the host:
     offloading packet processing, filtering, timestamping and even feed handling/order
     entry onto NIC-resident ARM cores or FPGA fabric (NVIDIA BlueField, Intel IPU, AMD
     Pensando); the host–DPU boundary and programming models (DOCA, P4, eBPF/XDP offload),
     on-NIC RDMA and storage/security offload, partitioning work between DPU and host; when
     a DPU earns its place on the tick-to-trade path vs adding a hop (builds on Ch. 49, 51
-    & 56; ties Ch. 53).
+    & 57; ties Ch. 53).
 
 ### Part X — Observability & Operations in Production
-58. **Zero-Overhead Logging** — async/lock-free loggers, deferred formatting, binary
+59. **Zero-Overhead Logging** — async/lock-free loggers, deferred formatting, binary
     logging, `std::print`/`std::println` for off-hot-path output, keeping logging off the
     hot path.
-59. **Secure Programming for Low-Latency Systems** — security as a hot-path concern:
+60. **Secure Programming for Low-Latency Systems** — security as a hot-path concern:
     treating market-data and order-entry messages as untrusted input — bounds/length
     validation on variable-length fields and zero-copy parses, defending feed handlers
     against malformed/hostile packets (builds on Ch. 48); memory safety in
@@ -260,22 +268,40 @@ Code & content guidelines:
     CET shadow stacks and how they interact with Spectre/Meltdown mitigations (builds on
     Ch. 5), measuring their hot-path cost and choosing what to keep on an isolated box;
     handling session credentials and secrets (non-elided secure wiping, keeping secrets
-    out of logs — ties Ch. 58); privilege reduction and isolation (`seccomp`, dropping
+    out of logs — ties Ch. 59); privilege reduction and isolation (`seccomp`, dropping
     capabilities, namespaces) and their latency implications; build/supply-chain
     integrity (dependency vetting, reproducible and signed builds); and a security
     toolchain — ASan/UBSan/MSan and fuzzing message parsers (libFuzzer/AFL++) on the
     decode path (builds on Ch. 38).
-60. **Hot Reload & Live Reconfiguration** — changing strategy parameters, symbol/reference
+61. **Hot Reload & Live Reconfiguration** — changing strategy parameters, symbol/reference
     data and even code without restarting or dropping a tick: atomic pointer swaps and
     double-buffering, seqlock-/RCU-published config snapshots read lock-free on the hot
     path, versioned configuration and safe reclamation of the old version; shared-memory
     config segments, validation-before-swap, draining vs instantaneous cutover, and
     dynamic-library/strategy reload with warm-up; testing that a reload never tears or
     stalls the hot path (builds on Ch. 29 & 34–35; ties Ch. 25 & 43).
-61. **Production Profiling & End-to-End Case Study** — continuous performance
+62. **Process Topology & Crash Isolation** — structuring the trading system as multiple
+    cooperating processes for fault containment instead of one monolith: process-per-role
+    (feed handler / strategy / order gateway / risk), shared-memory data planes between
+    isolated processes (builds on Ch. 25 & 46), fault domains and blast radius, the
+    single-writer-per-segment discipline, supervisor/watchdog processes, heartbeats and
+    liveness detection, crash-only design and fast restart with hot-path warm-up (ties
+    Ch. 43 & 60), kill-switch / safe-state on failure, capturing core dumps without
+    stalling survivors, and symbol/venue sharding so one strategy's crash can't take down
+    the session.
+63. **Capture, Persistence & Replay Storage** — recording every inbound tick and outbound
+    order for deterministic replay, research and compliance: lossless line capture and
+    nanosecond packet timestamps (ties Ch. 49–50), append-only/write-ahead journals and
+    compact binary log formats (builds on Ch. 58), getting bytes to disk *off* the hot
+    path (async writers, io_uring, `O_DIRECT`, NVMe, batching — ties Ch. 45 & 59),
+    sequencing and gap-free persistence, time-indexed storage, retention and compaction,
+    and feeding captures into deterministic replay, simulation harnesses and backtests
+    (ties Ch. 61 & 64).
+64. **Production Profiling & End-to-End Case Study** — continuous performance
     monitoring, regression detection, and a full tick-to-trade walkthrough tying the
     book together; determinism and capture/replay — deterministic replay of captured
-    market data, simulation harnesses, and latency-regression gates in CI.
+    market data, simulation harnesses, and latency-regression gates in CI (builds on
+    Ch. 63).
 
 ### Appendices
 - **Appendix A — ARM / Graviton & Non-x86 Targets** — porting the low-latency toolkit to
@@ -317,9 +343,30 @@ Code & content guidelines:
   null syscall, a context switch, kernel-stack NIC RX vs kernel-bypass RX, and a PCIe
   round-trip — each in ns and in cycles, with how-it-was-measured notes and pointers to the
   chapter that derives it (ties Ch. 3, 6, 12, 15, 16, 31–32, 39, 44, 49 & 52).
+- **Appendix F — Glossary (HFT & Microarchitecture Terms)** — an alphabetized quick
+  reference for the acronyms and jargon used throughout, each entry a line or two with a
+  pointer to the chapter that develops it: trading & market-structure (tick-to-trade,
+  NBBO, order book / level / top-of-book, ITCH/OUCH/FIX/SBE/FAST, A/B feed arbitration,
+  colocation, maker/taker, kill-switch); microarchitecture (IPC, µop & DSB, ROB, LFB,
+  MLP, MESI/MOESI & HITM, BTB, store buffer, TLB, prefetcher, SMT); memory & OS (NUMA,
+  huge pages, page fault, futex, `isolcpus`/`nohz_full`, IRQ affinity); concurrency
+  (acquire/release, seqlock, RCU, hazard pointer, ABA, false sharing); and C++/toolchain
+  (RAII, `noexcept`, `std::expected`, CRTP, LTO, PGO, BOLT). Cross-references the chapter
+  where each term is defined and measured.
+- **Appendix G — Annotated Bibliography** — a curated reading list consolidating the
+  per-chapter *References* and *Additional Reading*, each entry with a sentence on what
+  it's good for and which chapters draw on it: foundational papers (Drepper's *What Every
+  Programmer Should Know About Memory*, Dean's latency numbers, the LMAX *Disruptor*
+  paper, McKenney on RCU); vendor and reference manuals (Intel SDM and *Optimization
+  Reference Manual*, Agner Fog's microarchitecture and instruction tables, AMD and ARM
+  architecture references, the kernel and `perf` docs); books (Hennessy & Patterson,
+  Williams' *C++ Concurrency in Action*, Fog's optimization series); influential talks and
+  blogs (CppCon performance talks, Carl Cook's "When a Microsecond Is an Eternity," the
+  Mechanical Sympathy community); and tooling documentation (Google Benchmark, VTune,
+  `liburing`, DPDK, bpftrace). Organized to mirror the Parts of the book.
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (61 chapters + 5 appendices, A–E).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices, A–G).
 - Phase 2 (current): generating chapters one at a time into `chapters/NN-slug.md` (appendices
   into `chapters/appendix-X-slug.md`, e.g. `appendix-A-arm-graviton.md`), following the authoring
   conventions. Drafted (against the pre-expansion numbering, now remapped): **Ch. 1–7, 9, 10,
@@ -340,27 +387,48 @@ Code & content guidelines:
 
 ### README.md is the reader's topic index (keep it current with every chapter)
 
-`chapters/README.md` is a **table of contents and topic index**, not a progress board. For each
-chapter it lists the title, the file link, a one-line focus, and a **Covers:** list of the
-sub-topics inside that chapter, so a reader can find which document discusses a given technique.
-Planned chapters are marked *(not yet written)* with a **Will cover:** list of intended topics.
-Drafting progress is tracked **here in CLAUDE.md** (the "Drafted: …" line above), NOT in README.
+`chapters/README.md` is a **detailed table of contents and topic index**, not a progress board.
+It is organized by Part, and **each chapter is expanded into its standard section outline** so a
+reader can find which document discusses a given technique:
+
+```
+### N. Chapter Title
+- N.1 Why it matters: <hook>
+- N.2 Mental model
+  - N.2.1 <mechanism sub-topic>
+  - N.2.2 …
+- N.3 Measure it: <what is measured>
+- N.4 Techniques
+  - N.4.1 <pattern>
+  - N.4.2 …
+- N.5 Verify the codegen: <…>   (only for chapters where the optimizer matters)
+- N.6 Pitfalls & anti-patterns: <…>
+- N.7 Exercises & checklist
+```
+
+The searchable sub-topics live as numbered sub-bullets under **§N.2 (Mental model)** and
+**§N.4 (Techniques)**; per-chapter §8 References / §9 Additional Reading are **not** listed in the
+index. Appendices use the same outline at one level (`A.1`, `A.2`, …). A short legend at the top
+of the file states the convention: a **linked** chapter title (`[N. Title](NN-slug.md)`) points at
+a drafted file; a **plain** title is planned but not yet written. Drafting progress is tracked
+**here in CLAUDE.md** (the "Drafted: …" line above), NOT in README.
 
 After generating (or materially revising) any chapter `chapters/NN-slug.md`, always, in the same
 change:
 
-1. **Refresh that chapter's README entry:**
-   - Remove the *(not yet written)* marker and relabel its **Will cover:** line to **Covers:**.
-   - Replace the planned sub-topic list with one that reflects the chapter's *actual* sections —
-     distil the `### N.2.x` (Mental model) and `### N.4.x` (Techniques) subsection titles into a
-     deduplicated, `·`-separated list of the concepts/techniques a reader would search for.
-   - Verify the title, file link, and one-line focus match the chapter.
+1. **Refresh that chapter's README outline:**
+   - Turn the plain chapter title into a link to its file (`[N. Title](NN-slug.md)`).
+   - Replace the planned outline with one that mirrors the chapter's *actual* sections — the
+     `### N.2.x` (Mental model) and `### N.4.x` (Techniques) subsection titles map directly onto
+     the README's `N.2.x` / `N.4.x` sub-bullets; keep the `N.1`/`N.3`/`N.5`/`N.6`/`N.7` lines in
+     sync with the chapter's real one-line section summaries.
+   - Verify the title and section numbering match the chapter.
 2. **Update this file (CLAUDE.md):** advance the Phase 2 "Drafted: …" line (range drafted, current
    Part, next chapter).
 3. **Consistency sweep of the new chapter:** confirm it opens with the Part header +
    Prerequisites/Leads-into blockquote, follows the §1–§9 section structure, and ends with a
    `*Next: Ch. NN — …*` teaser pointing at the next planned chapter. Also catch up any earlier
-   chapters whose README entry still says *(not yet written)* but which now exist on disk.
+   chapters whose README title is still unlinked (plain) but which now exist on disk.
 
 Treat this as part of "generating a chapter," not an optional follow-up — a chapter is not done
-until its README entry reflects its real contents and CLAUDE.md's progress line is current.
+until its README outline reflects its real contents and CLAUDE.md's progress line is current.
