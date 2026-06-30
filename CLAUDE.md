@@ -126,6 +126,9 @@ Code & content guidelines:
     `std::map`, `std::function`, `shared_ptr` refcounting and node-based containers;
     flat/open-addressing & robin-hood hashing, `std::flat_map`/`std::flat_set` (C++23),
     intrusive containers, small-buffer types, choosing layout for the access pattern.
+    **Case Study: Building the Limit Order Book** — array-of-pointers vs. intrusive linked 
+    lists for price levels, handling BBO (top-of-book) vs. deep-book additions, and efficiently 
+    consolidating disparate feeds.
 25. **Memory Mapping** — `mmap`, shared memory, file-backed mappings, page faulting
     and pre-faulting/locking (`mlock`).
 
@@ -197,12 +200,17 @@ Code & content guidelines:
     copies: ITCH/OUCH/FIX/SBE/FAST, fixed-layout structs vs bit-fields, endianness,
     `std::from_chars`/`to_chars`, branch-free integer/decimal parsing, scatter/gather
     and zero-copy receive paths; feed-handler A/B line arbitration, sequence-gap
-    detection and recovery on redundant multicast feeds.
+    detection and recovery on redundant multicast feeds. **Mechanical Sympathy for UDP 
+    Microbursts:** tuning hardware RX ring sizes, managing UDP packet reordering in 
+    software ring buffers, and detecting hardware-level packet drops during market open.
 49. **NIC Features & Offloads** — RSS, hardware timestamping, busy-polling,
     checksum/segmentation offload, Solarflare/Onload.
 50. **Clock Synchronization & Hardware Timestamping (PTP)** — distributing time across
     hosts with PTP, NIC hardware timestamps, comparing timestamps across machines,
     measuring true wire-to-wire and tick-to-trade latency (builds on Ch. 16 & 49).
+    **Advanced Synchronization:** sub-nanosecond extensions via White Rabbit, utilizing 
+    PPS (Pulse Per Second) signaling for boundary clocks, and accounting for grandmaster 
+    oscillator drift.
 51. **eBPF, bpftrace & XDP / AF_XDP** — programmable kernel observability and fast
     networking: the eBPF VM and verifier, attaching probes (kprobes/uprobes/tracepoints/
     USDT), `bpftrace` one-liners and low-overhead production tracing of latency and syscalls
@@ -211,7 +219,8 @@ Code & content guidelines:
     between the kernel stack and full bypass; measuring overhead and where eBPF/XDP belongs
     off vs near the hot path (leads into Ch. 52).
 52. **Kernel Bypass & Userspace Networking** — DPDK, poll-mode drivers, hugepage
-    mempools, userspace TCP stacks, the tick-to-trade fast path.
+    mempools, userspace TCP stacks, the tick-to-trade fast path. **Proprietary Vendor APIs:** leveraging Solarflare `ef_vi` and ExaNIC `libexanic` for raw, zero-copy access to the 
+    NIC ring buffer; exploring the latency floors of transparent vs. explicit bypass.
 53. **InfiniBand Verbs & RDMA** — one-sided remote memory access for ultra-low-latency
     messaging: the verbs API (queue pairs, completion queues, memory regions and
     registration, work requests), RDMA read/write vs send/recv, RoCEv2 vs native
@@ -280,15 +289,17 @@ Code & content guidelines:
     config segments, validation-before-swap, draining vs instantaneous cutover, and
     dynamic-library/strategy reload with warm-up; testing that a reload never tears or
     stalls the hot path (builds on Ch. 29 & 34–35; ties Ch. 25 & 43).
-62. **Process Topology & Crash Isolation** — structuring the trading system as multiple
-    cooperating processes for fault containment instead of one monolith: process-per-role
-    (feed handler / strategy / order gateway / risk), shared-memory data planes between
-    isolated processes (builds on Ch. 25 & 46), fault domains and blast radius, the
-    single-writer-per-segment discipline, supervisor/watchdog processes, heartbeats and
-    liveness detection, crash-only design and fast restart with hot-path warm-up (ties
-    Ch. 43 & 60), kill-switch / safe-state on failure, capturing core dumps without
-    stalling survivors, and symbol/venue sharding so one strategy's crash can't take down
-    the session.
+62. **Process Topology & The Deterministic State Machine** — structuring the trading system 
+    as multiple cooperating processes for fault containment instead of one monolith: 
+    process-per-role (feed handler / strategy / order gateway / risk). **The Deterministic 
+    State Machine Pattern:** isolating the core matching or routing logic into a pure, 
+    side-effect-free state machine decoupled from network I/O and timers to guarantee 
+    exact replayability. Shared-memory data planes between isolated processes (builds on 
+    Ch. 25 & 46), fault domains and blast radius, the single-writer-per-segment discipline, 
+    supervisor/watchdog processes, heartbeats and liveness detection, crash-only design 
+    and fast restart with hot-path warm-up (ties Ch. 43 & 60), kill-switch / safe-state 
+    on failure, capturing core dumps without stalling survivors, and symbol/venue sharding 
+    so one strategy's crash can't take down the session.
 63. **Capture, Persistence & Replay Storage** — recording every inbound tick and outbound
     order for deterministic replay, research and compliance: lossless line capture and
     nanosecond packet timestamps (ties Ch. 49–50), append-only/write-ahead journals and
@@ -300,8 +311,8 @@ Code & content guidelines:
 64. **Production Profiling & End-to-End Case Study** — continuous performance
     monitoring, regression detection, and a full tick-to-trade walkthrough tying the
     book together; determinism and capture/replay — deterministic replay of captured
-    market data, simulation harnesses, and latency-regression gates in CI (builds on
-    Ch. 63).
+    market data through the core state machine, simulation harnesses, and latency-regression 
+    gates in CI (builds on Ch. 62 & 63).
 
 ### Appendices
 - **Appendix A — ARM / Graviton & Non-x86 Targets** — porting the low-latency toolkit to
@@ -369,13 +380,25 @@ Code & content guidelines:
 - Phase 1 (done): TOC established above (64 chapters + 7 appendices, A–G).
 - Phase 2 (current): generating chapters one at a time into `chapters/NN-slug.md` (appendices
   into `chapters/appendix-X-slug.md`, e.g. `appendix-A-arm-graviton.md`), following the authoring
-  conventions. Drafted (against the pre-expansion numbering, now remapped): **Ch. 1–7, 9, 10,
-  12, 14, 15, 16, 17 and Ch. 32**. That is — Part I complete; Part II drafted *except* the three
-  newly inserted chapters **Ch. 8 (Object Layout), Ch. 11 (Instruction Cache) and Ch. 13
-  (Indirect Calls)**, which are not yet written; Part III begun with **Ch. 17 — Compile-Time
-  Mechanics**; and **Ch. 32 — False Sharing** drafted ahead of sequence on request. Outstanding
-  in Part II: draft the three new chapters (8, 11, 13). Sequential drafting otherwise resumes at
-  **Ch. 18 — Template Metaprogramming & Zero-Cost Abstractions**.
+  conventions. Drafted so far: **Ch. 1–31** (Parts I–V complete; Part VI in progress:
+  `01-the-latency-mindset.md`, `02-measure-first-profiling-pmu.md`,
+  `03-microbenchmarking-done-right.md`, `04-reading-the-machine-asm.md`,
+  `05-system-setup-for-low-latency.md`, `06-memory-hierarchy-and-caches.md`,
+  `07-cache-aware-data-oriented-design.md`, `08-object-layout-alignment-padding.md`,
+  `09-software-prefetching-nontemporal-stores.md`, `10-cpu-pipelines-and-execution.md`,
+  `11-instruction-cache-frontend-code-layout.md`, `12-branch-prediction-branchless.md`,
+  `13-indirect-calls-virtual-dispatch.md`, `14-virtual-memory-tlb-huge-pages.md`,
+  `15-numa-architecture.md`, `16-timekeeping-tsc-rdtsc-clocks.md`,
+  `17-compile-time-mechanics.md`, `18-template-metaprogramming-zero-cost.md`,
+  `19-the-cost-of-abstractions.md`, `20-aliasing-restrict-type-punning.md`,
+  `21-build-toolchain-for-speed.md`, `22-memory-management-fundamentals.md`,
+  `23-custom-allocators.md`, `24-hotpath-hostile-stl-cache-friendly-containers.md`,
+  `25-memory-mapping.md`, `26-fixed-point-floating-point-arithmetic.md`,
+  `27-bit-manipulation-integer-tricks.md`, `28-simd-vectorization.md`,
+  `29-cpp-memory-model-atomics.md`, `30-multithreading-concurrency-foundations.md`,
+  `31-spinlocks-backoff-contention-control.md`).
+  Current Part: **Part VI — Concurrency**. Next chapter: **Ch. 32 — False Sharing &
+  Thread-Safety Anomalies**.
 - When generating a chapter, confirm scope against this TOC and keep cross-references
   to other chapters by number/title.
 - Benchmark output blocks in drafts are **representative** for the stated reference
