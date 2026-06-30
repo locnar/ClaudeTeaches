@@ -380,7 +380,8 @@ Code & content guidelines:
 - Phase 1 (done): TOC established above (64 chapters + 7 appendices, A–G).
 - Phase 2 (current): generating chapters one at a time into `chapters/NN-slug.md` (appendices
   into `chapters/appendix-X-slug.md`, e.g. `appendix-A-arm-graviton.md`), following the authoring
-  conventions. Drafted so far: **Ch. 1–31** (Parts I–V complete; Part VI in progress:
+  conventions. Drafted so far: **Ch. 1–64** (Parts I–X complete — all 64 main chapters drafted;
+  Appendices A–G remain:
   `01-the-latency-mindset.md`, `02-measure-first-profiling-pmu.md`,
   `03-microbenchmarking-done-right.md`, `04-reading-the-machine-asm.md`,
   `05-system-setup-for-low-latency.md`, `06-memory-hierarchy-and-caches.md`,
@@ -396,9 +397,34 @@ Code & content guidelines:
   `25-memory-mapping.md`, `26-fixed-point-floating-point-arithmetic.md`,
   `27-bit-manipulation-integer-tricks.md`, `28-simd-vectorization.md`,
   `29-cpp-memory-model-atomics.md`, `30-multithreading-concurrency-foundations.md`,
-  `31-spinlocks-backoff-contention-control.md`).
-  Current Part: **Part VI — Concurrency**. Next chapter: **Ch. 32 — False Sharing &
-  Thread-Safety Anomalies**.
+  `31-spinlocks-backoff-contention-control.md`, `32-false-sharing-thread-safety-anomalies.md`,
+  `33-lock-free-data-structures.md`, `34-seqlocks-single-writer-publication.md`,
+  `35-safe-memory-reclamation.md`, `36-the-disruptor-pattern.md`,
+  `37-coroutines-async-models.md`, `38-concurrency-correctness-tooling.md`,
+  `39-context-switching-mitigation.md`, `40-thread-interrupt-pinning.md`,
+  `41-smt-hyperthreading.md`, `42-realtime-scheduling-kernel-tuning.md`,
+  `43-keeping-the-hot-path-warm.md`, `44-linux-native-io.md`, `45-io-uring-deep-dive.md`,
+  `46-inter-process-communication.md`, `47-socket-optimization-tcp-tuning.md`,
+  `48-zero-copy-wire-market-data-decoding.md`, `49-nic-features-offloads.md`,
+  `50-clock-synchronization-ptp.md`, `51-ebpf-bpftrace-xdp.md`,
+  `52-kernel-bypass-userspace-networking.md`, `53-infiniband-verbs-rdma.md`,
+  `54-pcie-host-device-boundary.md`, `55-gpu-computing-cuda.md`,
+  `56-distributed-computing-mpi.md`, `57-fpga-acceleration.md`, `58-smartnics-dpus.md`,
+  `59-zero-overhead-logging.md`, `60-secure-programming-low-latency.md`,
+  `61-hot-reload-live-reconfiguration.md`,
+  `62-process-topology-deterministic-state-machine.md`,
+  `63-capture-persistence-replay-storage.md`,
+  `64-production-profiling-end-to-end-case-study.md`).
+  Appendices drafted: **A-G** (all seven — `appendix-A-arm-graviton.md`, `appendix-B-beyond-cpp.md`,
+  `appendix-C-system-tuning-checklist.md`, `appendix-D-compiler-flag-reference.md`,
+  `appendix-E-latency-numbers.md`, `appendix-F-glossary.md`, `appendix-G-annotated-bibliography.md`).
+  **STATUS: COMPLETE — front matter + all 64 chapters (Parts I-X) + all 7 appendices (A-G) drafted.**
+  Front matter: `00-preface.md` (preface / how-to-read, linked at the top of README). Phase 2 done.
+  A full consistency/cross-reference sweep has been run (Part boundaries, teaser chaining N->N+1 and
+  A->G, cross-ref ranges, section numbering, README link resolution, no-hard-wrap rule, README
+  sub-bullets vs actual subsections) — all clean.
+  Remaining work is *revision*, not drafting: backfill real measured benchmark runs (currently
+  representative).
 - When generating a chapter, confirm scope against this TOC and keep cross-references
   to other chapters by number/title.
 - Benchmark output blocks in drafts are **representative** for the stated reference
