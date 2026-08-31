@@ -375,64 +375,86 @@ Code & content guidelines:
   blogs (CppCon performance talks, Carl Cook's "When a Microsecond Is an Eternity," the
   Mechanical Sympathy community); and tooling documentation (Google Benchmark, VTune,
   `liburing`, DPDK, bpftrace). Organized to mirror the Parts of the book.
+- **Appendix H — C++23/26 Feature Availability Matrix** — a support table for the
+  modern-library/language features the book reaches for (`std::expected`, `std::flat_map`/
+  `std::flat_set`, `std::print`, `std::mdspan`, `std::span`, `std::bit_cast`, `<bit>`,
+  senders/receivers): first GCC/libstdc++ and Clang/libc++ version each landed in, the
+  `__cpp_lib_*`/`__cpp_*` feature-test macro to gate on, and the C++17/20 fallback. Makes the
+  "use modern C++ where it helps, and name the standard + toolchain support" convention
+  actionable in one place.
+- **Appendix I — Tooling Command Cookbook** — a copy-paste one-liner reference
+  consolidating the commands scattered across chapters: `perf` (stat/record/annotate,
+  top-down, `c2c`/`mem`), VTune, `bpftrace`/eBPF, topology/pinning (`lscpu`/`lstopo`/
+  `numactl`/`taskset`/`chrt`), layout (`pahole`, cachegrind), network/NIC (`ethtool`/`ss`/
+  `tcpdump`/PTP), and codegen/binaries/sanitizers (`objdump`, Godbolt, BOLT, ASan/UBSan/TSan).
+  The *operational* companion to Ch. 2–5 and 61 (consolidates Ch. 2, 3, 4, 5, 9, 61 and
+  Appendix C).
+- **Appendix J — HFT Market-Structure & Protocol Primer** — a domain onramp for the
+  advanced-C++-but-new-to-trading reader: matching engines and price-time priority, the order
+  book (BBO/NBBO/depth), the order lifecycle, market-data feeds (A/B lines, snapshots vs.
+  increments), a field-level quick reference for ITCH/OUCH/FIX/SBE/FAST, the roles in a
+  trading system, and the tick-to-trade path end to end. Makes the trading framing
+  self-contained (complements Appendix F; ties Ch. 25, 53, 54, 76).
+- **Appendix K — Exchange Connectivity & the Physical Layer** — the infrastructure
+  floor beneath the software: colocation and cross-connects, latency-equalized cabling, fiber
+  vs. copper vs. microwave/millimeter-wave, exchange access/entitlements/throttles and
+  pre-trade-risk mandates, venue-side time distribution (grandmaster/PPS/PTP boundary clocks),
+  path diversity, and the latency/cost/regulation trade-offs — the physical constraints the
+  rest of the book optimizes within (ties Ch. 54, 55, 56, 60, 76).
+- **Appendix L — Reproducible Benchmark & Measurement Harness** — the reusable
+  scaffold behind every measurement in the book: a copy-paste Google Benchmark skeleton
+  (`DoNotOptimize`/`ClobberMemory`, fixture setup vs. steady-state split), a tail-latency
+  (HdrHistogram) variant that avoids coordinated omission, the pinning/warm-up/frequency
+  environment setup that makes runs repeatable, and a pre-trust checklist. Implements Ch. 3's
+  method as copy-paste code (consolidates Ch. 1, 3, 4, 17, 46 and Appendices C, E, I).
 
 ## Status / Workflow
 - Phase 1 (done): TOC established above (64 chapters + 7 appendices, A–G).
-- Phase 2 (current): generating chapters one at a time into `chapters/NN-slug.md` (appendices
-  into `chapters/appendix-X-slug.md`, e.g. `appendix-A-arm-graviton.md`), following the authoring
-  conventions. Drafted so far: **Ch. 1–64** (Parts I–X complete — all 64 main chapters drafted;
-  Appendices A–G remain:
-  `01-the-latency-mindset.md`, `02-measure-first-profiling-pmu.md`,
-  `03-microbenchmarking-done-right.md`, `04-reading-the-machine-asm.md`,
-  `05-system-setup-for-low-latency.md`, `06-memory-hierarchy-and-caches.md`,
-  `07-cache-aware-data-oriented-design.md`, `08-object-layout-alignment-padding.md`,
-  `09-software-prefetching-nontemporal-stores.md`, `10-cpu-pipelines-and-execution.md`,
-  `11-instruction-cache-frontend-code-layout.md`, `12-branch-prediction-branchless.md`,
-  `13-indirect-calls-virtual-dispatch.md`, `14-virtual-memory-tlb-huge-pages.md`,
-  `15-numa-architecture.md`, `16-timekeeping-tsc-rdtsc-clocks.md`,
-  `17-compile-time-mechanics.md`, `18-template-metaprogramming-zero-cost.md`,
-  `19-the-cost-of-abstractions.md`, `20-aliasing-restrict-type-punning.md`,
-  `21-build-toolchain-for-speed.md`, `22-memory-management-fundamentals.md`,
-  `23-custom-allocators.md`, `24-hotpath-hostile-stl-cache-friendly-containers.md`,
-  `25-memory-mapping.md`, `26-fixed-point-floating-point-arithmetic.md`,
-  `27-bit-manipulation-integer-tricks.md`, `28-simd-vectorization.md`,
-  `29-cpp-memory-model-atomics.md`, `30-multithreading-concurrency-foundations.md`,
-  `31-spinlocks-backoff-contention-control.md`, `32-false-sharing-thread-safety-anomalies.md`,
-  `33-lock-free-data-structures.md`, `34-seqlocks-single-writer-publication.md`,
-  `35-safe-memory-reclamation.md`, `36-the-disruptor-pattern.md`,
-  `37-coroutines-async-models.md`, `38-concurrency-correctness-tooling.md`,
-  `39-context-switching-mitigation.md`, `40-thread-interrupt-pinning.md`,
-  `41-smt-hyperthreading.md`, `42-realtime-scheduling-kernel-tuning.md`,
-  `43-keeping-the-hot-path-warm.md`, `44-linux-native-io.md`, `45-io-uring-deep-dive.md`,
-  `46-inter-process-communication.md`, `47-socket-optimization-tcp-tuning.md`,
-  `48-zero-copy-wire-market-data-decoding.md`, `49-nic-features-offloads.md`,
-  `50-clock-synchronization-ptp.md`, `51-ebpf-bpftrace-xdp.md`,
-  `52-kernel-bypass-userspace-networking.md`, `53-infiniband-verbs-rdma.md`,
-  `54-pcie-host-device-boundary.md`, `55-gpu-computing-cuda.md`,
-  `56-distributed-computing-mpi.md`, `57-fpga-acceleration.md`, `58-smartnics-dpus.md`,
-  `59-zero-overhead-logging.md`, `60-secure-programming-low-latency.md`,
-  `61-hot-reload-live-reconfiguration.md`,
-  `62-process-topology-deterministic-state-machine.md`,
-  `63-capture-persistence-replay-storage.md`,
-  `64-production-profiling-end-to-end-case-study.md`).
-  Appendices drafted: **A-G** (all seven — `appendix-A-arm-graviton.md`, `appendix-B-beyond-cpp.md`,
-  `appendix-C-system-tuning-checklist.md`, `appendix-D-compiler-flag-reference.md`,
-  `appendix-E-latency-numbers.md`, `appendix-F-glossary.md`, `appendix-G-annotated-bibliography.md`).
-  **STATUS: COMPLETE — front matter + all 64 chapters (Parts I-X) + all 7 appendices (A-G) drafted.**
-  Front matter: `00-preface.md` (preface / how-to-read, linked at the top of README). Phase 2 done.
-  A full consistency/cross-reference sweep has been run (Part boundaries, teaser chaining N->N+1 and
-  A->G, cross-ref ranges, section numbering, README link resolution, no-hard-wrap rule, README
-  sub-bullets vs actual subsections) — all clean.
-  Remaining work is *revision*, not drafting: backfill real measured benchmark runs (currently
-  representative).
+- Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
+  `chapters/appendix-X-slug.md`), following the authoring conventions.
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 76 chapters + 7 appendices (A–G).**
+  **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
+  matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
+  connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
+  now: front matter + 76 chapters + 12 appendices (A–L). Appendix H's version numbers and
+  Appendix L's code should be verified against current toolchains as part of the Phase-4
+  revision pass.**
+- Phase 3 (done): **the book was reorganized into twelve topical Parts** and every chapter
+  renumbered accordingly (the `## Table of Contents` prose above predates this reorg and reflects
+  the original drafting order — **the authoritative current structure is `chapters/README.md`**).
+  The twelve Parts and their chapter ranges:
+  - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
+    debugging optimized code, system setup.
+  - **II — CPU Microarchitecture** (7–17).
+  - **III — Compile-Time & Language Mechanics** (18–22).
+  - **IV — Memory Management** (23–26).
+  - **V — Numerics & Data Parallelism** (27–29).
+  - **VI — Concurrency** (30–40): …coroutines, `std::execution`, correctness tooling.
+  - **VII — OS, Scheduling & Isolation** (41–46): …SMT, cache allocation (RDT), RT scheduling, warming.
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (47–52): native I/O, io_uring, zero-copy fast path,
+    IPC, socket tuning, advanced TCP.
+  - **IX — Market Data, NIC & Fabric** (53–60): decoding, reliable multicast, NIC, DDIO, flow
+    steering, PTP, precise transmission, fabric.
+  - **X — Kernel Bypass, RDMA & Transport** (61–65): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+    transport beyond TCP.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (66–70): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XII — Observability & Operations in Production** (71–76): logging, security, hot reload,
+    process topology, capture/replay, end-to-end case study (the capstone, now genuinely last).
+  The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
+  section refs, part headers, file renames), followed by an editorial pass refreshing every moved
+  chapter's framing/teasers and regenerating `chapters/README.md` from the chapter files.
+  A full consistency sweep (title/section numbering, teaser chaining N→N+1, cross-ref range,
+  README link resolution, no-hard-wrap) is clean. A PDF build toolchain lives in `tools/book-pdf/`
+  (pandoc + tectonic). Remaining work is *revision*: backfill real measured benchmark runs.
 - When generating a chapter, confirm scope against this TOC and keep cross-references
   to other chapters by number/title.
 - Benchmark output blocks in drafts are **representative** for the stated reference
   machine (authoring is on macOS; target is Linux x86-64); code/flags/`perf` commands are
   reproducible. Real measured runs must be backfilled before a chapter is final.
-- Reference machine: Ch. 6–14 use a single-socket Xeon Gold 6326 (Ice Lake-SP); Ch. 15
-  (NUMA) uses a **dual-socket 2× Xeon Gold 6326** because NUMA effects need two sockets.
-  Keep the per-chapter machine description consistent with these unless a chapter needs otherwise.
+- Reference machine: the CPU-microarchitecture chapters (Part II, Ch. 7–15) use a single-socket
+  Xeon Gold 6326 (Ice Lake-SP); the NUMA chapter (Ch. 16) uses a **dual-socket 2× Xeon Gold 6326**
+  because NUMA effects need two sockets. Keep the per-chapter machine description consistent with
+  these unless a chapter needs otherwise.
 
 ### README.md is the reader's topic index (keep it current with every chapter)
 
