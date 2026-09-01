@@ -1,0 +1,28 @@
+# Pandoc document settings for the book PDF.
+# Fonts are supplied by build.sh (OS-dependent) via -V monofont=... / -V mainfont=...
+
+documentclass: book
+classoption:
+  - openright   # every \chapter starts on a recto (right-hand) page
+  - 11pt
+  - twoside
+
+geometry:
+  - paperwidth=7in
+  - paperheight=10in
+  - inner=1in     # larger inner margin for the binding
+  - outer=0.85in
+  - top=0.9in
+  - bottom=1in
+
+toc-title: Contents
+
+# Links: keep body cross-references black (print-friendly), URLs blue.
+colorlinks: true
+linkcolor: black
+toccolor: black
+urlcolor: blue
+citecolor: blue
+
+linestretch: 1.05
+lang: en-US

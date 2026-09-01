@@ -1,0 +1,103 @@
+% header.tex — LaTeX preamble additions injected by Pandoc (--include-in-header).
+% These run after Pandoc's own \usepackage lines, so packages it already loads
+% (longtable, booktabs, graphicx, hyperref, xcolor) are available here.
+
+% --- Code blocks / ASCII diagrams (wrap-code.lua emits fvextra Verbatim) -----------
+\usepackage{fvextra}            % loads fancyvrb; adds breaklines/breakanywhere
+\fvset{fontsize=\footnotesize,breaklines=true,breakanywhere=true,breaksymbolleft={}}
+
+% --- Tables ------------------------------------------------------------------------
+\usepackage{etoolbox}
+\usepackage{ragged2e}
+% Pandoc lays out wrapping table columns with \raggedright, which disables
+% hyphenation, so long compound words ("Spectre/retpoline", "non-speculative")
+% overflow narrow cells. Make \raggedright behave like \RaggedRight, which keeps
+% hyphenation, so cell text breaks to fit.
+\let\raggedright\RaggedRight
+% Shrink wide tables, trim inter-column padding, and allow last-resort stretch so
+% cells fit the text block. The font/padding are redefinable macros so the
+% fit-tables.lua filter can drop especially wide tables (many columns) to a smaller
+% size and tighter spacing without affecting the normal tables.
+\newcommand{\tablefontsize}{\footnotesize}
+\newcommand{\tablecolsep}{4pt}
+\AtBeginEnvironment{longtable}{\tablefontsize\setlength{\tabcolsep}{\tablecolsep}\setlength{\emergencystretch}{2em}}
+\setlength{\LTpre}{0.6em}
+\setlength{\LTpost}{0.6em}
+\renewcommand{\arraystretch}{1.15}
+
+% --- Blank verso pages truly blank (no header/footer on openright blanks) -----------
+\usepackage{emptypage}
+
+% --- Typography --------------------------------------------------------------------
+\usepackage{microtype}
+\usepackage{seqsplit}           % allow ugly-long inline tokens to break
+\sloppy                         % prefer extra interword space over overfull lines
+
+% Map the technical/math Unicode glyphs used in the prose onto symbols the body font
+% (Latin Modern) has, so they render instead of silently dropping out. These mappings
+% are inactive inside Verbatim, so the box-drawing diagrams in code keep their literal
+% Menlo glyphs. (§, accented letters, dashes, quotes, ×, … already render in LM.)
+\usepackage{amssymb}
+\usepackage{textcomp}
+\usepackage{pifont}
+\usepackage{newunicodechar}
+% relations / operators
+\newunicodechar{≈}{\ensuremath{\approx}}
+\newunicodechar{≠}{\ensuremath{\neq}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{≥}{\ensuremath{\geq}}
+\newunicodechar{≪}{\ensuremath{\ll}}
+\newunicodechar{≫}{\ensuremath{\gg}}
+\newunicodechar{±}{\ensuremath{\pm}}
+\newunicodechar{÷}{\ensuremath{\div}}
+\newunicodechar{−}{\ensuremath{-}}
+\newunicodechar{∈}{\ensuremath{\in}}
+% arrows
+\newunicodechar{→}{\ensuremath{\rightarrow}}
+\newunicodechar{←}{\ensuremath{\leftarrow}}
+\newunicodechar{↔}{\ensuremath{\leftrightarrow}}
+\newunicodechar{↓}{\ensuremath{\downarrow}}
+\newunicodechar{↑}{\ensuremath{\uparrow}}
+\newunicodechar{⇒}{\ensuremath{\Rightarrow}}
+% marks and stars (tables / bibliography)
+\newunicodechar{★}{\ding{72}}
+\newunicodechar{✓}{\ding{51}}
+\newunicodechar{✗}{\ding{55}}
+\newunicodechar{®}{\textregistered}
+% greek used in prose
+\newunicodechar{α}{\ensuremath{\alpha}}
+\newunicodechar{κ}{\ensuremath{\kappa}}
+\newunicodechar{Σ}{\ensuremath{\Sigma}}
+\newunicodechar{μ}{\textmu}          % U+03BC Greek mu, used as "μs" (micro); distinct from µ U+00B5
+% super/subscripts
+\newunicodechar{⁰}{\textsuperscript{0}}
+\newunicodechar{³}{\textsuperscript{3}}
+\newunicodechar{⁴}{\textsuperscript{4}}
+\newunicodechar{⁵}{\textsuperscript{5}}
+\newunicodechar{⁶}{\textsuperscript{6}}
+\newunicodechar{⁸}{\textsuperscript{8}}
+\newunicodechar{⁻}{\textsuperscript{\ensuremath{-}}}
+\newunicodechar{₂}{\textsubscript{2}}
+
+% --- Running heads -----------------------------------------------------------------
+\usepackage{fancyhdr}
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\chaptermark}[1]{\markboth{\thechapter.\ #1}{}}
+\renewcommand{\sectionmark}[1]{\markright{\thesection.\ #1}}
+\fancyhead[LE]{\small\nouppercase{\leftmark}}    % verso: chapter
+\fancyhead[RO]{\small\nouppercase{\rightmark}}   % recto: section
+\fancyhead[RE,LO]{}
+\fancyfoot[LE,RO]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+% Chapter/part opening pages use plain style; keep the page number there:
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyfoot[LE,RO]{\small\thepage}%
+  \renewcommand{\headrulewidth}{0pt}%
+}
+
+% --- Tighten Pandoc lists a touch --------------------------------------------------
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}

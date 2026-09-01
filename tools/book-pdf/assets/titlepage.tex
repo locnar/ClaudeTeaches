@@ -1,0 +1,25 @@
+% titlepage.tex — placeholders {{AUTHOR}} / {{DATE}} are filled in by build.sh.
+% Included via --include-before-body, so it is the first content page (recto),
+% followed by the table of contents.
+\begin{titlepage}
+\centering
+\thispagestyle{empty}
+\vspace*{\stretch{2}}
+
+{\Huge\bfseries Low-Latency C++ on Linux\par}
+\vspace{1.2em}
+{\large\itshape High-Performance Techniques for Electronic Trading\par}
+
+\vspace{2.5em}
+{\normalsize A hands-on tutorial series on tail latency, the tick-to-trade path,\\
+and squeezing nanoseconds out of modern x86-64 and Linux.\par}
+
+\vspace*{\stretch{3}}
+
+{\large {{AUTHOR}}\par}
+\vspace{0.6em}
+{\normalsize {{DATE}}\par}
+
+\vspace*{\stretch{1}}
+\end{titlepage}
+\cleardoublepage
