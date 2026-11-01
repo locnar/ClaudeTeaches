@@ -1,13 +1,13 @@
-# Consistency & Accuracy Review + Gap Analysis — 2026-10-30
+# Consistency & Accuracy Review + Gap Analysis — 2026-10-30 (completed 2026-11-01)
 
 **Scope.** All 76 chapters, 12 appendices, the preface, `chapters/README.md`, `CLAUDE.md` and `tools/book-pdf/README.md` (≈307,000 words).
 
 **Method.**
 1. A scripted structural sweep over every file (headers, section numbering, teaser chain, every `Ch. N` / `§N.M` / `Appendix X` reference, README outline vs. real headings).
-2. An agent review: eight *book-wide* checks (cross-reference targets, chapter chain, reference-machine consistency, recurring latency numbers, duplication/placement, glossary & bibliography, Appendices C/D/H/I accuracy) plus a *two-lens per-chapter review* (technical-accuracy lens and editorial/conventions lens). The per-chapter pass completed for **Ch. 1–17** before the author asked for the review workflow to be wrapped up; **Ch. 18–76 received only the book-wide checks** and still need the per-chapter pass.
-3. Verification: the planned adversarial-verifier stage did not run. Instead, every quoted passage (538 of 541) was mechanically confirmed to exist in the named file, and the author of this report personally re-verified the headline items marked ✅ below (by reading the passage, by compiling/running the listing with GCC 13.3 / Clang 18, or by web lookup). Everything else is a reviewer finding of stated confidence, listed in full in the three `2026-10-30-findings-*.md` files.
+2. An agent review: eight *book-wide* checks (cross-reference targets, chapter chain, reference-machine consistency, recurring latency numbers, duplication/placement, glossary & bibliography, Appendices C/D/H/I accuracy) plus a *two-lens per-chapter review* (technical-accuracy lens and editorial/conventions lens) over **all 76 chapters, all 12 appendices and the front matter**, in 25 chunks.
+3. Verification: every per-chapter finding went through an **adversarial verifier** that re-read the passage, tried to refute it, and where it mattered compiled the listing (GCC 13.3 / Clang 18), ran it, or checked primary sources on the web. The verifier's ruling and severity are attached to every row of the findings tables. The author of this report additionally re-verified the headline items marked ✅ below. The eight book-wide checks (212 findings) were not put through a second verifier; they are marked as such in the tables.
 
-**Totals (first pass).** 541 findings: 49 high, 213 medium, 279 low; the continuation run has so far added Ch. 18–46 (594 findings: 380 confirmed, 4 refuted, 198 lens duplicates, 12 verifier-added) with an adversarial verdict on every finding, and Ch. 47–76 (685 findings: 424 confirmed, 13 refuted, 234 duplicates, 14 verifier-added); the appendices and front matter (309 findings) are reviewed and awaiting their verdicts. Across everything verified so far: 1,009 confirmed, 31 refuted, 542 duplicates. The book-wide checks alone produced 212 of them, which is why most of the systemic issues below affect every Part, not just Ch. 1–17.
+**Totals.** 2,146 rows in the findings tables: **1,243 confirmed** (1,200 reviewer findings upheld + 43 found by the verifiers), 39 refuted (kept for transparency with the verifier's reason), 651 duplicates where both lenses found the same issue, 1 uncertain, and 212 book-wide-check findings. By the verifier's severity the confirmed set is 41 high, 372 medium, 830 low, spread over 92 of the 93 files reviewed. The refutation rate (39 of 1,282 ruled-on findings, 3 %) is the best available estimate of how much to discount the unverified book-wide checks.
 
 ---
 
@@ -38,7 +38,7 @@
 | 20 | **Ch. 43 asserts in ten places that an idle SMT sibling still halves the store buffer/ROB.** Intel SDM Vol. 3A §8.10.1: when a logical processor is halted, the partitioned resources are recombined for the active one. The chapter's HT-off-vs-idle-sibling comparison rests on the wrong mechanism. | `43:37, 50, 52, 100–105, 125, 142–165` | ✅ verifier, SDM |
 | 21 | **Ch. 44's CAT recipe contradicts itself and cannot run on the reference machine**: `L3:0=ff0ff` is a non-contiguous mask (forbidden on Intel, `sparse_masks=0`), and 20-bit masks (`fffff`, `00f00`) cannot be written on a 12-way Xeon Gold 6326 (`cbm_mask=fff`). | `44:73` | ✅ verifier, resctrl docs |
 | 22 | **A dozen §N.3 measurements in Ch. 18–46 collapse under the optimizer or measure the harness** (strcmp inside the timed loop; loop-invariant calls hoisted; counters folded to one `add`; `rng() \| 1` making the scan trivially zero; a runtime `memory_order` that GCC maps to `seq_cst`; `reserve()` instead of touching a 200 MB buffer). The verifier compiled each listing with the stated flags and showed the collapse in the asm or the output. See §6. | Ch. 20, 21, 23, 24, 28, 29, 30, 31, 33, 38, 42, 46 | ✅ verifier compiled/ran each |
-| 23 | **Appendix L's coordinated-omission harness double-counts.** Line 77 records `end − start` *and* then calls `hdr_record_corrected_value(h, end − intended, interval_ns)`, which itself records its value and back-fills `value − k·interval`; service time, response time and synthetic samples land in one histogram, so the percentiles the whole book's "tail-latency variant" produces are meaningless. The scaffold every chapter is told to reuse is wrong in its one non-trivial line. | `appendix-L:76–77` | ✅ HdrHistogram_c API semantics; verifier pending |
+| 23 | **Appendix L's coordinated-omission harness double-counts.** Line 77 records `end − start` *and* then calls `hdr_record_corrected_value(h, end − intended, interval_ns)`, which itself records its value and back-fills `value − k·interval`; service time, response time and synthetic samples land in one histogram, so the percentiles the whole book's "tail-latency variant" produces are meaningless. The scaffold every chapter is told to reuse is wrong in its one non-trivial line. | `appendix-L:76–77` | ✅ verifier fetched, compiled and ran HdrHistogram_c (total_count = 2 after one op) |
 | 24 | **Ch. 73's hot-reload fix is not lock-free and the alternative is a use-after-free.** `std::atomic<std::shared_ptr<T>>` in libstdc++ 13 has `is_always_lock_free == false`: `load()` spins on a lock bit in the control-block pointer, so readers can stall behind a writer — the exact stall the chapter forbids. The parenthetical alternative "load a raw pointer and bump a ref" is the classic race hazard pointers/RCU (Ch. 36) exist to solve. | `73:79, 73:106` | ✅ verifier checked `<bits/shared_ptr_atomic.h>` |
 | 25 | **Ch. 61's headline `bpftrace` one-liner histograms timestamps, not latency** (`hist(nsecs)` on a kprobe is nanoseconds since boot; a latency histogram needs entry/return probes), and the probe-cost table calls an *enabled* USDT marker "cheaper than a uprobe" when on Linux it *is* a uprobe (the `nop` is patched to `int3`). Ch. 5 repeats the USDT claim. | `61:52, 61:68` | ✅ verifier, libbpf `usdt.c` |
 | 26 | **Ch. 67's CUDA listing cannot build and its table is physically impossible**: `nvcc -O3 gpu_e2e.cpp` hands a `.cpp` file to the host compiler (needs `.cu` or `-x cu`), and the 100 M-element saxpy "~8 ms end-to-end" moves 1.2 GB over PCIe Gen4 x16, which is ≥ 37 ms even at the theoretical 32 GB/s. | `67:60, 67:77` | ✅ verifier, nvcc docs, arithmetic |
@@ -199,11 +199,44 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 
 ---
 
-## 9. What was *not* reviewed, and what remains
+## 9. Coverage, verification statistics and what remains
 
-- **Ch. 18–76 prose and code are receiving the per-chapter two-lens review in a continuation run** (the first pass was stopped after Ch. 17 at the author's request and resumed on request); Ch. 18–76 results are folded into §§1, 5 and 6 above; the appendix and front-matter verdicts will follow in the findings tables. The density of problems found in Ch. 1–17 (≈20 findings per chapter, 1–4 high) and the book-wide checks' hits in later chapters (Ch. 29, 41, 43–47, 51–57, 60, 62, 75–76) suggest the same density there; the §3 stale-reference list already covers them mechanically.
-- Appendices A, B, J, K, L were covered only by the cross-reference and chain checks.
-- Benchmark numbers are "representative" by design (CLAUDE.md); this review did **not** flag the absence of real runs, only internal contradictions and physical impossibilities. Three of the flagged experiments (Ch. 10, 13 and the GCC flag claims) were reproduced on a GCC 13.3 box; the rest are reasoning or reviewer-compiled.
+Every chapter, appendix and front-matter file received the two-lens review and the adversarial verification. Per chunk (confirmed includes findings the verifier added itself):
+
+| Chunk | Confirmed | Refuted | Duplicate | Uncertain |
+|---|---|---|---|---|
+| Part 1: Ch. 1-3 | 36 | 0 | 17 | 0 |
+| Part 1: Ch. 4-6 | 40 | 8 | 20 | 0 |
+| Part 2: Ch. 7-10 | 54 | 5 | 33 | 0 |
+| Part 2: Ch. 11-14 | 52 | 0 | 26 | 0 |
+| Part 2: Ch. 15-17 | 35 | 1 | 14 | 0 |
+| Part 3: Ch. 18-22 | 59 | 0 | 25 | 0 |
+| Part 4: Ch. 23-26 | 36 | 0 | 21 | 0 |
+| Part 5: Ch. 27-29 | 57 | 0 | 34 | 0 |
+| Part 6: Ch. 30-33 | 44 | 0 | 20 | 0 |
+| Part 6: Ch. 34-37 | 51 | 0 | 26 | 0 |
+| Part 6: Ch. 38-40 | 41 | 1 | 16 | 0 |
+| Part 7: Ch. 41-43 | 52 | 3 | 29 | 0 |
+| Part 7: Ch. 44-46 | 52 | 0 | 27 | 0 |
+| Part 8: Ch. 47-49 | 60 | 3 | 25 | 0 |
+| Part 8: Ch. 50-52 | 62 | 0 | 25 | 0 |
+| Part 9: Ch. 53-56 | 54 | 0 | 26 | 0 |
+| Part 9: Ch. 57-60 | 41 | 1 | 22 | 0 |
+| Part 10: Ch. 61-65 | 50 | 2 | 35 | 0 |
+| Part 11: Ch. 66-70 | 67 | 0 | 40 | 0 |
+| Part 12: Ch. 71-73 | 51 | 4 | 31 | 0 |
+| Part 12: Ch. 74-76 | 53 | 3 | 30 | 0 |
+| Appendices A-D | 50 | 2 | 23 | 1 |
+| Appendices E-H | 70 | 2 | 44 | 0 |
+| Appendices I-L | 49 | 1 | 31 | 0 |
+| Front matter & meta | 27 | 3 | 11 | 0 |
+
+What remains outside this review's reach:
+
+- **Benchmark numbers are "representative" by design** (CLAUDE.md); the review flagged only internal contradictions and physical impossibilities, and — more seriously — the roughly twenty §N.3 listings whose measurement collapses under the optimizer or exercises UB (§1 rows 4–5, 15, 18, 22). Backfilling real runs will require fixing those listings first.
+- **The 212 book-wide-check findings** (stale cross-references, chain, numbers, glossary, appendices C/D/H/I) were produced by single agents and not re-verified; the headline ones were re-checked by hand and the rest should be read with the ~3 % refutation rate of the verified set in mind.
+- **Refuted findings are kept in the tables** with the verifier's reason, so the author can overrule either side.
+- The review did not attempt to fix anything; §3 gives the recipe for the one mechanical fix (the fenced-block renumber), and the gap analysis in §10 is a planning input, not a commitment.
 
 ---
 

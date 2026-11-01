@@ -1,4 +1,4 @@
-# Full finding list (part2-ch27-52) — automated review of the book (25 of 25 chunks reviewed, 21 verified)
+# Full finding list (part2-ch27-52) — automated review of the book (25 of 25 chunks reviewed, 25 verified)
 
 Each row is one reviewer finding (technical-accuracy lens or editorial lens) with the adversarial verifier's ruling. **Verdict**: `confirmed` (verifier re-read the passage and agrees), `refuted` (kept for transparency — the verifier explains why the text is fine), `duplicate` (same issue as another row), `uncertain`, `verifier-added` (found by the verifier itself), or `book-wide check` (from the eight cross-cutting agents, which were not separately verified). **Sev** is the verifier's severity when it ruled, else the reviewer's. Line numbers are approximate.
 
