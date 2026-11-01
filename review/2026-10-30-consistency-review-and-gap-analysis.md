@@ -7,7 +7,7 @@
 2. An agent review: eight *book-wide* checks (cross-reference targets, chapter chain, reference-machine consistency, recurring latency numbers, duplication/placement, glossary & bibliography, Appendices C/D/H/I accuracy) plus a *two-lens per-chapter review* (technical-accuracy lens and editorial/conventions lens). The per-chapter pass completed for **Ch. 1–17** before the author asked for the review workflow to be wrapped up; **Ch. 18–76 received only the book-wide checks** and still need the per-chapter pass.
 3. Verification: the planned adversarial-verifier stage did not run. Instead, every quoted passage (538 of 541) was mechanically confirmed to exist in the named file, and the author of this report personally re-verified the headline items marked ✅ below (by reading the passage, by compiling/running the listing with GCC 13.3 / Clang 18, or by web lookup). Everything else is a reviewer finding of stated confidence, listed in full in [`2026-10-30-findings-full.md`](2026-10-30-findings-full.md).
 
-**Totals.** 541 findings: 49 high, 213 medium, 279 low. The book-wide checks alone produced 212 of them, which is why most of the systemic issues below affect every Part, not just Ch. 1–17.
+**Totals (first pass).** 541 findings: 49 high, 213 medium, 279 low; the continuation run adds Ch. 18–76 (Ch. 47–56 so far: 250 more findings, 11 high) and an adversarial verdict on every finding — see the full table. The book-wide checks alone produced 212 of them, which is why most of the systemic issues below affect every Part, not just Ch. 1–17.
 
 ---
 
@@ -29,6 +29,10 @@
 | 12 | **Chain/teaser errors that send readers to the wrong chapter**: Ch. 30's Leads-into list is off by one for five chapters ("31 (spinlocks), 32 (false sharing), 33 (lock-free), 34 (seqlocks), 35 (reclamation)"); Ch. 19, Ch. 14 and the Ch. 19 teaser promise `std::function`/type-erasure coverage in Ch. 20, which contains neither (0 hits); Ch. 17 sends readers to Ch. 6 six times for clocksource setup that Ch. 6 does not contain; Ch. 60 sends them to Ch. 6 for colocation (Appendix K). | `30:7`, `19:7/271`, `14:7/311`, `17:7/29/54/137/170/192`, `60:13/66/88/120/127` | ✅ read |
 | 13 | **Appendix H's version table is wrong in several rows** (the appendix CLAUDE.md already flagged for checking): `std::mdspan` is *not* in libstdc++ 13/14 (first ships in GCC 16.1 per the libstdc++ status table ✅); `flat_map`/`flat_set` landed in libc++ 20/21 (table says "not yet"); `add_sat` in libc++ 18; `std::jthread` only unguarded in libc++ 20; `consteval` complete in Clang 17 (not 11); P2128 multidimensional `operator[]` is Clang 15 (not 17); "D.2" pointer for `-std`/`-stdlib` is dangling. | `appendix-H:27–75, 101, 112` | ✅ libstdc++ rows (mdspan 16.1, expected 12.1, flat_map/flat_set 15.1, print 14.1, stacktrace 12.1) checked against gcc.gnu.org; libc++/Clang rows are the reviewer's web checks |
 
+| 14 | **The book's "most dramatic single-knob result" does not reproduce as written.** Ch. 51 §51.3 and Ch. 52 §52.3 measure a 40 ms Nagle + delayed-ACK stall on a strict one-`write`/one-`read` ping-pong (`write(fd,req,len); read(fd,rep,len)`). In that pattern nothing is ever unacknowledged when the next small write is issued (the reply carries the ACK), so Nagle never holds a segment and no 40 ms mode appears. The stall needs a write-write-read pattern (header then body, or back-to-back orders). Both lenses found it independently in both chapters. | `51:47/66/79`, `52:15/41/96` | ✅ read; TCP semantics |
+| 15 | **Ch. 53's decoder benchmark neither builds nor measures.** The build line says `-std=c++20` but the listing uses `std::byteswap` (C++23): GCC 13 fails with "'byteswap' is not a member of 'std'". Built with `-std=c++23 -O2`, the binary-overlay loop is hoisted (one `movbe` + `imul rax,rax,5000000`, no loop) and the program prints `binary overlay: 0.0 ns/msg`, so the "~8–15 ns vs ~10× for FIX text" table cannot come from this code. The §53.5 "verified Clang output" shows `bswap` and the wrong argument registers; with `-march=x86-64-v3` Clang emits `movbe`. | `53:69, 53:117–132, 53:185` | ✅ compiled and run |
+| 16 | **`SO_BUSY_POLL` does not make `epoll_wait` busy-poll.** Ch. 47's headline technique pairs the socket option with an `epoll` loop, but the option only governs a blocking receive; epoll busy-polls only with `net.core.busy_poll` or the per-instance `EPIOCSPARAMS` ioctl (6.9+). | `47:119` | reviewer, kernel source; consistent with `socket(7)` |
+| 17 | **`IORING_OP_SEND_ZC` posts two CQEs**, not one: the result CQE carries `IORING_CQE_F_MORE` (buffer still owned by the kernel) and a later `IORING_CQE_F_NOTIF` CQE is the only signal the buffer may be reused. Ch. 49 describes "a CQE when the buffer is free", which leads readers into exactly the reuse bug the section warns about. | `49:74` | reviewer, uapi header |
 ---
 
 ## 2. Structural sweep (clean)
@@ -106,6 +110,7 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 - Appendix I: `:33–37` `perf stat` continuation lines indented after `\` (shell splits the event list) ✅; `:104` `grep -E 'cpu[0-9]' /proc/interrupts` matches nothing; `:150` Cyrillic `С` in `objdump -drwС` ✅; `:152` `nm --defined-only` counts static symbols, not exports; `:155` BOLT recipe lacks `-Wl,--emit-relocs` and `-fno-reorder-blocks-and-partition`.
 - Appendix D: `:64` `-flto=thin` "Clang/modern GCC" ✅ (GCC rejects); `:55/93` `-freorder-blocks-and-partition` is already on at `-O2` in GCC and rejected by Clang, and conflicts with the BOLT step at `:98`; `:14` `-Ofast` omits `-fallow-store-data-races` (breaks the Ch. 30–35 memory-model guarantees); `:81–82` `-fsanitize=cfi` / `-fsanitize=fuzzer` are Clang-only.
 - Appendix C: `:42` writing `/proc/irq/<N>/smp_affinity` fails for kernel-managed (multi-queue NIC/NVMe) IRQs; needs `isolcpus=…,managed_irq`.
+- `53:69` build line `-std=c++20` with `std::byteswap` (C++23) ✅; `53:185` "verified" asm shows `bswap` where `-march=x86-64-v3` produces `movbe`, and swaps the `rdi`/`rsi` roles (the 32-byte result is returned via sret) ✅; `54:27` diagram cites "Ch.69" (FPGA) for the TCP recovery channel — the prose correctly says Ch. 52.
 
 ---
 
@@ -125,6 +130,8 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 | Ch. 16 §16.3 | ~85 ns local DRAM from a 512 MiB chase on 4 KiB pages | every access also pays an STLB miss + page walk unless the buffer is THP-backed (unstated) | reviewer reasoning |
 | Ch. 17 §17.3 | "TSC calibrates to base 2.9 GHz, confirming TSC ticks ≠ core cycles" | the run is turbo-off, so core clock *is* 2.9 GHz; proves nothing (use `cycles` vs `ref-cycles` with turbo on) | ✅ read |
 | Ch. 29 §29.3 | downclock table "@ 3.5 GHz (full turbo)" under a "turbo off" header | self-contradictory environment | ✅ read |
+| Ch. 51 §51.3, Ch. 52 §52.3 | ~40 ms Nagle/delayed-ACK stall on a one-write ping-pong | no unacked data exists when the next small write happens, so Nagle never holds it; needs write-write-read | ✅ read, protocol semantics |
+| Ch. 53 §53.3 | binary overlay ~8–15 ns vs FIX text ~10× slower | the decode has a loop-invariant argument and no side effect; GCC 13 hoists it (`imul rax,rax,5000000`) and the program prints 0.0 ns/msg | ✅ compiled and run |
 
 ---
 
@@ -171,7 +178,7 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 
 ## 9. What was *not* reviewed, and what remains
 
-- **Ch. 18–76 prose and code were not given the per-chapter two-lens review** (the pass was stopped after Ch. 17 at the author's request). The density of problems found in Ch. 1–17 (≈20 findings per chapter, 1–4 high) and the book-wide checks' hits in later chapters (Ch. 29, 41, 43–47, 51–57, 60, 62, 75–76) suggest the same density there; the §3 stale-reference list already covers them mechanically.
+- **Ch. 18–76 prose and code are receiving the per-chapter two-lens review in a continuation run** (the first pass was stopped after Ch. 17 at the author's request and resumed on request); Ch. 47–56 results are already folded into §§1, 5 and 6 above, the rest will follow in the findings table. The density of problems found in Ch. 1–17 (≈20 findings per chapter, 1–4 high) and the book-wide checks' hits in later chapters (Ch. 29, 41, 43–47, 51–57, 60, 62, 75–76) suggest the same density there; the §3 stale-reference list already covers them mechanically.
 - Appendices A, B, J, K, L were covered only by the cross-reference and chain checks.
 - Benchmark numbers are "representative" by design (CLAUDE.md); this review did **not** flag the absence of real runs, only internal contradictions and physical impossibilities. Three of the flagged experiments (Ch. 10, 13 and the GCC flag claims) were reproduced on a GCC 13.3 box; the rest are reasoning or reviewer-compiled.
 
