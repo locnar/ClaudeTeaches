@@ -31,13 +31,13 @@ The Linux interface is the **`resctrl` pseudo-filesystem** (`/sys/fs/resctrl`), 
 
 ```
    /sys/fs/resctrl/
-     schemata            # default CLOS0: L3:0=fffff;MB:0=100  (all ways, 100% BW)
+     schemata            # default CLOS0: L3:0=fff;MB:0=100  (all 12 ways, 100% BW)
      tasks / cpus        # who is in CLOS0
      info/L3/            # num_closids, cbm_mask, min_cbm_bits
      info/L3_MON/        # monitoring: max_rmid, mon_features
      mon_data/           # per-group occupancy & bandwidth counters
      hotpath/            # a group YOU create (a CLOS)
-       schemata          #   L3:0=00003;MB:0=100   (only the low 2 ways)
+       schemata          #   L3:0=003;MB:0=100     (only the low 2 ways)
        cpus              #   the hot core(s)
        mon_data/         #   this group's L3 occupancy / BW
 ```
@@ -46,7 +46,7 @@ The model to hold: **a CLOS is a lease on cache ways and bandwidth; you give the
 
 ## 44.3 Measure it: a noisy neighbor vs a partitioned cache
 
-The effect to measure is **hot-path tail latency with and without a cache-thrashing neighbor, before and after partitioning.** Set up: the hot thread on an isolated core (Ch. 42) doing repeated lookups over a working set sized to fit L3 (an order book, Ch. 25); a "noisy neighbor" on another core streaming a large buffer (bigger than L3) to evict everything. Measure the hot path's latency distribution (HdrHistogram, Ch. 3) and its L3 miss rate (`perf`, Ch. 2) in three conditions. Representative shape (single-socket Xeon Gold 6326, Ice Lake-SP, ~30 MB L3, 12-way; figures pending real runs):
+The effect to measure is **hot-path tail latency with and without a cache-thrashing neighbor, before and after partitioning.** Set up: the hot thread on an isolated core (Ch. 42) doing repeated lookups over a working set sized to fit L3 (an order book, Ch. 25); a "noisy neighbor" on another core streaming a large buffer (bigger than L3) to evict everything. Measure the hot path's latency distribution (HdrHistogram, Ch. 3) and its L3 miss rate (`perf`, Ch. 2) in three conditions. Representative shape (single-socket Xeon Gold 6326, Ice Lake-SP, 24 MiB L3 — 1.5 MiB/core × 16, 12-way, 2 MiB per way; figures pending real runs):
 
 | Condition | Hot-path L3 miss rate | p50 | p99.9 | Notes |
 |---|---|---|---|---|
@@ -69,8 +69,8 @@ The lessons:
 
 The core technique: carve the L3 so the hot path owns a private set of ways.
 
-- **Mount resctrl and inspect capabilities.** `mount -t resctrl resctrl /sys/fs/resctrl`; read `info/L3/cbm_mask` (the full mask, e.g. `fffff` = 20 ways) and `info/L3/min_cbm_bits` (minimum contiguous ways per allocation) and `info/L3/num_closids` (how many CLOSes you have).
-- **Create a hot group and give it exclusive ways.** `mkdir /sys/fs/resctrl/hotpath`; write a bitmask to its `schemata` that reserves the ways *only it* uses, e.g. `L3:0=00f00` (4 ways). Then **shrink the default group** (`CLOS0`, everything else) to the *complementary* ways: `L3:0=ff0ff` — critically, the default mask must **not overlap** the hot mask, or the isolation is void (§44.5). Bitmasks in CAT must be **contiguous** (a run of 1-bits) on most parts.
+- **Mount resctrl and inspect capabilities.** `mount -t resctrl resctrl /sys/fs/resctrl`; read `info/L3/cbm_mask` (the full mask — `fff` = 12 ways on the Xeon Gold 6326; a 20-way part shows `fffff`) and `info/L3/min_cbm_bits` (minimum contiguous ways per allocation) and `info/L3/num_closids` (how many CLOSes you have).
+- **Create a hot group and give it exclusive ways.** `mkdir /sys/fs/resctrl/hotpath`; write a bitmask to its `schemata` that reserves the ways *only it* uses, e.g. `L3:0=f00` (4 ways = 8 MiB of the 6326's 24 MiB). Then **shrink the default group** (`CLOS0`, everything else) to the *complementary* ways: `L3:0=0ff` — critically, the default mask must **not overlap** the hot mask, or the isolation is void (§44.5). Bitmasks in CAT must be **contiguous** (a single run of 1-bits — Intel parts with `info/L3/sparse_masks` = 0, which includes all Ice Lake-SP, reject anything else with `EINVAL`), which is why the hot ways go at one *end* of the mask so that both masks stay contiguous.
 - **Assign the hot core(s).** Write the hot CPU(s) to `hotpath/cpus` (CPU-based assignment — everything on that core uses the hot CLOS), or write the hot thread's TID to `hotpath/tasks` (task-based). CPU-based is simplest for a dedicated hot core (Ch. 42).
 - **Size the partition to the working set.** Give the hot group *just enough* ways to hold its working set (order book + strategy state + decode tables — Ch. 25), measured via CMT occupancy (§44.3). Too few ways and the hot path evicts *itself* (§44.5); too many and you starve everyone else, which can bounce back as bandwidth pressure. Right-size with occupancy monitoring, don't guess.
 - **CDP for code/data split (optional).** If the hot path is also front-end-bound (Ch. 12), enable CDP and give its *code* ways protection from its own data streaming, keeping hot instructions resident.
@@ -92,7 +92,7 @@ Two higher-order uses that connect forward:
 
 ## 44.5 Pitfalls & anti-patterns: over-partitioning and overlapping masks
 
-- **Overlapping bitmasks (the cardinal error).** Giving the hot group ways `00f00` but leaving the default group at `fffff` (which *includes* those ways) means everyone still allocates into the hot ways — you've partitioned nothing. The default/other CLOSes must be shrunk to the **complement** of the hot mask so the masks are **disjoint**. Verify every CLOS's schemata; overlap silently defeats the isolation (and the CMT occupancy will show it — the neighbor still eats the hot ways).
+- **Overlapping bitmasks (the cardinal error).** Giving the hot group ways `f00` but leaving the default group at `fff` (which *includes* those ways) means everyone still allocates into the hot ways — you've partitioned nothing. The default/other CLOSes must be shrunk to the **complement** of the hot mask so the masks are **disjoint**. Verify every CLOS's schemata; overlap silently defeats the isolation (and the CMT occupancy will show it — the neighbor still eats the hot ways).
 - **Over-partitioning — starving the hot path of its own cache.** Give the hot group too few ways and it can't hold its working set, so it evicts *itself* on every pass — you've manufactured the miss you were trying to prevent. Size to the working set via CMT occupancy (§44.3), with headroom; a partition smaller than the footprint is worse than no partition.
 - **Starving everyone else into bandwidth pressure.** Give the hot group almost *all* the ways and the housekeeping cores thrash their tiny slice, miss constantly, and pound memory bandwidth (Ch. 16) — which bounces back as bandwidth contention on the hot path's own misses. Isolation is a balance: enough for the hot path, enough left for the rest. Watch total bandwidth (MBM).
 - **Forgetting bandwidth (CAT without MBA).** A neighbor that streams (capture, Ch. 75) may occupy few *ways* but saturate *bandwidth* — CAT won't stop it, only MBA will. If the hot path's misses get slower under a streaming neighbor despite CAT, it's bandwidth, not capacity (§44.4.2).

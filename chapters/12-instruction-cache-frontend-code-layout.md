@@ -141,7 +141,7 @@ L1-dcache-load-misses                 ~0 (same data)         ~0 (same)    <- DAT
 branch-misses                         ~0 (same)              ~0 (same)    <- branches not the cause
 ```
 
-Read it the Ch. 2 way: **same data, same data-cache behavior, same branch behavior — and 2× slower.** The common path executes the *identical* `acc += m.px * m.qty`; the cold `handle_rare` is essentially never called in either build. The only thing that changed is that in the `bloat` build the cold code's *bytes* live inside the hot function, evicting the loop from L1i/DSB and forcing the slow MITE decode path. That is the Front-End-Bound signature: **low IPC, high `idq_uops_not_delivered`, DSB→MITE spill, clean memory, clean branches.** When you see it, the problem is your *code's* footprint, not your data's.
+Read it the Ch. 2 way: **same data, same data-cache behavior, same branch behavior — and 2× slower.** The common path executes the *identical* `acc += m.px * m.qty`; the cold `handle_rare` is essentially never called in either build. The only thing that changed is that in the `bloat` build the cold code's *bytes* are interleaved within the hot function's fetch lines and 32-byte DSB windows, fragmenting the loop across more of them (and adding taken jumps around the cold arms) until it spills out of the DSB and onto the slow MITE decode path. That is the Front-End-Bound signature: **low IPC, high `idq_uops_not_delivered`, DSB→MITE spill, clean memory, clean branches.** When you see it, the problem is your *code's* footprint, not your data's.
 
 ---
 
@@ -164,7 +164,7 @@ This is the workhorse technique and the direct cure for §12.3's bloat. The prin
 
 The mechanism is a partnership between you and the compiler:
 
-- **Tell the compiler which way a branch goes.** `[[likely]]`/`[[unlikely]]` (C++20) on the branch, or `__builtin_expect(cond, 0)` (C/older), mark the rare arm. The compiler then lays the unlikely arm's code *out of line* — physically moved to a cold region — so the hot fall-through path is a straight, contiguous run of bytes with no cold code interleaved.
+- **Tell the compiler which way a branch goes.** `[[likely]]`/`[[unlikely]]` (C++20) on the branch, or `__builtin_expect(cond, 0)` (C/older), mark the rare arm. The compiler then reorders blocks so the unlikely arm leaves the fall-through path (it lands after the function's `ret`, still in `.text`) and the hot path is a straight, contiguous run of bytes with no cold code interleaved. By itself the hint does *not* move the arm to `.text.unlikely`: without profile data GCC partitions a block into the `.cold` section only when it can prove it cold — in practice when the arm calls a `[[gnu::cold]]` function (which is why the §12.5 example works), and Clang likewise needs `[[gnu::cold]]` or PGO (checked with GCC 13 and Clang 18 at `-O2`).
 
   ```cpp
   if (seq != expected_seq) [[unlikely]]      // gap detected — rare
@@ -255,7 +255,7 @@ The verification habit: for a hot function, **disassemble it and confirm the com
 ## 12.6 Pitfalls & anti-patterns: inlining everything; cold code on the hot path
 
 - **Inlining everything (`flatten`, force-inline-all).** The cardinal front-end sin: pulling large, rarely-run callees into the hot function bloats its L1i/DSB footprint and starves the back-end (§12.3). Inline the small and hot; outline the large and cold. More inlining is *not* monotonically faster.
-- **Cold code interleaved in the hot path.** Error formatting, logging (Ch. 71), gap recovery, assertions-with-messages, or a giant `default:` arm sitting *inline* in the hot loop. Even if never executed, its *bytes* evict the hot loop. Mark it `[[unlikely]]`/`[[gnu::cold]]` and `noinline` so it moves to `.text.unlikely` (§12.4.2, §12.5).
+- **Cold code interleaved in the hot path.** Error formatting, logging (Ch. 71), gap recovery, assertions-with-messages, or a giant `default:` arm sitting *inline* in the hot loop. Even if never executed, its *bytes* fragment the hot loop across more 64-byte fetch lines and 32-byte DSB windows — the L1i and DSB hold only what is fetched and decoded, so cold code hurts when it is interleaved *within* the hot path's lines, not when it sits after the `ret` or in `.text.unlikely`. Mark it `[[unlikely]]`/`[[gnu::cold]]` and `noinline` so it moves to `.text.unlikely` (§12.4.2, §12.5).
 - **Mis-hinting `[[likely]]`/`[[unlikely]]`.** These are *layout* hints, not magic. Hinting a genuinely 50/50 or data-dependent branch lays out the wrong path as hot and can *slow* it, and it does nothing for the hardware predictor's mispredict cost (that's Ch. 13). Use them only where the bias is overwhelming and real, and verify with `frontend_retired`/branch counters.
 - **Optimizing the front-end when you're not Front-End-Bound.** If top-down (Ch. 2) says Memory-Bound (Ch. 7) or Core-Bound (Ch. 11), shrinking code footprint does nothing. Confirm the `idq_uops_not_delivered`/DSB-miss signature *first*.
 - **Ignoring the DSB and alignment.** A hot loop that just barely spills the µop cache or straddles a fetch boundary loses front-end bandwidth despite an L1i hit. Watch `idq.dsb_uops : idq.mite_uops`; consider `-falign-loops` and shrinking the loop body — but measure, since over-alignment wastes I-cache.

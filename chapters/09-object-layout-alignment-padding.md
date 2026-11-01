@@ -148,7 +148,7 @@ And the **deliberate over-align** case (§9.2.2): a per-thread counter or queue 
 - On **x86-64**, a misaligned *scalar* load/store is one instruction and usually cheap — the hardware handles it — *until* the access **crosses a cache-line (or page) boundary**, where it costs a second line fetch (and a page-table walk at a page edge). So packed scalar access degrades from "free" to "occasionally 2×" depending on where the object lands.
 - **Vectorization is the real casualty** (see §9.5): the compiler often **refuses to auto-vectorize** a loop over packed structs because it can't assume element alignment — turning a wide SIMD reduction back into a scalar loop. On a hot aggregation, that's a far bigger loss than the padding you saved.
 - **Atomics on a packed (misaligned) member are undefined / a "split lock"** — catastrophic (§9.6).
-- On **ARM** (Appendix A) misaligned access can fault or trap-and-emulate — far worse than x86's tolerance.
+- On **AArch64** (Appendix A) ordinary misaligned scalar loads/stores to normal memory are handled in hardware (with a split-access penalty, as on x86), but load/store-exclusive, `LDAR`/`STLR` and the atomic instructions *fault* (`SIGBUS`) on a misaligned address — a packed struct containing an atomic is fatal there, not merely slow. Older ARM cores and other RISC targets may trap or emulate.
 
 So `pack` is the right tool for **wire/overlay structs you parse off the network** (Ch. 53), where the layout is fixed by the protocol and you typically copy fields out rather than vectorize over them — and the wrong tool for **internal hot compute structs**, where you want alignment for SIMD and atomics. Don't reach for `pack` to save footprint on a hot array; reorder and hot/cold-split instead.
 
@@ -192,7 +192,7 @@ long sumP(const P* p, unsigned long n){ long s=0; for(...) s += p[i].v; return s
         vpaddq  ...                             ; ... and added, 4-wide, unrolled
 ```
 
-`sumP` **does not vectorize** — the compiler falls back to a scalar, stride-17 loop because it can't assume the packed elements are aligned for vector loads (verified excerpt):
+`sumP` **does not vectorize** — not because of alignment (x86 `vmovdqu` has no alignment requirement and both GCC and Clang vectorize misaligned data freely) but because the 17-byte stride is not a multiple of the 8-byte field: no interleaved group of contiguous vector loads plus shuffles expresses the access (as it does for the 16-byte-stride `A`), only a gather, which the cost model rejects — so the compiler falls back to a scalar, stride-17 loop (verified excerpt):
 
 ```asm
 .loop:

@@ -42,10 +42,10 @@ For async I/O, **stackless C++20 coroutines** are the standard modern choice (lo
 ```
 
 - **The frame is heap-allocated by default**, via `operator new` (customizable per-promise). This is the per-invocation `malloc` that makes coroutines dangerous on the hot path.
-- **HALO (Heap Allocation eLision Optimization)** — *if* the compiler can prove the coroutine's frame doesn't outlive the caller (the coroutine is created, awaited, and destroyed within a bounded scope the caller can see — typically requiring inlining), it can **elide** the allocation and put the frame on the caller's stack (or fold it away). This makes a coroutine genuinely zero-overhead — *when it fires*. But it's an *optimization*, not a guarantee: it depends on inlining (Ch. 19), visibility, and the coroutine's lifetime being provable. **You must verify it happened** (§38.3).
+- **HALO (Heap Allocation eLision Optimization)** — *if* the compiler can prove the coroutine's frame doesn't outlive the caller (the coroutine is created, awaited, and destroyed within a bounded scope the caller can see — typically requiring inlining), it can **elide** the allocation and put the frame on the caller's stack (or fold it away). This makes a coroutine genuinely zero-overhead — *when it fires*. But it's an *optimization*, not a guarantee: it depends on inlining (Ch. 19), visibility, and the coroutine's lifetime being provable. **You must verify it happened** (§38.3). And it is Clang-only: LLVM implements HALO as the `CoroElide` pass, while GCC — through at least GCC 14/15 — performs no frame elision at all (GCC bugzilla 100579, 115309), so on GCC every coroutine call allocates its frame unless `promise_type::operator new` supplies the memory (§38.4.2).
 - **`promise_type` and awaiters** — the customization machinery: the **promise** (per-coroutine, controls behavior: what `co_return` does, the initial/final suspend, custom `operator new`) and **awaiters** (control what `co_await` does: `await_ready`/`await_suspend`/`await_resume` — the hook where you suspend until I/O completes — §38.4.2).
 
-The model: **a coroutine suspends/resumes with its cross-suspend state in a frame; stackless C++20 coroutines keep the frame small but *heap-allocate it by default* (a per-call malloc — the hazard), which HALO *may* elide to the stack if it can prove the lifetime (verify it!). Coroutines give async I/O the readability of sequential code, at the cost of this allocation question and suspend/resume overhead.**
+The model: **a coroutine suspends/resumes with its cross-suspend state in a frame; stackless C++20 coroutines keep the frame small but *heap-allocate it by default* (a per-call malloc — the hazard), which HALO *may* elide to the stack if it can prove the lifetime (Clang only — GCC never elides; verify it!). Coroutines give async I/O the readability of sequential code, at the cost of this allocation question and suspend/resume overhead.**
 
 ## 38.3 Measure it: coroutine resume cost
 
@@ -98,7 +98,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2`, pinned (illustrative; *whether HALO fires* is compiler/version/flag-dependent):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2`, pinned (illustrative; *whether HALO fires* is compiler-dependent — only Clang implements it, GCC always allocates — and under Clang version/flag/inlining-dependent):
 
 ```
    scenario                                  ns/coro     allocs/call    note
@@ -154,7 +154,7 @@ Practical points:
 
 **Exercises**
 
-1. **Did it allocate?** Build `coro.cpp` (override `operator new` to count). Measure `allocs/call` and ns/coro. Does HALO fire at `-O2`? Try `-O0` (likely allocates), force-inline, and make the handle escape (store it) — watch elision break. This is the §38.3 measurement.
+1. **Did it allocate?** Build `coro.cpp` (override `operator new` to count). Measure `allocs/call` and ns/coro. Does HALO fire at `-O2` under Clang? Build the same source with GCC and confirm it never elides. Under Clang try `-O0` (allocates), force-inline, and make the handle escape (store it) — watch elision break. This is the §38.3 measurement.
 2. **Pool-allocated frames.** Give the `promise_type` a custom `operator new`/`delete` that draws from an arena/pool (Ch. 24). Confirm (counter) that even non-elided coroutines no longer hit global `malloc`. Measure the ns/coro improvement.
 3. **Event-loop echo server.** Build a tiny coroutine echo server over `epoll` (Ch. 47) or io_uring (Ch. 48): one coroutine per connection, `co_await async_read`/`async_write`. Compare lines-of-code and clarity to a callback-based version. Measure connections/thread vs thread-per-connection.
 4. **The ready fast path.** Implement an awaiter with `await_ready()` returning true when data is buffered; measure the overhead saved vs always suspending, on a workload where most reads are immediately satisfiable (§38.4.2).

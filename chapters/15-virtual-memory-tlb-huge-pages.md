@@ -14,7 +14,7 @@ Every load and store in your program uses a **virtual** address that the hardwar
 
 This matters for low-latency code because the standard 4 KB page is *small* relative to modern working sets. A core's L1 data-TLB holds on the order of **64 entries**; at 4 KB/page that covers just **256 KB** of memory before you start missing — far smaller than the multi-megabyte order books, market-data ring buffers, and tick caches a trading system keeps hot. The second-level (L2/STLB) TLB extends the reach to a few thousand entries (a handful of MB), but a feed handler streaming a large book, or a strategy walking a big hash map (Ch. 25), routinely exceeds it. The result is a steady drip of TLB misses that don't show up as *cache* misses (the data may be in L2/L3) yet still cost you — an invisible bottleneck unless you measure the TLB counters specifically (§15.3).
 
-The fix is **huge pages**: instead of 4 KB pages, map memory in **2 MB** (or **1 GB**) chunks, so one TLB entry covers 512× (or 256K×) more memory. The same 64-entry TLB that reached 256 KB with 4 KB pages reaches **128 MB** with 2 MB pages — enough to cover a large book, a capture buffer, or the hot code segment (Ch. 12) with near-zero TLB misses. Huge pages are one of the highest-leverage, lowest-effort wins for a large-footprint hot path, and they come in two flavors — *transparent* (automatic, convenient, with a jitter caveat) and *explicit* (reserved, deterministic, the HFT default) — whose trade-offs §15.4 makes precise. As always, measure first (Ch. 2): if your hot working set fits comfortably in the TLB's reach, this chapter's techniques buy nothing; if `dtlb_load_misses` is elevated, they can be transformative.
+The fix is **huge pages**: instead of 4 KB pages, map memory in **2 MB** (or **1 GB**) chunks, so one TLB entry covers 512× (or 256K×) more memory. The L1 dTLB's 2 MB pool (32 entries on Ice Lake-SP, beside the 64 entries for 4 KB pages) reaches **64 MB** where the 4 KB entries reached 256 KB, and the STLB's ~1024 2 MB-capable entries reach **~2 GB** where 4 KB pages reached 8 MB — enough to cover a large book, a capture buffer, or the hot code segment (Ch. 12) with near-zero TLB misses. Huge pages are one of the highest-leverage, lowest-effort wins for a large-footprint hot path, and they come in two flavors — *transparent* (automatic, convenient, with a jitter caveat) and *explicit* (reserved, deterministic, the HFT default) — whose trade-offs §15.4 makes precise. As always, measure first (Ch. 2): if your hot working set fits comfortably in the TLB's reach, this chapter's techniques buy nothing; if `dtlb_load_misses` is elevated, they can be transformative.
 
 ---
 
@@ -43,20 +43,20 @@ The translation result — the virtual→physical mapping plus permission bits �
 
 The TLB is a cache *of translations*, with the same structure ideas as the data cache (Ch. 7) — entries, associativity, levels — but indexed by virtual page number:
 
-- **It's hierarchical and split.** A typical modern core has a small, fast **L1 TLB** split into **iTLB** (instruction, Ch. 12) and **dTLB** (data) — tens of entries each, often with separate sub-pools for 4 KB and 2 MB pages — backed by a larger unified **L2 TLB (STLB)** of ~1.5–2K entries. Representative Ice Lake-class numbers: dL1-TLB ~64 entries (4 KB), STLB ~2048 entries.
-- **Reach, not just count, is the metric.** What you care about is **coverage** = entries × page size. The same TLB reaches 512× further with 2 MB pages:
+- **It's hierarchical and split.** A typical modern core has a small, fast **L1 TLB** split into **iTLB** (instruction, Ch. 12) and **dTLB** (data) — tens of entries each, often with separate sub-pools for 4 KB and 2 MB pages — backed by a larger unified **L2 TLB (STLB)** of ~1.5–2K entries. Representative Ice Lake-SP (Sunny Cove) numbers: dL1-TLB 64 entries for 4 KB pages, 32 for 2 MB/4 MB, 8 for 1 GB; STLB 2048 entries, all usable by 4 KB pages but at most ~1024 by 2 MB (or 1 GB) pages.
+- **Reach, not just count, is the metric.** What you care about is **coverage** = entries × page size. Each entry reaches 512× further with 2 MB pages (the 2 MB pools are smaller, so total reach grows ~256×):
 
   ```
                        4 KB pages              2 MB pages
-   dTLB (64 entries)   64 × 4 KB  = 256 KB     64 × 2 MB  = 128 MB
-   STLB (2048)         2048 × 4 KB = 8 MB       2048 × 2 MB = 4 GB
+   dTLB (64×4K/32×2M)  64 × 4 KB  = 256 KB     32 × 2 MB  = 64 MB
+   STLB (2048/≤1024)   2048 × 4 KB = 8 MB       ~1024 × 2 MB = ~2 GB
   ```
 
-  A working set that overflows the 4 KB reach (8 MB at the STLB) but fits the 2 MB reach (4 GB) goes from "TLB-miss-bound" to "TLB-resident" with no code change.
+  A working set that overflows the 4 KB reach (8 MB at the STLB) but fits the 2 MB reach (~2 GB) goes from "TLB-miss-bound" to "TLB-resident" with no code change.
 - **Miss cost is the walk.** An L1-TLB miss that hits the STLB is cheap (a few cycles). An STLB miss triggers the full page-table walk (§15.2.1): cheap if the page-walk caches are warm, *hundreds of cycles* if the walk misses to DRAM. Crucially, a TLB miss is **independent of** whether the *data* is cached — you can have the data hot in L2 and still pay a 100+-cycle translation miss, which is why TLB problems hide from cache-miss counters and need their own (§15.3).
 - **What thrashes the TLB.** *Large* working sets (more pages than reach) and *scattered* access (touching many distinct pages with poor locality — pointer-chasing node containers, random hash probes, huge sparse tables). *Sequential* access over a large region still touches many pages but the hardware prefetches translations well; *random* access over the same region is far worse. This is the same locality story as Ch. 7–8, one level up: the TLB rewards dense, contiguous, predictable page access.
 
-The model to carry: **the TLB is a tiny cache whose "lines" are whole pages; its reach is your real budget for hot memory, and huge pages multiply that reach 512×.** When the working set exceeds the reach, translation — not data — can become the bottleneck.
+The model to carry: **the TLB is a tiny cache whose "lines" are whole pages; its reach is your real budget for hot memory, and huge pages multiply that reach by two orders of magnitude (512× per entry, ~256× in total on Ice Lake-SP).** When the working set exceeds the reach, translation — not data — can become the bottleneck.
 
 ---
 

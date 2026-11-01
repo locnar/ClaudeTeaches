@@ -179,7 +179,7 @@ double s = (s0+s1) + (s2+s3);        // combine at the end (tree-reduce the part
 // + a scalar remainder loop for n % 4
 ```
 
-How many accumulators? Roughly **latency ÷ throughput** of the chained op — for FP add on modern Intel, ~4-cycle latency ÷ ~2/cycle throughput ⇒ **~8 accumulators** to fully saturate (4 is a good start and captures most of the win). More than that hits diminishing returns and register pressure (spills — Ch. 4, 9). For **integer** add (1-cycle latency) the chain is rarely the bottleneck, so splitting matters most for *higher-latency* ops: FP add/mul, and anything with multi-cycle latency in the loop-carried path.
+How many accumulators? Roughly **latency × throughput** of the chained op (throughput in ops/cycle — equivalently latency ÷ *reciprocal* throughput in cycles/op) — for FP add on modern Intel, ~4-cycle latency × ~2 adds/cycle ⇒ **~8 accumulators** to fully saturate (4 is a good start and captures most of the win). More than that hits diminishing returns and register pressure (spills — Ch. 4, 9). For **integer** add (1-cycle latency) the chain is rarely the bottleneck, so splitting matters most for *higher-latency* ops: FP add/mul, and anything with multi-cycle latency in the loop-carried path.
 
 This is also exactly what auto-vectorization does *for* you when allowed (§11.5): packing 4 doubles into a `ymm` accumulator *is* four independent lanes. So accumulator splitting and SIMD (Ch. 29) are two faces of the same idea — and SoA layout (Ch. 8) is what makes both possible.
 
@@ -236,7 +236,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 - **The single serial accumulator.** The headline anti-pattern: a reduction (`sum`, dot product, hash, checksum, min/max) written as one accumulator, latency-bound at one op-latency per element while the core's execution units idle (§11.3, §11.5). Fix: split accumulators. Signature: low IPC, clean memory, clean branches.
 - **Believing unrolling fixed it.** Unrolling the loop (or trusting `-O3` to) without separate accumulators leaves the chain intact — same speed, more code (§11.4.2, §11.5 listing 1). Verify in the asm that the adds target *different* registers, not one.
 - **Expecting the compiler to reassociate FP.** Without `-ffast-math`/`-fassociative-math`, the compiler **must** preserve your FP evaluation order and *cannot* break the chain or vectorize the reduction (§11.5). Either split manually (safe, exact) or opt into reassociation *knowing* it changes results and can introduce FP hazards (Ch. 27). Don't assume `-O3` did it.
-- **Over-splitting / register pressure.** Too many accumulators spill to the stack (Ch. 4, 9), reintroducing memory traffic and latency. Match the count to latency÷throughput (~8 for FP add); more is waste.
+- **Over-splitting / register pressure.** Too many accumulators spill to the stack (Ch. 4, 9), reintroducing memory traffic and latency. Match the count to latency × throughput (~8 for FP add); more is waste.
 - **Optimizing a chain that isn't the bottleneck.** If you're memory-bound (Ch. 7) or mispredict-bound (Ch. 13), breaking dependency chains does nothing — top-down first (Ch. 2). Accumulator splitting is the cure for the *Core-Bound, latency* signature specifically.
 - **Counting instructions instead of finding the critical path.** "Fewer instructions" can be *slower* if they form a longer chain; "more instructions" (SIMD, split accumulators) can be faster (Ch. 4's warning, made precise). Reason about the dependency graph, then measure.
 - **Ignoring loop-carried dependencies you didn't notice.** A running pointer, a `prev` reference, a conditional that feeds the next iteration — hidden chains. Recompute from the index where possible to make iterations independent (§11.4.1).
@@ -249,7 +249,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 **Exercises**
 
 1. **Measure the 4×.** Build `dep_chain.cpp`, run `chains=1` vs `chains=4` pinned/turbo-off, and `perf stat -e cycles,instructions,L1-dcache-load-misses,branch-misses`. Confirm: same instructions, ~0 misses, ~0 mispredicts, ~4× speed. What's the IPC of each? Which top-down bucket (Ch. 2) is `chains=1`?
-2. **Sweep the accumulator count.** Generalize the split to 1, 2, 4, 8, 16 accumulators. Plot ns/element. Where do diminishing returns start, and where does register-spill regression begin (read the asm, Ch. 4)? Relate the knee to FP add latency÷throughput (§11.4.2).
+2. **Sweep the accumulator count.** Generalize the split to 1, 2, 4, 8, 16 accumulators. Plot ns/element. Where do diminishing returns start, and where does register-spill regression begin (read the asm, Ch. 4)? Relate the knee to FP add latency × throughput (§11.4.2).
 3. **Unroll ≠ split.** Force `#pragma unroll 8` on the *single*-accumulator loop. Does it speed up? Read the asm — are the eight adds chained through one register? Now split the accumulators. Which change mattered (§11.5)?
 4. **The `-ffast-math` lever.** Compile the single-accumulator sum at `-O2` and `-O2 -ffast-math`; diff the asm (Ch. 4). Confirm `-ffast-math` vectorizes it into multiple `ymm` accumulators. Then check: does the numeric *result* differ? (Preview of Ch. 27's hazard.)
 5. **Find a hidden chain.** Take a loop with a loop-carried scalar (e.g. a running min with an index, or `x = f(x)`). Identify the critical path, then restructure to expose independent work. Measure before/after and explain via §11.2.3.
@@ -258,7 +258,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 
 - [ ] I confirmed (top-down, Ch. 2) the loop is **Core-Bound** — low IPC, **clean memory and branches** — before attacking dependency chains.
 - [ ] I identified the **longest loop-carried dependency chain** (the critical path) — not the instruction count.
-- [ ] Reductions use **multiple independent accumulators** (~latency÷throughput of the chained op), combined at the end — not a single serial accumulator.
+- [ ] Reductions use **multiple independent accumulators** (~latency × throughput of the chained op), combined at the end — not a single serial accumulator.
 - [ ] I verified in the **asm** (Ch. 4) that adds target **different registers** / `vaddpd`-style packed ops — not one chained `vaddsd`/register.
 - [ ] If I rely on the compiler to reassociate/vectorize FP, I **opted into `-ffast-math` knowingly** (Ch. 27) — or split manually for exact results.
 - [ ] I didn't **over-split** into register spills, and I kept high-latency ops (`div`/`sqrt`) **off** the critical path (Ch. 27–28).

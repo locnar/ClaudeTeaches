@@ -59,7 +59,7 @@ A target mispredict costs the same ~15–20-cycle flush as a direction mispredic
 
 `std::function<R(Args...)>` is the most expensive common form of indirect dispatch, and it's worth understanding *why* so you reach for it deliberately:
 
-- **It is a double indirection.** `std::function` type-erases the callable behind a vtable-like mechanism (a pointer to a manager/invoker function plus storage). Calling it is an indirect call *to* the invoker, which then calls the stored target — often two indirect hops, neither inlinable.
+- **It is an opaque indirection.** `std::function` type-erases the callable behind a vtable-like mechanism (a manager pointer, an invoker pointer, plus storage). Calling it is an empty-check branch and *one* indirect call to a type-specific invoker whose body is the stored callable inlined (in libstdc++ the invoker instantiated for a lambda is literally the lambda's body); a second indirect hop occurs only if what you stored is itself a function pointer. The dispatch cost is therefore comparable to a virtual call — what `std::function` adds is that the call site can never inline the target, plus a heap allocation for callables that overflow its small buffer (Ch. 25).
 - **It may allocate.** A callable larger than the small-buffer optimization (SBO) capacity (a few pointers — typically capturing more than ~2 pointers' worth of state) is **heap-allocated** on construction. On a hot path that constructs `std::function`s, that's a `malloc` (Ch. 23) — a latency catastrophe. Even when SBO applies, the object is larger and copies are non-trivial.
 - **It blocks inlining and bloats.** Like `virtual`, the call target is opaque; the compiler inlines nothing through it. Worse, each distinct callable type instantiates its own manager/invoker, inflating code size (Ch. 12).
 
@@ -204,7 +204,7 @@ std::int64_t dispatch(const Event& e) {
 Why it can beat `virtual` on the hot path:
 
 - **Value semantics, no allocation, dense storage.** A `variant` holds the object *inline* (sized to the largest alternative), so a `vector<Event>` is contiguous and cache-friendly (Ch. 8) — unlike a `vector<unique_ptr<Base>>` whose objects are scattered on the heap (a pointer-chase per element, Ch. 7) and each carry a vptr.
-- **The compiler sees all alternatives.** `std::visit` typically lowers to a **jump table** over the (small integer) type index — and the bodies, being known, can **inline**. It's still an indirect jump (§14.4.4's caveat), but over a small closed set the predictor handles it far better than a megamorphic vtable, and inlining is recovered.
+- **The compiler sees all alternatives.** How `std::visit` lowers is library- and size-dependent: libstdc++ (GCC 10+) emits a `switch` over the type index for a single-variant visit with ≤ 11 alternatives — a compare/branch chain for ~3 alternatives, a **jump table** for more — and falls back to a function-pointer table (an indirect *call*) beyond that or for multi-variant visits; libc++ dispatches through a function-pointer table. Either way the bodies are known, so they can **inline**. Where it is a jump table it's still an indirect jump (§14.4.4's caveat) whose target prediction is no better than a vtable's for the same tag stream; the win is inlining and contiguous, allocation-free storage — and, when the lowering is a branch chain, *direction* prediction (Ch. 13) instead of target prediction.
 
 Trade-offs: the set must be *closed* (adding a type means editing the `variant` and every exhaustive `visit` — the opposite of open `virtual` extensibility, sometimes a feature for correctness); the `variant` is sized to its largest member (padding waste if sizes differ wildly); and `std::visit`'s codegen quality varies (verify — §14.5). For a feed handler with a *fixed* protocol message set, `variant`+visit is often the sweet spot: closed, contiguous, inlinable, no allocation.
 
@@ -244,7 +244,7 @@ addhandler_handle(long):        ; AddH final; called through a known AddH* / val
 
 No vptr load, no `call` — the dispatch vanished. This is the §14.4.1 win and the §14.3 CRTP row in asm form: when you mark leaf classes `final` (or use CRTP), confirm you see the *body*, not a `call [rax]`.
 
-**`std::variant` visit — jump table over a closed set.** `std::visit` lowers to an indexed jump over the small type index, with the (known) bodies inlinable:
+**`std::variant` visit — closed-set dispatch.** With a jump-table lowering (libstdc++'s `switch` with enough alternatives, or a `switch` you wrote) `std::visit` becomes an indexed jump over the small type index, with the (known) bodies inlinable — note that for the 3-alternative `Event` above, libstdc++ with GCC 13/Clang 18 actually emits a compare/branch chain (`cmp`/`je` on the index) around the same inlined bodies, and libc++ an indirect `call` through a function-pointer table:
 
 ```asm
         movzx   eax, byte ptr [rdi + N]     ; the variant's type index (small int)
@@ -256,7 +256,7 @@ No vptr load, no `call` — the dispatch vanished. This is the §14.4.1 win and 
 
 Still an indirect jump (so verify the predictor is happy for *your* tag stream — §14.4.4), but over a small closed set the bodies are visible and inlinable, unlike the opaque vtable call.
 
-The verification habit: **for a hot dispatch site, disassemble and check whether you see a direct/inlined body (devirtualized — good), a small closed-set jump table (`variant`/`switch` — acceptable, check prediction), or an opaque `call [rax]`/`call [reg]` (live indirect — the thing to eliminate on a megamorphic hot path).** When `final`/LTO *should* have devirtualized and you still see `call [rax]`, the type wasn't statically recoverable — that tells you to change the call site (concrete type, CRTP, or `variant`) rather than hope.
+The verification habit: **for a hot dispatch site, disassemble and check whether you see a direct/inlined body (devirtualized — good), a small closed-set branch chain or jump table (`variant`/`switch` — acceptable, check prediction), or an opaque `call [rax]`/`call [reg]` (live indirect — the thing to eliminate on a megamorphic hot path).** When `final`/LTO *should* have devirtualized and you still see `call [rax]`, the type wasn't statically recoverable — that tells you to change the call site (concrete type, CRTP, or `variant`) rather than hope.
 
 ---
 
