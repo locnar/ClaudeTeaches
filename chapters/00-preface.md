@@ -10,7 +10,7 @@ The techniques are general — caches, branches, memory layout, lock-free concur
 
 This book assumes you are already a competent C++ programmer and comfortable on Linux. It is aimed at **intermediate-to-advanced C++ developers** who know the language (C++17/20, RAII, templates, the standard library) and the basics of how a Linux system works (processes, threads, syscalls, the shell), and who now want to understand *what the machine is actually doing* and how to bend it to a latency budget. It does **not** teach C++ or Linux fundamentals — the page budget is spent on performance depth, not on the basics. If you have written multithreaded C++, used a profiler at least once, and can read a stack trace, you are ready.
 
-You do **not** need a background in finance. The trading concepts you need — what an order book is, what tick-to-trade means, what a feed handler does — are introduced as they come up and gathered in the glossary (**Appendix F**). The trading framing is there to make the techniques concrete and to set honest latency targets, not to assume you are already an HFT engineer.
+You do **not** need a background in finance. The trading concepts you need — what an order book is, what tick-to-trade means, what a feed handler does — are introduced as they come up, gathered in the glossary (**Appendix F**), and developed end to end in the market-structure and protocol primer (**Appendix J**). The trading framing is there to make the techniques concrete and to set honest latency targets, not to assume you are already an HFT engineer.
 
 ## The north-star: tail latency, not average throughput
 
@@ -43,7 +43,7 @@ The seventy-six chapters are grouped into twelve Parts that build from the found
 - **Part XI — Heterogeneous Computing & Hardware Acceleration** (Ch. 66–70): the PCIe boundary, GPUs, MPI, FPGAs, and SmartNICs/DPUs — and where each does (and does not) belong on the order path.
 - **Part XII — Observability & Operations in Production** (Ch. 71–76): zero-overhead logging, secure programming, hot reload, process topology and the deterministic state machine, capture/replay, and a full end-to-end case study that ties the book together.
 
-Seven appendices (**A-G**) are standing references that outlive any single chapter: the ARM port, the alternative-languages survey, a copy-paste system-tuning checklist, a compiler-flag reference, the latency-numbers table, a glossary, and an annotated bibliography. The detailed, searchable topic index — every chapter expanded into its sub-topics — is in [`README.md`](README.md).
+Twelve appendices (**A–L**) are standing references that outlive any single chapter: the ARM port, the alternative-languages survey, a copy-paste system-tuning checklist, a compiler-flag reference, the latency-numbers table, a glossary, an annotated bibliography, a C++23/26 feature-availability matrix, a tooling command cookbook, an HFT market-structure & protocol primer, a survey of exchange connectivity & the physical layer, and the reproducible benchmark & measurement harness behind every number in the book. The detailed, searchable topic index — every chapter expanded into its sub-topics — is in [`README.md`](README.md).
 
 ## How each chapter is built
 

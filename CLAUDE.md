@@ -55,6 +55,11 @@ Code & content guidelines:
 
 ## Table of Contents
 
+> **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
+> A–G), kept for history. The book was since reorganised into twelve Parts with 76 chapters and twelve
+> appendices (A–L); **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
+> *Status / Workflow* below). Do not renumber against this list.
+
 ### Part I — Foundations & Methodology
 1. **The Latency Mindset** — latency vs throughput, tail latency, jitter, the
    tick-to-trade budget; why means lie.
@@ -412,7 +417,8 @@ Code & content guidelines:
 - Phase 1 (done): TOC established above (64 chapters + 7 appendices, A–G).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 76 chapters + 7 appendices (A–G).**
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 76 chapters + 12 appendices (A–L);
+  Appendices A–G were drafted with the chapters and H–L were added afterwards (next bullet).**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
@@ -481,8 +487,8 @@ The searchable sub-topics live as numbered sub-bullets under **§N.2 (Mental mod
 **§N.4 (Techniques)**; per-chapter §8 References / §9 Additional Reading are **not** listed in the
 index. Appendices use the same outline at one level (`A.1`, `A.2`, …). A short legend at the top
 of the file states the convention: a **linked** chapter title (`[N. Title](NN-slug.md)`) points at
-a drafted file; a **plain** title is planned but not yet written. Drafting progress is tracked
-**here in CLAUDE.md** (the "Drafted: …" line above), NOT in README.
+a drafted file; a **plain** title is planned but not yet written. Drafting/revision status is tracked
+**here in CLAUDE.md** (the Phase 2/3 status block under *Status / Workflow* above), NOT in README.
 
 After generating (or materially revising) any chapter `chapters/NN-slug.md`, always, in the same
 change:
@@ -494,8 +500,9 @@ change:
      the README's `N.2.x` / `N.4.x` sub-bullets; keep the `N.1`/`N.3`/`N.5`/`N.6`/`N.7` lines in
      sync with the chapter's real one-line section summaries.
    - Verify the title and section numbering match the chapter.
-2. **Update this file (CLAUDE.md):** advance the Phase 2 "Drafted: …" line (range drafted, current
-   Part, next chapter).
+2. **Update this file (CLAUDE.md):** if the change alters the book's shape or status (a new or
+   removed chapter/appendix, a Part boundary, a revision milestone), update the Phase 2/3 status
+   block under *Status / Workflow* — counts, Part ranges and the remaining-work note.
 3. **Consistency sweep of the new chapter:** confirm it opens with the Part header +
    Prerequisites/Leads-into blockquote, follows the §1–§9 section structure, and ends with a
    `*Next: Ch. NN — …*` teaser pointing at the next planned chapter. Also catch up any earlier

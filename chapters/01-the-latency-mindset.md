@@ -94,7 +94,7 @@ The discipline is to treat that end-to-end number as a **budget** and to allocat
 | Host memory → NIC → wire | 250–800 ns | Ch. 55, 62, 66 |
 | **Tick-to-trade total** | **≈ 0.7–2.5 µs** | the whole book |
 
-Two lessons live in this table. First, **no single stage dominates** — there is no one trick that wins; competitiveness is the sum of dozens of disciplined decisions, which is why the book has 64 chapters. Second, the I/O stages (wire in, wire out) are a large fraction of the budget, which is why kernel bypass, NIC offloads, and even FPGAs (Ch. 62, 69) exist: at some point the only way to cut the budget is to stop touching the general-purpose CPU and OS at all. A pure-software path that does everything right still spends most of its time getting bytes on and off the wire.
+Two lessons live in this table. First, **no single stage dominates** — there is no one trick that wins; competitiveness is the sum of dozens of disciplined decisions, which is why the book has 76 chapters. Second, the I/O stages (wire in, wire out) are a large fraction of the budget, which is why kernel bypass, NIC offloads, and even FPGAs (Ch. 62, 69) exist: at some point the only way to cut the budget is to stop touching the general-purpose CPU and OS at all. A pure-software path that does everything right still spends most of its time getting bytes on and off the wire.
 
 Crucially, **every number in that table is itself a distribution.** The budget must hold at p99.9, not at p50, or you have budgeted for the races you win and ignored the ones you lose. "Decode is 200 ns" is meaningless; "decode is 180 ns at p50 and 240 ns at p99.9" is an engineering statement.
 

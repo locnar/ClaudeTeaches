@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 2 (perf/PMU — production observation) and Ch. 4 (reading asm — debugging optimized code means reading its codegen). This chapter establishes debugging *methodology* as part of the foundations; the specific machinery it leans on is developed later and forward-referenced here — you don't need it first.
 >
-> **Connects forward to:** the reproduce-then-debug approach draws on tools built later — the build/debug-info flags (Ch. 22, Appendix D), the sanitizers (Ch. 40), zero-overhead logging as a debug channel (Ch. 71), and — the single best debugging tool — the deterministic state machine and capture/replay (Ch. 74–75). Every "verify the codegen" and async pipeline in the book (e.g. Ch. 39) eventually needs what this chapter teaches. It's the methodology Part I implied: how to *debug* a low-latency system when you can't attach a debugger to the hot path and the optimizer has erased your variables.
+> **Leads into:** the reproduce-then-debug approach draws on tools built later — the build/debug-info flags (Ch. 22, Appendix D), the sanitizers (Ch. 40), zero-overhead logging as a debug channel (Ch. 71), and — the single best debugging tool — the deterministic state machine and capture/replay (Ch. 74–75). Every "verify the codegen" and async pipeline in the book (e.g. Ch. 39) eventually needs what this chapter teaches. It's the methodology Part I implied: how to *debug* a low-latency system when you can't attach a debugger to the hot path and the optimizer has erased your variables.
 
 ---
 
