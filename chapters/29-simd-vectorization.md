@@ -57,7 +57,7 @@ Two measurements: the **vectorization throughput win** on batch work, and the **
 #include <vector>
 #include <chrono>
 
-// restrict (Ch. 20) so the compiler may vectorize; SoA float arrays (Ch. 7).
+// restrict (Ch. 21) so the compiler may vectorize; SoA float arrays (Ch. 8).
 float dot(const float* __restrict a, const float* __restrict b, int n) {
     float s = 0.f;
     for (int i = 0; i < n; ++i) s += a[i] * b[i];   // needs -ffast-math OR multiple accumulators to vectorize the reduction
@@ -92,7 +92,7 @@ And the **downclocking** measurement — the one that matters for a latency box.
 ```
    scalar task, core idle otherwise           ~100 ns   @ ~3.5 GHz (full turbo)
    scalar task, while heavy AVX-512 on core    ~118 ns   @ ~3.0 GHz  <- downclock taxed the scalar path
-   (effect lingers ~ms after the SIMD stops; can affect the SMT sibling — Ch. 41)
+   (effect lingers ~ms after the SIMD stops; can affect the SMT sibling — Ch. 43)
 ```
 
 Read it two ways. (1) **The kernel win is real**: vectorization gives ~2-3× on the dot product (and the scalar row shows the reduction *didn't* vectorize without FP-reassociation permission — Ch. 27 — a common silent miss). (2) **The downclock is also real**: the *scalar* task got ~18% slower while AVX-512 ran on the core, because the core dropped frequency — so on a latency core, the AVX-512 kernel's local speedup can be *outweighed* by slowing the critical path around it. The decision rule: **SIMD wins where the core is SIMD-dominated (a batch/risk core); it can lose where a little SIMD shares a core with latency-critical scalar work.** Measure *both* the kernel speedup *and* the frequency effect on the surrounding work (`turbostat`, the scalar-task latency with/without SIMD) before putting wide SIMD on a tick-to-trade core. (Modern cores downclock far less; check yours.)
@@ -136,12 +136,12 @@ Whether a loop vectorized — and to what width — is visible in the asm, and i
 **Scalar (didn't vectorize) vs packed.** A reduction without FP-reassociation permission stays scalar (`...ss`/`...sd`, one lane); with `-ffast-math`/`-march` it goes packed (`...ps`/`...pd`, N lanes):
 
 ```asm
-; dot product, -O3 (no fast-math):  SCALAR — reduction not reassociated (Ch. 26)
+; dot product, -O3 (no fast-math):  SCALAR — reduction not reassociated (Ch. 27)
 .loop:  vfmadd231ss xmm0, xmm1, [rsi+rax]    ; ss = scalar single, ONE lane
 
 ; dot product, -O3 -march=native -ffast-math:  PACKED AVX-512 (16 lanes) + multiple accumulators
 .loop:  vfmadd231ps zmm0, zmm4, [rsi+rax]    ; ps + zmm = 16 floats/op
-        vfmadd231ps zmm1, zmm4, [rsi+rax+64] ; multiple zmm accumulators (Ch. 10 ILP)
+        vfmadd231ps zmm1, zmm4, [rsi+rax+64] ; multiple zmm accumulators (Ch. 11 ILP)
         ...
         ; + horizontal reduce of zmm0..zmm3 at the end
 ```
@@ -156,7 +156,7 @@ Whether a loop vectorized — and to what width — is visible in the asm, and i
 **Aligned vs unaligned loads.** `vmovaps` (aligned) vs `vmovups` (unaligned) — and a misaligned loop emits a scalar prologue to reach alignment:
 
 ```asm
-        vmovaps ymm0, [rdi]          ; aligned (fast) — array was 32B-aligned (Ch. 8)
+        vmovaps ymm0, [rdi]          ; aligned (fast) — array was 32B-aligned (Ch. 9)
         vmovups ymm0, [rdi]          ; unaligned (compiler couldn't prove alignment)
 ```
 

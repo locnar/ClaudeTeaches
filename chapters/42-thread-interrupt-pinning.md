@@ -21,7 +21,7 @@ This chapter is the concrete mechanics — `taskset`/`sched_setaffinity`/`pthrea
 **CPU affinity — binding a thread to a core.** The OS scheduler, by default, runs a thread on whatever core is convenient and **migrates** it freely (for load-balancing, when a core frees up, etc.). **Affinity** constrains the set of cores a thread may run on; pin it to *one* core and it can never migrate:
 
 ```
-   without affinity:  thread bounces across cores → cold every time (Ch. 39), NUMA-random (Ch. 15)
+   without affinity:  thread bounces across cores → cold every time (Ch. 41), NUMA-random (Ch. 16)
    with affinity (pinned to core 2):  thread ALWAYS runs on core 2 → warm caches/TLB, NUMA-stable
 
    the mechanisms:
@@ -46,9 +46,9 @@ Pinning to the wrong logical CPU (the SMT sibling of a busy core, the wrong NUMA
 ```
    - DISABLE irqbalance (systemctl stop/disable irqbalance) — stop it shuffling IRQs onto hot cores
    - set every IRQ's smp_affinity to HOUSEKEEPING cores only (never the hot cores)
-   - especially the NIC IRQs (Ch. 49): route them to housekeeping cores, or use RSS/affinity so the
-     queue feeding the hot path is steered appropriately (Ch. 49)
-   - the hot core handles NO device IRQs; combined with nohz_full (Ch. 42) it takes no timer IRQ either
+   - especially the NIC IRQs (Ch. 55): route them to housekeeping cores, or use RSS/affinity so the
+     queue feeding the hot path is steered appropriately (Ch. 55)
+   - the hot core handles NO device IRQs; combined with nohz_full (Ch. 45) it takes no timer IRQ either
 ```
 
 **Housekeeping vs hot cores — the partition.** The clean design splits the CPU into **housekeeping cores** (run the OS, kernel threads, IRQs, `irqbalance`-equivalent work, control/admin/logging threads — Ch. 41's blocking threads) and **hot/isolated cores** (run *only* the pinned busy-polling trading threads, no IRQs, no kernel work, no timer tick). Everything noisy goes on housekeeping; the hot cores are pristine. This partition is the heart of a low-latency box (Ch. 6, 45, Appendix C).
@@ -64,7 +64,7 @@ Pinning's payoff is **jitter reduction** — the tail (Ch. 1), not the mean. Mea
 // Build: g++ -O2 -std=c++20 -march=native jitter.cpp -o jitter
 // Run:   ./jitter                        (unpinned — scheduler may migrate/preempt)
 //        taskset -c 2 ./jitter           (pinned to core 2)
-//        taskset -c 2 ./jitter           (with core 2 isolated: isolcpus/nohz_full + IRQs routed away — Ch.42)
+//        taskset -c 2 ./jitter           (with core 2 isolated: isolcpus/nohz_full + IRQs routed away — Ch.45)
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -94,7 +94,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), t
 
 ```
                                    p50    p99    p99.9    p99.99    max        what's in the tail
-   unpinned (noisy system)        ~20    ~80    ~2,500   ~30,000   ~120,000   migrations, preemption, IRQs (Ch.39)
+   unpinned (noisy system)        ~20    ~80    ~2,500   ~30,000   ~120,000   migrations, preemption, IRQs (Ch.41)
    pinned to a normal core        ~20    ~30    ~400     ~8,000    ~40,000    fewer migrations, but timer tick + IRQs remain
    pinned + isolated + IRQs away  ~20    ~22    ~28      ~60       ~300       quiet core: tail nearly GONE
 ```

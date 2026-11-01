@@ -21,13 +21,13 @@ The cost — and why FPGAs are a specialized, high-investment tier — is **deve
 **An FPGA is programmable hardware — a circuit you configure, not a processor you program.** It's a sea of configurable logic blocks (LUTs — lookup tables), flip-flops, DSP blocks, block RAM, and I/O, connected by configurable routing. You *describe a circuit* and the toolchain *synthesizes* it onto the fabric:
 
 ```
-   CPU/software (Ch.6-13):  fetch instruction → decode → execute → ...  (sequential, cached, branchy, JITTERY)
+   CPU/software (Ch.7-14):  fetch instruction → decode → execute → ...  (sequential, cached, branchy, JITTERY)
    FPGA:                    your CIRCUIT — packet flows THROUGH the gates, pipelined, in N fixed cycles
                             (PARALLEL by construction, NO instruction fetch/cache/branch, DETERMINISTIC)
 
    inline placement (the HFT win):
-     wire → [FPGA: parse → decide → emit order] → wire     ← nanoseconds, no CPU, no PCIe round-trip (Ch.54)
-                    ↕ (PCIe, Ch.54)
+     wire → [FPGA: parse → decide → emit order] → wire     ← nanoseconds, no CPU, no PCIe round-trip (Ch.66)
+                    ↕ (PCIe, Ch.66)
                    host CPU (config, complex/rare cases, monitoring) — OFF the hot path
 ```
 
@@ -45,9 +45,9 @@ The model: **an FPGA is a configurable circuit (described in RTL — lowest late
 The FPGA's metric is **wire-to-wire latency** — from a packet arriving on the FPGA's input to the response leaving its output — measured with hardware timestamps (Ch. 55, 58). The headline: tens-to-hundreds of nanoseconds, *deterministic* (a flat distribution, the key property), an order of magnitude below software bypass (Ch. 62).
 
 ```
-   # Measure with hardware timestamps (Ch.49-50) at the FPGA's wire I/O, or an external timing tap:
+   # Measure with hardware timestamps (Ch.55-58) at the FPGA's wire I/O, or an external timing tap:
    #   t_out (order leaves) - t_in (feed packet arrives) = wire-to-wire latency
-   # Compare: FPGA inline vs software kernel bypass (Ch.52) vs kernel stack (Ch.44).
+   # Compare: FPGA inline vs software kernel bypass (Ch.62) vs kernel stack (Ch.47).
    # The KEY metric is not just the median — it's the DISTRIBUTION (determinism / tail — Ch.1).
 ```
 
@@ -55,8 +55,8 @@ Representative results — NIC-integrated FPGA inline path vs software (illustra
 
 ```
    tick-to-trade path                  wire-to-wire latency (p50)     p99 / tail        determinism
-   kernel stack (Ch.44)                ~5-20 µs                       much worse        jittery (OS, Ch.39-42)
-   software kernel bypass (Ch.52)      ~1 µs                          ~2 µs             good (tuned)
+   kernel stack (Ch.47)                ~5-20 µs                       much worse        jittery (OS, Ch.41-45)
+   software kernel bypass (Ch.62)      ~1 µs                          ~2 µs             good (tuned)
    FPGA inline (HLS)                   ~hundreds of ns                ~tight            very deterministic
    FPGA inline (RTL, optimized)        ~tens to ~100 ns               p99 ≈ p50         ESSENTIALLY CONSTANT
                                                                        ↑ the tail is FLAT — no cache/branch/OS jitter

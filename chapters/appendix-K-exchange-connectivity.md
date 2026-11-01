@@ -43,7 +43,7 @@ Getting bytes onto the exchange is a gated, metered, regulated interface — not
 
 ## K.5 Time distribution at the venue
 
-Comparing timestamps across machines and firms — the basis of true wire-to-wire measurement (Ch. 56) and of regulatory reporting — requires a shared, disciplined time source.
+Comparing timestamps across machines and firms — the basis of true wire-to-wire measurement (Ch. 58) and of regulatory reporting — requires a shared, disciplined time source.
 
 - A **grandmaster clock** in the facility, disciplined by a **GNSS/GPS** reference (with a rooftop antenna), is the authoritative time source. It distributes time to hosts via **PTP** (Precision Time Protocol, IEEE 1588 — Ch. 56), which — with **hardware timestamping** in the NIC (Ch. 55) and on-path **boundary/transparent clocks** in the switches — achieves sub-microsecond, often sub-100-nanosecond, alignment across machines.
 - **PPS** (Pulse-Per-Second) signaling distributes a precise once-per-second edge over coax to discipline oscillators directly; it is the low-jitter physical heartbeat behind a boundary clock. Grandmaster **oscillator drift** and holdover (behavior when GNSS is lost) are real engineering concerns for a boundary clock (the topic Ch. 56 develops, and where White Rabbit pushes to sub-nanosecond).
@@ -74,7 +74,7 @@ The physical layer is where the latency arms race meets economics and rules:
 
 ## K.9 Additional Reading
 
-- Ch. 55 (NIC features/timestamping), Ch. 56 (PTP/clock sync), Ch. 54 (reliable multicast / A/B feeds), Ch. 60 (fabric), Ch. 68 & 70 (FPGA / SmartNIC inline paths), Ch. 76 (wire-to-wire measurement) — the software that lives on this infrastructure.
+- Ch. 55 (NIC features/timestamping), Ch. 58 (PTP/clock sync), Ch. 54 (reliable multicast / A/B feeds), Ch. 60 (fabric), Ch. 69 & 70 (FPGA / SmartNIC inline paths), Ch. 76 (wire-to-wire measurement) — the software that lives on this infrastructure.
 - **Appendix E** (Latency Numbers) — the *on-host* costs, to compare against the *off-host* physical floor described here; **Appendix J** (Market-Structure Primer) — the protocols, roles, and order lifecycle that ride these links.
 - **Appendix C** (System Tuning Checklist) — the box-level work that makes a colocated server actually quiet (GNSS/PTP, NIC rings, IRQ affinity) once it's in the cage.
 

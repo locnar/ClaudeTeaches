@@ -119,7 +119,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `
 ns / call             ~0.30 ns      ~0.30 ns    ~0.9 ns      ~1.4 ns
 matches hand?            —          YES (≡)      no           no
 inlined?               yes          yes          no           no
-asm (§18.5)          identical    identical    call [rax]   double indirection
+asm (§19.5)          identical    identical    call [rax]   double indirection
 ```
 
 Read it the Ch. 14 / Ch. 18 way: **CRTP is *byte-for-byte* the hand-written code** — same ns/call, same asm (§19.5) — because the static dispatch inlined and the optimizer then treated it exactly as the direct version. That is "zero-cost" *demonstrated*, not asserted: the abstraction (a reusable `Strat<>` base, a clean `update()` interface) cost the hot path nothing. The `virtual` and `std::function` versions — flexible at runtime — are 3–5× slower here purely from un-inlinable dispatch (Ch. 14), even though the callee is trivial. The discipline this sets up: when you claim an abstraction is zero-cost, **prove it matches the hand-written codegen** (§19.5); if it doesn't, the abstraction is leaking a runtime cost and you either fix it or account for it.

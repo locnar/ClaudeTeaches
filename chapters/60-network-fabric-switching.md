@@ -2,7 +2,7 @@
 
 # Chapter 60 — Network Fabric & Switching
 
-> **Prerequisites:** Ch. 6 (colocation — the switch is the box next to yours in the rack), Ch. 51 (socket/TCP and multicast), Ch. 53 (microbursts — where switch buffers overflow), Ch. 55 (NIC — the far end of the wire), Ch. 58 (PTP — how you measure per-hop latency), Ch. 1 (the tail).
+> **Prerequisites:** Appendix K (colocation — the switch is the box next to yours in the rack), Ch. 51 (socket/TCP and multicast), Ch. 53 (microbursts — where switch buffers overflow), Ch. 55 (NIC — the far end of the wire), Ch. 58 (PTP — how you measure per-hop latency), Ch. 1 (the tail).
 >
 > **Leads into:** Ch. 54 (reliable multicast — the switch fans it out), Appendix E (add the switch-latency numbers). The hop the software chapters assumed: the physical fabric between your NIC and the exchange, where nanoseconds are decided by hardware you buy, not code you write.
 
@@ -10,7 +10,7 @@
 
 ## 60.1 Why it matters: the switch is on the tick-to-trade path
 
-Every packet in the tick-to-trade path (Ch. 76) crosses at least one **switch** — usually several — between the exchange's matching engine and your NIC, and between your NIC and the exchange's order gateway. In a colocated setup (Ch. 6) the wire is short (light travels ~1 ns per 30 cm, so the cable itself is tens of nanoseconds), which means the **switch latency dominates the network hop**. A switch that adds 500 ns per hop across three hops is 1.5 µs — larger than the entire software tick-to-trade budget of a tuned system (Ch. 76's ~640 ns). You can spend months shaving nanoseconds off your decode (Ch. 53) and lose all of it to a store-and-forward switch you didn't think about. The fabric is not "the network department's problem"; it is a latency component of your system, and often the *largest* one you don't control in software.
+Every packet in the tick-to-trade path (Ch. 76) crosses at least one **switch** — usually several — between the exchange's matching engine and your NIC, and between your NIC and the exchange's order gateway. In a colocated setup (Appendix K) the wire is short (light travels ~1 ns per 30 cm, so the cable itself is tens of nanoseconds), which means the **switch latency dominates the network hop**. A switch that adds 500 ns per hop across three hops is 1.5 µs — larger than the entire software tick-to-trade budget of a tuned system (Ch. 76's ~640 ns). You can spend months shaving nanoseconds off your decode (Ch. 53) and lose all of it to a store-and-forward switch you didn't think about. The fabric is not "the network department's problem"; it is a latency component of your system, and often the *largest* one you don't control in software.
 
 Worse, the switch is where the **tail** is manufactured under exactly the conditions you care about (Ch. 1). At market open (Ch. 53), the exchange fans out a microburst of market data to every participant simultaneously; that burst hits the switch's buffers, and if the switch queues (store-and-forward, oversubscription, buffer contention) it *adds variable delay* — the flat, deterministic latency you want (Ch. 1) becomes a jittery, load-dependent tail. Two switches with the same "average latency" spec can have wildly different behavior under a burst: one holds a flat tail, the other bufferbloats and spikes. The switch's *distribution under load*, not its datasheet median, is what reaches your strategy.
 
@@ -63,7 +63,7 @@ The lessons: measure per-hop with hardware timestamps (software timing includes 
 
 - **Cut-through on the hot path.** For any switch on the tick-to-trade path, choose **cut-through** (Arista 7130/7150, Cisco Nexus low-latency, Exablaze) over store-and-forward — flat, frame-size-independent, sub-microsecond latency. The CRC-propagation trade-off (§60.2) is acceptable on clean colo links; monitor error counters to confirm the links are clean.
 - **Layer-1 for fan-out and replication.** Where you're *distributing* a signal (a market-data feed to multiple strategy hosts, a tap to multiple capture/analytics consumers — Ch. 75, or an order feed to redundant systems), use a **layer-1 replicator** (Arista 7130 Metamux/Metaconnect, Exablaze) — sub-nanosecond, no buffering, deterministic. This is how one feed reaches many consumers without a switching-latency penalty per consumer.
-- **Minimize hop count.** Every hop is a switch latency *and* a queuing point (§60.5). Lay out the path (and choose your colo cross-connects — Ch. 6) to traverse the **fewest switches** between the exchange handoff and your NIC, and between your NIC and the order gateway. One cut-through hop beats three; a direct layer-1 cross-connect beats a switched path where topology allows.
+- **Minimize hop count.** Every hop is a switch latency *and* a queuing point (§60.5). Lay out the path (and choose your colo cross-connects — Appendix K) to traverse the **fewest switches** between the exchange handoff and your NIC, and between your NIC and the order gateway. One cut-through hop beats three; a direct layer-1 cross-connect beats a switched path where topology allows.
 - **Consistent, high link speeds.** Keep link speeds uniform and high (25/100 G) along the path to minimize serialization delay (§60.2); a single slower segment reintroduces serialization latency. Match the exchange's handoff speed.
 
 ### 60.4.2 Fabric layout, buffering, and microburst handling
@@ -85,7 +85,7 @@ Fabric hardware does more than forward — it can timestamp, replicate, and tap,
 
 - **A store-and-forward switch on the hot path (the cardinal fabric error).** It pays full frame serialization on every hop and queues under load — microseconds of latency that grows with frame size and spikes under a burst (§60.3), dwarfing your software budget (Ch. 76). Use cut-through (or layer-1) on any path that matters.
 - **Oversubscription manufacturing tail latency.** An oversubscribed switch queues under the market-open burst (Ch. 53), turning a flat cut-through latency into a jittery, load-dependent tail (§60.3). Provision the hot path non-oversubscribed; the tail you see at the open is often the switch, not your code.
-- **Hidden extra hops.** A path that looks direct but traverses an extra aggregation switch, a firewall, or a mismatched cross-connect — each hop is latency and a queuing point. Trace the *actual* physical path (Ch. 6 colo cross-connects) and count hops; the fewest wins (§60.4.1).
+- **Hidden extra hops.** A path that looks direct but traverses an extra aggregation switch, a firewall, or a mismatched cross-connect — each hop is latency and a queuing point. Trace the *actual* physical path (Appendix K — colo cross-connects) and count hops; the fewest wins (§60.4.1).
 - **Measuring RTT/2 as one-way latency on an asymmetric path.** If the two directions traverse different switches/queues (common), RTT/2 is not the one-way latency — you'll misattribute where the time goes. Measure each direction with synchronized hardware timestamps (PTP, Ch. 58; §60.3).
 - **Software timestamps for fabric measurement.** Timing packets with host software clocks includes the host's own jitter (Ch. 41) — the thing you're trying to exclude when measuring the *fabric*. Use NIC/switch hardware timestamps (Ch. 55, 58).
 - **Deep buffers "for reliability."** Choosing a deep-buffer switch to avoid drops trades your latency for burst tolerance (bufferbloat) — a queued frame is a slow frame. For drop-tolerant market data (A/B recovery handles loss — Ch. 54), shallow buffers + no oversubscription keep the tail flat; reserve deep buffering for paths that truly can't drop and aren't latency-critical (§60.4.2).
@@ -111,20 +111,20 @@ Fabric hardware does more than forward — it can timestamp, replicate, and tap,
 - [ ] The fabric's **latency distribution under a market-open burst** (Ch. 53) is measured, not just the idle median (§60.3).
 - [ ] **Fan-out / replication** uses layer-1 devices; **capture** taps the wire at the fabric (Ch. 75) without adding hot-path latency (§60.4.3).
 - [ ] **Fabric/switch hardware timestamping** (Ch. 58) feeds latency monitoring and capture (Ch. 75–76) (§60.4.3).
-- [ ] The **actual physical path** (Ch. 6 colo) is traced — no hidden hops, mismatched speeds, or asymmetric detours (§60.5).
+- [ ] The **actual physical path** (Appendix K — colocation) is traced — no hidden hops, mismatched speeds, or asymmetric detours (§60.5).
 
 ## 60.7 References
 
 - Low-latency switch vendor documentation — **Arista 7130/7150** (and Metamux/Metaconnect layer-1), **Cisco Nexus 3550/low-latency**, **Exablaze/Cisco** — cut-through and layer-1 latency specs and timestamping (§60.2, §60.4).
 - IEEE 802.3 (Ethernet) and switching-architecture references — store-and-forward vs cut-through, serialization, head-of-line blocking, VOQ (§60.2).
-- Ch. 58 (PTP / hardware timestamping — how to measure the fabric), Ch. 55 (NIC timestamping), Ch. 53 (microbursts — where the fabric queues), Ch. 6 (colocation — the physical path), Ch. 75 (capture — fabric taps).
+- Ch. 58 (PTP / hardware timestamping — how to measure the fabric), Ch. 55 (NIC timestamping), Ch. 53 (microbursts — where the fabric queues), Appendix K (colocation — the physical path), Ch. 75 (capture — fabric taps).
 - Exchange colocation and connectivity guides — the handoff speed, cross-connects, and fabric between the matching engine and the participant (§60.1, §60.4).
 
 ## 60.8 Additional Reading
 
 - Vendor and practitioner material on HFT network fabrics, cut-through switching, and layer-1 devices — real low-latency fabric designs and their measured latencies (§60.2, §60.4).
 - Papers and talks on datacenter fabric latency, microburst behavior, and buffer sizing — the tail-under-load behavior of §60.3/§60.5.
-- Ch. 54 (*Reliable Multicast*) — the feed the fabric fans out and how loss is recovered; Ch. 58 (*PTP*) — the clock discipline behind one-way measurement; Ch. 6 (*System Setup*) — colocation and the physical path; Ch. 75 (*Capture*) — fabric-level tapping; **Appendix E** — switch-latency numbers in the latency table; **Appendix F** — cut-through/layer-1/serialization glossary.
+- Ch. 54 (*Reliable Multicast*) — the feed the fabric fans out and how loss is recovered; Ch. 58 (*PTP*) — the clock discipline behind one-way measurement; **Appendix K** (*Exchange Connectivity*) — colocation and the physical path; Ch. 75 (*Capture*) — fabric-level tapping; **Appendix E** — switch-latency numbers in the latency table; **Appendix F** — cut-through/layer-1/serialization glossary.
 
 ---
 

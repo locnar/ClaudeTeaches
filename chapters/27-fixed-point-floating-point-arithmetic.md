@@ -167,7 +167,7 @@ The two produce **different bits** — which is exactly the determinism knob of 
 **Reassociation / vectorized reduction (`-ffast-math`).** Without fast-math the compiler keeps a serial `vaddsd` chain (Ch. 11.5); with `-ffast-math` it reassociates into a vectorized multi-accumulator reduction — *faster, different result*:
 
 ```asm
-; sum reduction, -O2 (strict):   serial scalar chain (Ch. 10) — exact order preserved
+; sum reduction, -O2 (strict):   serial scalar chain (Ch. 11) — exact order preserved
         vaddsd  xmm0, xmm0, [rdi + 8*rcx]
 ; sum reduction, -O2 -ffast-math: vectorized packed accumulators — reassociated
         vaddpd  ymm0, ymm0, [rdi + 8*rcx]

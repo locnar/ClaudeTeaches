@@ -23,7 +23,7 @@ The minimal, correct micro-benchmark — defeating dead-code elimination (Ch. 3)
      std::size_t i = 0;
 
      for (auto _ : state) {                       // <-- only THIS loop is timed
-       auto& m = msgs[i++ & (msgs.size() - 1)];   // pow2 mask, no modulo (Ch. 27)
+       auto& m = msgs[i++ & (msgs.size() - 1)];   // pow2 mask, no modulo (Ch. 28)
        auto bbo = book.apply(m);                  // the operation under measurement
        benchmark::DoNotOptimize(bbo);             // force the result to be "used"
        benchmark::ClobberMemory();                // force pending writes to memory
@@ -43,7 +43,7 @@ Build and run:
            --benchmark_out=bench.json --benchmark_out_format=json
 ```
 
-**The three things that make it correct** (Ch. 3): `DoNotOptimize`/`ClobberMemory` stop the optimizer from deleting work whose result is unused (the #1 micro-benchmark bug — a "0.1 ns" result means the loop was optimized away); the input is **representative** (real order flow, not a degenerate constant the branch predictor learns perfectly — Ch. 12); and construction is **outside** the `for (auto _ : state)` loop so you time the steady-state operation, not allocation/setup. `--benchmark_repetitions` + aggregates give you mean/median/stddev (Ch. 3) — never trust a single run. `-O2 -march=native -DNDEBUG` because a debug/`-O0` build measures nothing real (Ch. 3; flags per Appendix D).
+**The three things that make it correct** (Ch. 3): `DoNotOptimize`/`ClobberMemory` stop the optimizer from deleting work whose result is unused (the #1 micro-benchmark bug — a "0.1 ns" result means the loop was optimized away); the input is **representative** (real order flow, not a degenerate constant the branch predictor learns perfectly — Ch. 13); and construction is **outside** the `for (auto _ : state)` loop so you time the steady-state operation, not allocation/setup. `--benchmark_repetitions` + aggregates give you mean/median/stddev (Ch. 3) — never trust a single run. `-O2 -march=native -DNDEBUG` because a debug/`-O0` build measures nothing real (Ch. 3; flags per Appendix D).
 
 ## L.2 Tail-latency capture with HdrHistogram (and avoiding coordinated omission)
 

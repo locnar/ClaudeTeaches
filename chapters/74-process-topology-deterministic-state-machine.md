@@ -24,7 +24,7 @@ Decompose the tick-to-trade path into separate processes by **role**, each a fau
 
 ```
    wire ─► [ FEED HANDLER ]─shm─►[ STRATEGY(s) ]─shm─►[ RISK ]─shm─►[ ORDER GATEWAY ]─► wire
-            decode (Ch.48)        pure decision        pre-trade      venue session,
+            decode (Ch.53)        pure decision        pre-trade      venue session,
             normalize, seq        (state machine)      limits/kill    order I/O
                  │                      │                  │                │
             (one process)          (one per strategy/   (one process)   (one process,
@@ -45,8 +45,8 @@ The most important pattern in the chapter: **isolate the core decision logic int
 ```
    IMPURE EDGE (non-deterministic):              PURE CORE (deterministic):
    ──────────────────────────────               ──────────────────────────
-   network RX (Ch.44-52)                         apply(state, input) → (state', outputs)
-   timers / clocks (Ch.16)            ─inputs─►   • NO syscalls, NO I/O, NO clock reads
+   network RX (Ch.47-62)                         apply(state, input) → (state', outputs)
+   timers / clocks (Ch.17)            ─inputs─►   • NO syscalls, NO I/O, NO clock reads
    RNG, OS scheduling                             • NO wall-clock now() inside — time is an INPUT
    network TX                         ◄─outputs─  • same (state, input sequence) ⇒ same outputs, ALWAYS
 ```

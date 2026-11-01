@@ -162,7 +162,7 @@ The three checks you'll run most:
         vpaddq     ymm1, ymm1, ymm4                      ;     unrolled across 4 separate
         vpmovsxdq  ymm4, xmmword ptr [rdi + 4*rax + 32]  ;     ymm accumulators (ymm0..ymm3)
         vpaddq     ymm2, ymm2, ymm4                      ;     to break the dependency chain
-        ...                                              ;     (the Ch.10 trick, done for you)
+        ...                                              ;     (the Ch.11 trick, done for you)
         vextracti128 xmm1, ymm0, 1                       ; horizontal reduce the 4 lanes
         vpaddq     xmm0, xmm0, xmm1                      ;     back down to one sum at the end
 ```

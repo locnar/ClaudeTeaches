@@ -42,8 +42,8 @@ Compiler/OS hardening features (stack protector, `_FORTIFY_SOURCE`, PIE/ASLR, CF
    ~free (keep almost always):     ASLR/PIE (load-time only), _FORTIFY_SOURCE level 1-2 (compile-time bounds where size known),
                                     stack canaries on non-hot functions, UBSan-found bugs FIXED (not the runtime checks shipped)
    cheap-ish (measure, usually keep): stack protector on hot functions (a load+compare per call), CET shadow stack (HW-assisted)
-   potentially costly (measure, decide on an isolated box):  CFI (indirect-call checks — Ch.13), retpoline/IBRS spec-exec
-                                    mitigations (Ch.5 — can be large on indirect-branch-heavy code), heavy bounds-check instrumentation
+   potentially costly (measure, decide on an isolated box):  CFI (indirect-call checks — Ch.14), retpoline/IBRS spec-exec
+                                    mitigations (Ch.6 — can be large on indirect-branch-heavy code), heavy bounds-check instrumentation
 ```
 
 The model: **most hardening is cheaper than people fear and should stay on; a few features have real hot-path cost and are decided per-function on a measured, isolated box** (Ch. 6). The mitigations interact (Ch. 6: retpoline changes indirect-call cost, which interacts with CFI and with Ch. 14's devirtualization), so you *measure the combination* (§72.3), not each in isolation. The isolated-box context (Ch. 6, 42, 43, 45) actually *helps*: a dedicated, network-restricted, single-tenant box has a smaller attack surface, so you can rationally drop the most expensive mitigations *there* that you'd keep on a shared machine — a deliberate, documented decision, not a default.

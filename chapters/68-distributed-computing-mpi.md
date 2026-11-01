@@ -43,8 +43,8 @@ What makes MPI worth a chapter (beyond "run it across nodes") is the **communica
 ```
    scatter the work (data/parameters) to ranks → each rank computes its chunk (local, parallel)
    → all-reduce / gather the results → done.
-   GOOD: compute >> communication, overlap comm with compute (§56.4.1).
-   BAD:  frequent collectives / fine-grained messages → communication dominates → poor scaling (§56.5).
+   GOOD: compute >> communication, overlap comm with compute (§68.4.1).
+   BAD:  frequent collectives / fine-grained messages → communication dominates → poor scaling (§68.5).
 ```
 
 The model: **MPI runs N ranks (shared-nothing processes across hosts) that pass messages — point-to-point (send/recv) and collectives (broadcast/scatter/gather/all-reduce/barrier) within communicators. Communication (network, µs+) is the bottleneck, not compute; scaling means minimizing/structuring communication, overlapping it with compute (non-blocking), using RDMA transport, and placing ranks topology-aware. It's throughput/scale across hosts — off the order path (network latency disqualifies it), for batch analytics.**
@@ -58,21 +58,21 @@ The fundamental MPI cost is the **message** — its latency (small messages, dom
    $ mpirun -n 2 osu_latency       # point-to-point latency vs message size
    $ mpirun -n 2 osu_bw            # bandwidth vs message size
    $ mpirun -n N osu_allreduce     # collective (all-reduce) latency vs ranks and size
-   # Compare transports: TCP vs RDMA/InfiniBand (§56.4.2) — and rank placement (§56.4.3).
+   # Compare transports: TCP vs RDMA/InfiniBand (§68.4.2) — and rank placement (§68.4.3).
 ```
 
 Representative results — a cluster with InfiniBand/RoCE (RDMA — Ch. 63) vs TCP/Ethernet (illustrative; the *transport gap* and *small-message floor* are the point):
 
 ```
-   point-to-point latency:           RDMA/InfiniBand (Ch.53)    TCP/Ethernet (Ch.44)
+   point-to-point latency:           RDMA/InfiniBand (Ch.63)    TCP/Ethernet (Ch.47)
    small message (8 bytes)           ~1-2 µs                    ~20-50 µs        ← RDMA ~10-25x better
    large message (1 MB)              bandwidth-bound (~GB/s)    bandwidth-bound (lower)
 
-   all-reduce (collective) latency:  grows with rank count (log N or worse) — a SYNC point (§56.5)
+   all-reduce (collective) latency:  grows with rank count (log N or worse) — a SYNC point (§68.5)
      N=8:   ~few µs        N=128:  ~tens of µs       ← collectives scale with N; the critical-path cost
 
    the lessons: small-message latency is the FLOOR (per-message overhead) — batch messages;
-                RDMA transport (Ch.53) is ~10-25x TCP — use it; collectives cost grows with N — minimize them.
+                RDMA transport (Ch.63) is ~10-25x TCP — use it; collectives cost grows with N — minimize them.
 ```
 
 Read it: the **small-message latency** (~1-2 µs over RDMA, ~20-50 µs over TCP) is the per-message floor — so **fine-grained messaging is expensive** (many small messages pay the floor each time); **batch** data into fewer larger messages (the batching theme — Ch. 37, 67). The **transport** matters enormously: **RDMA/InfiniBand (Ch. 63) is ~10-25× faster than TCP** for small messages — so a serious MPI cluster uses RDMA, not Ethernet TCP (§68.4.2). And **collective latency grows with rank count** (all-reduce is a synchronization across all N ranks — log N or worse) — so collectives are the scaling bottleneck (§68.5): a frequent collective on the critical path serializes the whole cluster and caps scaling. The measurement discipline mirrors the GPU's (Ch. 67): **measure the *communication* cost (it dominates), choose the RDMA transport, and structure the program so communication is minimized and overlapped with compute** (§68.4) — and remember all of this is *microseconds-plus per message*, which is why MPI (like the GPU) is for batch analytics, **off the order path** (one network hop blows the nanosecond budget). The OSU/IMB benchmarks give you these curves for your cluster — run them before designing the communication pattern.

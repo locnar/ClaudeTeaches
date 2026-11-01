@@ -24,7 +24,7 @@ The core shift is that a packet carries a **departure time**, and the egress pat
    "send now":         app -> socket -> qdisc -> NIC -> wire   (as fast as possible)
    scheduled send:     app -> [attach TxTime T via SO_TXTIME] -> ETF qdisc (holds until ~T)
                                                               -> NIC hardware LAUNCHTIME (puts on wire AT T)
-                              ▲ T is on the PTP-disciplined clock (Ch. 50)
+                              ▲ T is on the PTP-disciplined clock (Ch. 58)
 ```
 
 The layers, from the EDT model down to the wire:

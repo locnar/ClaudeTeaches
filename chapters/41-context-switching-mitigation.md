@@ -23,14 +23,14 @@ The companion cost is **syscalls**. A system call crosses from user space into t
 ```
    DIRECT cost (~1-5 µs): the switch mechanism itself
      - save outgoing thread's registers, run the scheduler, load incoming thread's registers
-     - (with KPTI / spec-exec mitigations — Ch. 5 — a page-table switch on kernel entry adds more)
+     - (with KPTI / spec-exec mitigations — Ch. 6 — a page-table switch on kernel entry adds more)
 
    INDIRECT cost (often FAR larger): the cold restart when YOUR thread resumes
-     - L1/L2 data cache evicted by the other thread       → hundreds of misses (Ch. 6)
-     - L1i / µop cache evicted                            → front-end stalls (Ch. 11)
-     - TLB flushed (or polluted)                          → page-walk storms (Ch. 14)
-     - branch predictors polluted                         → mispredicts (Ch. 12-13)
-     → the resumed thread runs COLD for thousands of cycles (Ch. 43) — the real cost
+     - L1/L2 data cache evicted by the other thread       → hundreds of misses (Ch. 7)
+     - L1i / µop cache evicted                            → front-end stalls (Ch. 12)
+     - TLB flushed (or polluted)                          → page-walk storms (Ch. 15)
+     - branch predictors polluted                         → mispredicts (Ch. 13-14)
+     → the resumed thread runs COLD for thousands of cycles (Ch. 46) — the real cost
 ```
 
 The mental correction: **never think of a context switch as "a few microseconds." Think of it as "a few microseconds *plus* a cold-start that degrades the next ~10-100 µs of execution."** This is why even *infrequent* switches wreck the tail, and why eliminating them (not just minimizing them) is the goal.
@@ -103,9 +103,9 @@ int main() {
 Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; mitigations on/off changes the syscall number a lot — Ch. 6):
 
 ```
-   null syscall (getpid)              ~80-400 ns      kernel crossing (higher with KPTI/mitigations — Ch. 5)
+   null syscall (getpid)              ~80-400 ns      kernel crossing (higher with KPTI/mitigations — Ch. 6)
    context switch (direct, measured)  ~1-3 µs         the futex ping-pong round-trip / 2
-   + cold-restart (indirect)          +5-50 µs        the resumed thread's working set is GONE (Ch. 6,11,14,43)
+   + cold-restart (indirect)          +5-50 µs        the resumed thread's working set is GONE (Ch. 7,12,15,46)
                                                        (measure via cache-misses/cycles after resume)
 
    the hot path's budget is ~hundreds of ns → ANY of these is a blowout.

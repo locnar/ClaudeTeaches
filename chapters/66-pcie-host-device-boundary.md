@@ -56,7 +56,7 @@ For HFT this understanding is foundational to Part XI: it tells you *what* can b
    2. CPU rings the DOORBELL — a single posted WRITE to a device register ("new work in the ring"). (cheap)
    3. The DEVICE reads the descriptor (via DMA — the device's cost, not the CPU's), does the work,
       and writes a COMPLETION back into HOST memory (DMA).
-   4. CPU POLLS the completion in HOST memory (a cheap cache/memory read — Ch.6), NOT a device-register read.
+   4. CPU POLLS the completion in HOST memory (a cheap cache/memory read — Ch.7), NOT a device-register read.
   ```
   The CPU only ever **writes** to the device (descriptors to host-memory rings, the doorbell — posted, cheap) and **reads from host memory** (completions — cheap). **It never reads device registers on the hot path.** This is the universal fast-device interaction model, and the reason for it is the posted/non-posted asymmetry.
 
@@ -69,7 +69,7 @@ Measure the two PCIe costs that govern offload: the **device-register round-trip
 ```
    # MMIO read vs write latency (requires a mapped device BAR — e.g. via a driver or DPDK/VFIO):
    #   time a posted WRITE to a device register   vs   a non-posted READ of a device register
-   # DMA streaming bandwidth: time a large host↔device DMA transfer (e.g. cudaMemcpy — Ch.55,
+   # DMA streaming bandwidth: time a large host↔device DMA transfer (e.g. cudaMemcpy — Ch.67,
    #   or a NIC/DPDK bulk transfer), compute GB/s; compare to the link's theoretical (lanes × gen).
 ```
 
@@ -79,7 +79,7 @@ Representative results — Gen4 x16 device, illustrative (the *asymmetry* and th
    operation                              latency / bandwidth      note
    MMIO WRITE (posted, fire-and-forget)   ~tens of ns to issue     CPU doesn't wait — cheap (doorbell)
    MMIO READ (non-posted, round-trip)     ~hundreds of ns - ~1 µs  CPU STALLS for the full round-trip  ← the floor
-   descriptor-ring completion (poll host) ~cache/memory read       device DMA'd it to host mem — cheap (Ch.6)
+   descriptor-ring completion (poll host) ~cache/memory read       device DMA'd it to host mem — cheap (Ch.7)
    DMA streaming bandwidth (x16 Gen4)     ~25-28 GB/s (of ~32)     bulk transfer ceiling (lanes × gen)
    one-way DMA latency (small transfer)   ~hundreds of ns          setup + transfer + completion
 

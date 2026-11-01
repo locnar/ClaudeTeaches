@@ -86,16 +86,16 @@ Flags that *find problems* rather than change codegen — build-time and test-ti
 Pulling it together (GCC, single-socket Ice Lake target; adapt `-march`):
 
 ```
-   # Production hot-path build (after measuring each choice — Ch. 3/21):
+   # Production hot-path build (after measuring each choice — Ch. 3/22):
    g++ -std=c++23 -O2 -march=icelake-server -mtune=icelake-server \
        -fno-math-errno -fno-semantic-interposition -fvisibility=hidden \
        -fno-omit-frame-pointer \
        -freorder-blocks-and-partition \
        -flto=auto \
        -DNDEBUG ...
-   #   + explicit FTZ/DAZ at runtime (Ch.26), not -ffast-math
-   #   + PGO: -fprofile-generate → run on captured session (Ch.63) → -fprofile-use
-   #   + BOLT post-link with a production perf profile (Ch.21)
+   #   + explicit FTZ/DAZ at runtime (Ch.27), not -ffast-math
+   #   + PGO: -fprofile-generate → run on captured session (Ch.75) → -fprofile-use
+   #   + BOLT post-link with a production perf profile (Ch.22)
    #   + per-kernel: [[gnu::hot]], targeted -O3 / always_inline where MEASURED to help
 
    # Test/CI build (NOT production):

@@ -62,7 +62,7 @@ Measure what io_uring is *for*: **syscalls per I/O** and the resulting latency/t
 #include <cstdio>
 #include <cstdint>
 // ... setup elided ...
-// epoll model (Ch.44):  per I/O = epoll_wait() + read()/write()  = ~2 syscalls/op
+// epoll model (Ch.47):  per I/O = epoll_wait() + read()/write()  = ~2 syscalls/op
 // io_uring (default):   batch N ops, one io_uring_enter() submits+reaps all  = ~1 syscall / N ops
 // io_uring (SQPOLL + CQ poll): kernel polls SQ, you poll CQ  = ~0 syscalls/op (dedicated kernel thread)
 
@@ -81,10 +81,10 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), p
 
 ```
    model                          syscalls / I/O    p50 latency    throughput     note
-   epoll (Ch.44, per-op)          ~2                ~5 µs          baseline       epoll_wait + read/write each
+   epoll (Ch.47, per-op)          ~2                ~5 µs          baseline       epoll_wait + read/write each
    io_uring (batched enter)       ~1 / batch        ~3.5 µs        ~2-3x higher   one enter submits+reaps many
    io_uring SQPOLL + CQ poll      ~0                ~2.5 µs        highest         kernel polls SQ, user polls CQ
-   (preview) kernel bypass (Ch.52) ~0 (no kernel)   ~1 µs          —              removes the stack entirely
+   (preview) kernel bypass (Ch.62) ~0 (no kernel)   ~1 µs          —              removes the stack entirely
 
    strace -c: epoll shows millions of read/write/epoll_wait; SQPOLL io_uring shows ~NONE on the hot loop.
 ```

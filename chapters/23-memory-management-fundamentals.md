@@ -32,7 +32,7 @@ This chapter is the foundation for that discipline. It separates the two costs t
      │
      └─ IF the heap must grow OR the page is untouched:
           kernel involvement:  mmap/brk syscall (grow the mapping)       ~hundreds of ns
-          PAGE FAULT on first touch of each new page (Ch. 14):
+          PAGE FAULT on first touch of each new page (Ch. 15):
              minor fault:  map a zero page / existing page        ~hundreds of ns - ~1 µs
              major fault:  bring page from disk/swap              ~ms  (catastrophic; avoid entirely)
 ```

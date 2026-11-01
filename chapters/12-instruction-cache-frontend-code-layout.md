@@ -29,7 +29,7 @@ The front-end is a small pipeline of its own, sitting in front of the rename sta
 ```
    ┌────────────┐   ┌─────────┐   ┌──────────────┐   ┌───────────────┐
    │  L1i cache │──►│ predict │──►│   decode     │──►│   µop queue   │──► rename/back-end
-   │  (~32 KB)  │   │ (BPU →  │   │ (x86 bytes → │   │  (IDQ) feeds  │     (Ch. 10)
+   │  (~32 KB)  │   │ (BPU →  │   │ (x86 bytes → │   │  (IDQ) feeds  │     (Ch. 11)
    │  + I-TLB   │   │  next   │   │  µops, ~4-5  │   │  the back-end │
    │            │   │  fetch) │   │  wide)       │   │               │
    └────────────┘   └─────────┘   └──────┬───────┘   └───────────────┘

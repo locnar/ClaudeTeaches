@@ -220,7 +220,7 @@ int main() {
     std::uint32_t x = 1;
     for (int i = 0; i < WARMUP; ++i) x = operation_under_test(x);  // warm, untimed
 
-    using clk = std::chrono::steady_clock;  // see Ch. 16 on clock choice
+    using clk = std::chrono::steady_clock;  // see Ch. 17 on clock choice
     for (int i = 0; i < MEASURE; ++i) {
         auto t0 = clk::now();
         x = operation_under_test(x);               // dependent chain: not elided

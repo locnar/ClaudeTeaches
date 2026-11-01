@@ -22,12 +22,12 @@ The methods are a coherent set, all variations on "exercise the hot path during 
 
 ```
    resource                  warm (hot path running)        cold (after idle gap)         re-warm cost
-   L1/L2/L3 data (Ch.6)      working set resident           evicted by other code         hundreds of misses
-   L1i / µop cache (Ch.11)   hot code resident              evicted                       front-end stalls
-   TLB (Ch.14)               translations cached            flushed/evicted               page-walk storm
-   branch predictors (Ch.12) patterns learned               forgotten/polluted            mispredicts
+   L1/L2/L3 data (Ch.7)      working set resident           evicted by other code         hundreds of misses
+   L1i / µop cache (Ch.12)   hot code resident              evicted                       front-end stalls
+   TLB (Ch.15)               translations cached            flushed/evicted               page-walk storm
+   branch predictors (Ch.13) patterns learned               forgotten/polluted            mispredicts
    prefetcher state          stream trained                 reset                         no prefetch first pass
-   TCP cwnd / slow-start     window grown                   shrunk after idle (Ch.47)     slow first send
+   TCP cwnd / slow-start     window grown                   shrunk after idle (Ch.51)     slow first send
    NIC RX / driver state     primed                         idle/cold                     first-packet latency
 ```
 
@@ -102,7 +102,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), i
 
 ```
    WARM (tight loop):   p50 ~3,000 cycles   (~1.0 µs)   everything resident — the number you benchmarked
-   COLD (after gap):    p50 ~18,000 cycles  (~6.2 µs)   ~6x SLOWER — cache/TLB/predictor cold (§43.2)
+   COLD (after gap):    p50 ~18,000 cycles  (~6.2 µs)   ~6x SLOWER — cache/TLB/predictor cold (§46.2)
 
    with SHADOW TRAFFIC during the gap (run process() on dummy msgs):
    "cold" path:         p50 ~3,200 cycles   (~1.1 µs)   ~warm again — shadow traffic kept it resident

@@ -21,16 +21,16 @@ This is "zero-overhead" logging: not *zero* cost (capturing the event costs *som
 The core idea is **separate capture from formatting**, in time and across threads:
 
 ```
-   HOT PATH (isolated core, Ch.40)                  BACKGROUND (housekeeping core)
+   HOT PATH (isolated core, Ch.42)                  BACKGROUND (housekeeping core)
    ───────────────────────────────                  ─────────────────────────────
    log(id, price, qty):                             consumer loop:
-     • read TSC (Ch.16)         ~cheap                • drain ring buffer (batched, Ch.36)
+     • read TSC (Ch.17)         ~cheap                • drain ring buffer (batched, Ch.37)
      • copy raw bytes to ring   ~few ns               • FORMAT now (integers→text, etc.)
-     • bump producer sequence                         • write to disk/socket (Ch.44/45)
+     • bump producer sequence                         • write to disk/socket (Ch.47/48)
      └─ return. NO format, NO alloc,                  └─ all expensive work lives HERE,
         NO lock, NO syscall.                             where latency is free.
             │                                                      ▲
-            └──────────────  lock-free SPSC ring (Ch.33)  ─────────┘
+            └──────────────  lock-free SPSC ring (Ch.34)  ─────────┘
 ```
 
 Two design decisions define a zero-overhead logger:
@@ -98,7 +98,7 @@ The whole claim is "the hot-path `LOG` compiles to little more than a ring-buffe
    ; store the TSC                                            rdtscp / mov [rbx+8], rax
    ; store the raw args (id, price) — a few moves            mov   [rbx+16], rdi
    ;                                                          mov   [rbx+24], rsi
-   ; publish: bump the producer sequence (one release store) mov   [head], rcx   ; (release, Ch.29)
+   ; publish: bump the producer sequence (one release store) mov   [head], rcx   ; (release, Ch.30)
 ```
 
 No call to a formatting routine, no `std::string` constructor, no `malloc`, no `write`. A handful of stores and a sequence update — exactly the Ch. 34 ring-buffer producer, plus a few argument stores. What to confirm in the codegen:
