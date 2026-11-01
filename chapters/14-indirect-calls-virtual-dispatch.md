@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile with `perf stat -e cycles,instructions,branches,branch-misses, br_misp_retired.indirect`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; *relative* costs are the point):
+Profile with `perf stat -e cycles,instructions,branches,branch-misses,br_misp_retired.indirect`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; *relative* costs are the point):
 
 ```
                           crtp/static   mono virtual   std::function   mega virtual
@@ -277,7 +277,7 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 
 **Exercises**
 
-1. **Measure the dispatch ladder.** Build `dispatch.cpp`, run `crtp`/`mono`/`func`/`mega` pinned/turbo-off with `perf stat -e cycles,instructions,branches,branch-misses, br_misp_retired.indirect`. Confirm: CRTP fastest (inlined), mega worst (high indirect mispredicts). What's the IPC of each? Which top-down bucket (Ch. 2) is `mega`?
+1. **Measure the dispatch ladder.** Build `dispatch.cpp`, run `crtp`/`mono`/`func`/`mega` pinned/turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,br_misp_retired.indirect`. Confirm: CRTP fastest (inlined), mega worst (high indirect mispredicts). What's the IPC of each? Which top-down bucket (Ch. 2) is `mega`?
 2. **Make the megamorphic site monomorphic.** Take the `mega` case and **sort** the work by type so each handler runs in a long contiguous run. Re-measure `br_misp_retired.indirect` and ns/call. How close to `mono` does it get, and why (Ch. 13.2.1)?
 3. **`final` and the asm.** Mark the handler classes/methods `final` and call through a *concrete* type. Disassemble (Ch. 4): did the call devirtualize and inline? Now call through `IH*` — does `final` still help? Explain (§14.4.1, §14.5).
 4. **`variant` vs virtual.** Reimplement the closed 4-type set as `std::variant` + `std::visit` in a contiguous `vector<Event>`. Compare ns/call *and* cache behavior (`L1-dcache-load-misses`) against `vector<unique_ptr<IH>>`. Where does the win come from — dispatch, or layout (Ch. 8)?

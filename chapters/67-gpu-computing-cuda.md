@@ -56,8 +56,9 @@ The model: **a GPU runs thousands of threads (in warps of 32, SIMT/SIMD) across 
 The decisive measurement — the one the classic mistake skips: **end-to-end time (transfer + launch + kernel + transfer) vs kernel-only**, across problem sizes. The kernel-only number flatters the GPU; the end-to-end number tells the truth about whether to offload.
 
 ```cpp
-// gpu_e2e.cpp (CUDA) — measure kernel-only vs end-to-end (with transfer) for a vector op.
-// Build: nvcc -O3 gpu_e2e.cpp -o gpu_e2e
+// gpu_e2e.cu (CUDA) — measure kernel-only vs end-to-end (with transfer) for a vector op.
+// Build: nvcc -std=c++20 -O3 -arch=sm_80 gpu_e2e.cu -o gpu_e2e   (CUDA 12.x; a .cpp input would be
+//        treated as host-only C++ -- keep the .cu extension or pass -x cu)
 __global__ void saxpy(float* y, const float* x, float a, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) y[i] = a * x[i] + y[i];           // data-parallel: one thread per element

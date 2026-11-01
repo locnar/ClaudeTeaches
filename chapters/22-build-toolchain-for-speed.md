@@ -106,7 +106,7 @@ The discipline: **don't assume a flag helped — measure each tier on *your* cod
 **Link-Time Optimization** defers optimization to link time so the compiler sees the *whole program*, removing the per-translation-unit walls (§22.2).
 
 - **What it unlocks:** cross-TU **inlining** (a hot accessor defined in `a.cpp` inlined into `b.cpp`), cross-TU **devirtualization** (Ch. 14 — proving a call monomorphic across the whole program), cross-TU constant propagation and dead-code elimination, and better whole-program code layout. For a codebase split across many files (every real system), LTO recovers the optimizations that file boundaries otherwise block — the §22.3 dispatch-loop win.
-- **Flavors:** **full LTO** (`-flto`) optimizes the entire program together — best results, slowest/most-memory-hungry link. **ThinLTO** (`-flto=thin`, Clang/GCC) does scalable, parallel, mostly-as-good LTO with far faster links — the practical default for large codebases (keeps the iterate loop, Ch. 3, tolerable). Use ThinLTO unless you've measured full LTO meaningfully better.
+- **Flavors:** **full LTO** (`-flto`) optimizes the entire program together — best results, slowest/most-memory-hungry link. **ThinLTO** (`-flto=thin`, **Clang/LLD only** — GCC rejects the flag) does scalable, parallel, mostly-as-good LTO with far faster links — the practical default for large codebases (keeps the iterate loop, Ch. 3, tolerable). GCC's scalable equivalent is its partitioned WHOPR mode, `-flto=auto` (or `-flto=N`), tuned with `-flto-partition=`. Use ThinLTO/WHOPR unless you've measured full LTO meaningfully better.
 - **Costs:** longer link times and more memory; build all objects *and* the final link with the matching `-flto` flags (and a compatible linker plugin); debugging is a little harder. Worth it for the production binary; you may keep a non-LTO config for fast dev builds.
 - **Pairs with `-fno-semantic-interposition` and visibility.** Hidden visibility (`-fvisibility=hidden`) and `-fno-semantic-interposition` let the compiler assume functions aren't replaced at load time, enabling more inlining/devirtualization (especially in shared libraries) — natural companions to LTO for a self-contained trading binary.
 
@@ -138,7 +138,7 @@ The highest tier: replace the compiler's *guesses* about hot/cold and branch dir
 1. **Build the matrix.** Take a hot TU with a numeric kernel and a dispatch loop; run `build_matrix.sh` across `-O0/-O2/-O3/-O3 -march=native/-O3 -march=native -flto`. Tabulate ns/op *and* `.text` size. Where is the giant step? Where does `-O3` help vs not? Where does `-march`/LTO pay (§22.3)?
 2. **Confirm the ISA.** Disassemble (Ch. 4) the numeric kernel at `-O3` vs `-O3 -march=native`. Does AVX-512 (`zmm`)/FMA actually appear with `native`? Use `-Rpass=loop-vectorize`/`-fopt-info-vec`. If it *didn't* vectorize, why (aliasing — Ch. 21)?
 3. **`-march=native` portability.** Build `-march=native` on the newest CPU you have and run on an older one (or use `-march=icelake-server` then run on Haswell). Reproduce the SIGILL; then fix it with an explicit deployment `-march`. 
-4. **LTO across TUs.** Split a hot accessor and its caller into two `.cpp` files. Confirm (asm) the call is *not* inlined without LTO and *is* with `-flto`/`-flto=thin`. Measure the difference and the link-time cost (§22.4.2).
+4. **LTO across TUs.** Split a hot accessor and its caller into two `.cpp` files. Confirm (asm) the call is *not* inlined without LTO and *is* with `-flto` (Clang: `-flto=thin`). Measure the difference and the link-time cost (§22.4.2).
 5. **PGO end-to-end.** Instrument (`-fprofile-generate`) a dispatch-heavy program, run a representative message replay, rebuild (`-fprofile-use`). Compare ns/op, `.text` layout (`readelf -S`/hot-section placement — Ch. 12), and `br_misp_retired.indirect` (Ch. 14) vs the non-PGO build. Then try a *bad* (idle-traffic) profile — does it regress?
 
 **Checklist — build toolchain**
@@ -146,7 +146,7 @@ The highest tier: replace the compiler's *guesses* about hot/cold and branch dir
 - [ ] Production builds use at least **`-O2`** (never `-O0`); `-O3` is applied where **measured** to help (often numeric kernels) and *not* where it bloats a front-end-bound path (Ch. 12).
 - [ ] `-march`/`-mtune` target the **exact deployment (colo) uarch** for reproducible builds — **not `-march=native`** unless build and run hardware are identical (else SIGILL — §22.5).
 - [ ] I **verified the intended transform in the asm** (Ch. 4): vectorization actually emitted (`zmm`/FMA), the inline/devirt actually happened — flags aren't trusted by name.
-- [ ] **LTO** (ThinLTO by default) is on for the production binary so inlining/devirtualization (Ch. 14) go cross-TU; objects and link use matching flags.
+- [ ] **LTO** (ThinLTO on Clang, `-flto=auto` on GCC, by default) is on for the production binary so inlining/devirtualization (Ch. 14) go cross-TU; objects and link use matching flags.
 - [ ] **PGO** (or AutoFDO) and **BOLT** are applied to the large branchy binary with a **representative captured profile** (Ch. 75), in the order `-O3 -march → LTO → PGO → BOLT`.
 - [ ] **No `-Ofast`/`-ffast-math`** on determinism- or precision-critical financial math (Ch. 27); FP relaxations are opted into specifically and documented.
 - [ ] Profiled builds keep **frame pointers** (or use LBR/DWARF) so `perf` (Ch. 2) call graphs are reliable.
@@ -154,7 +154,7 @@ The highest tier: replace the compiler's *guesses* about hot/cold and branch dir
 
 ## 22.7 References
 
-- GCC and Clang documentation — the optimization-level (`-O*`), `-march`/`-mtune`, inlining, LTO (`-flto`/`-flto=thin`), PGO (`-fprofile-generate`/`-fprofile-use`, `-fauto-profile`), and FP (`-ffast-math` and friends) flag references; the authoritative basis for this chapter and **Appendix D**.
+- GCC and Clang documentation — the optimization-level (`-O*`), `-march`/`-mtune`, inlining, LTO (`-flto`/`-flto=auto`; Clang `-flto=thin`), PGO (`-fprofile-generate`/`-fprofile-use`, `-fauto-profile`), and FP (`-ffast-math` and friends) flag references; the authoritative basis for this chapter and **Appendix D**.
 - M. Panchenko et al., *"BOLT: A Practical Binary Optimizer for Data Centers and Beyond"* — post-link layout optimization and how it stacks on PGO/LTO (§22.4.3).
 - D. Chen et al., *"AutoFDO: Automatic Feedback-Directed Optimization for Warehouse-Scale Applications"* — sample-based PGO from production profiles (§22.4.3).
 - A. Fog, *Optimizing software in C++* and *The microarchitecture of Intel/AMD CPUs* — the effect of `-march`/`-mtune` and instruction selection on real microarchitectures (§22.4.1).

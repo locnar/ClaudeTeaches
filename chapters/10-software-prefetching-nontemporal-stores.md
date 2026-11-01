@@ -88,6 +88,7 @@ Software prefetch lives or dies by the distance, so the essential experiment is 
 // prefetch_sweep.cpp — find the prefetch distance that best hides miss latency.
 // Build: g++ -O2 -std=c++20 -march=native prefetch_sweep.cpp -o prefetch_sweep
 // Run pinned, turbo off (Ch.3,6): taskset -c 2 ./prefetch_sweep
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -183,11 +184,12 @@ __builtin_prefetch(p, 1, 1);   // write intent
 
 The thing to *check*: that locality `0` actually became `prefetchnta` (not `prefetcht0`) when you wanted touch-once semantics, and that a write-intent prefetch became `prefetchw` (it requires the `PRFCHW` ISA bit — without the right `-march`/`-mprfchw`, the compiler may silently emit a plain `prefetcht0`, costing you the read-for-ownership saving). The hint you wrote and the instruction you got are not always the same — confirm it.
 
-**Non-temporal stores → `movnt*`** (verified):
+**Non-temporal stores → `movnt*`** (verified; GCC 13 and Clang 17, `-O2 -march=x86-64-v3`). `__builtin_nontemporal_store` is a **Clang-only** builtin — GCC has no equivalent, so the portable spelling on the book's default toolchain is the `<immintrin.h>` streaming intrinsics, which both compilers accept:
 
 ```cpp
-__builtin_nontemporal_store(v, p);            // scalar long long
-__builtin_nontemporal_store(vec256, vptr);    // 256-bit vector
+#include <immintrin.h>
+_mm_stream_si64(p, v);                        // scalar long long  (Clang only: __builtin_nontemporal_store(v, p))
+_mm256_stream_ps(fptr, vec256);               // 256-bit float vector (integer data: _mm256_stream_si256)
 ```
 ```asm
         movnti     qword ptr [rdi], rsi       ; scalar non-temporal store
@@ -218,7 +220,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 1. **Find your sweet spot.** Build `prefetch_sweep.cpp`, run it pinned/turbo-off, and plot ns/elem vs `PD`. Where's the minimum on your CPU? How much faster than `PD=0`? Confirm with `perf stat -e cycle_activity.stalls_mem_any,L1-dcache-load-misses` that the misses stayed but the stalls dropped (you overlapped, not avoided).
 2. **Hardware already wins.** Change `index` to the identity (sequential) order and re-run the sweep. Does *any* `PD` beat `PD=0` now? Explain why (the hardware prefetcher handles sequential — §10.6).
 3. **Locality matters.** In the gather, change the hint from `0` (NTA) to `3` (T0) and re-measure on a working set that's reused across multiple passes vs touched once. When does T0 beat NTA, and vice versa (§10.2.1)?
-4. **See the streaming store.** Write a loop that copies a large `long long` array using `__builtin_nontemporal_store` + `_mm_sfence()`. Confirm `movnti`/`vmovnt*` in the asm (§10.5). Then measure the *hot working set's* L2 miss rate with and without streaming (Ch. 2) — did streaming protect the cache?
+4. **See the streaming store.** Write a loop that copies a large `long long` array using `_mm_stream_si64` (`<immintrin.h>`; on Clang, `__builtin_nontemporal_store` also works) + `_mm_sfence()`. Confirm `movnti`/`vmovnt*` in the asm (§10.5). Then measure the *hot working set's* L2 miss rate with and without streaming (Ch. 2) — did streaming protect the cache?
 5. **Break it.** Remove the `sfence` from a streaming producer feeding another thread; build a stress test (Ch. 40) that reads the buffer. Can you observe a torn/stale read? (Demonstrate the §10.6 correctness hazard — then fix it.)
 
 **Checklist — software prefetch & non-temporal stores**
@@ -237,7 +239,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 
 - Intel, *64 and IA-32 Architectures Optimization Reference Manual* — software prefetch guidance, `prefetcht0/1/2/nta`, `prefetchw`, non-temporal stores, write-combining, and the fencing requirements (the authoritative source for this chapter); AMD's optimization guide for AMD parts.
 - U. Drepper, *"What Every Programmer Should Know About Memory,"* §7 — software prefetching, prefetch distance, and non-temporal access, with measurements.
-- Intel *Intrinsics Guide* and GCC/Clang docs for `__builtin_prefetch`, `__builtin_nontemporal_store`, `_mm_prefetch`, `_mm_stream_*`, and `_mm_sfence`.
+- Intel *Intrinsics Guide* and GCC/Clang docs for `__builtin_prefetch`, `__builtin_nontemporal_store` (Clang only), `_mm_prefetch`, `_mm_stream_*`, and `_mm_sfence`.
 - A. Fog, *The Microarchitecture of Intel, AMD and VIA CPUs* — line-fill-buffer counts, MLP limits, and prefetch behavior per microarchitecture (the LFB-pressure caveat of §10.2.1).
 - Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* — memory-level parallelism and latency-hiding, the theory behind why prefetch works (Ch. 11).
 

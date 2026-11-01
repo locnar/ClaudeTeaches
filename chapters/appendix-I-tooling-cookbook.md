@@ -30,11 +30,8 @@ The everyday profiling loop (Ch. 2).
 Attributing stalls to a microarchitectural cause (Ch. 2, 11, 12).
 
 ```
-   perf stat -e cycles,instructions,\
-   cache-references,cache-misses,\
-   branches,branch-misses ./app                 # the classic six (Ch. 2, 13)
-   perf stat -e L1-dcache-load-misses,LLC-load-misses,\
-   dTLB-load-misses,iTLB-load-misses ./app      # cache/TLB breakdown (Ch. 7, 15)
+   perf stat -e cycles,instructions,cache-references,cache-misses,branches,branch-misses ./app   # the classic six (Ch. 2, 13)
+   perf stat -e L1-dcache-load-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses ./app   # cache/TLB breakdown (Ch. 7, 15)
    perf stat --topdown ./app                    # top-down: retiring / bad-spec / front-end / back-end
    perf stat --td-level 2 ./app                 # drill one level deeper (needs recent perf + CPU)
    toplev.py -l3 --no-desc ./app                # pmu-tools top-down, level 3 (Andi Kleen's toplev)
@@ -101,7 +98,7 @@ Discovering the machine and placing threads on it (Ch. 16, 42, 43; Appendix C).
    chrt -f 80 ./app                              # SCHED_FIFO priority 80 (Ch. 45)
    numactl --cpunodebind=0 --membind=0 ./app     # bind cores AND memory to node 0 (Ch. 16)
    cpupower frequency-info                        # governor + current/available frequencies (Ch. 6)
-   grep -E 'cpu[0-9]' /proc/interrupts           # where IRQs are landing (Ch. 42)
+   grep -E 'CPU|<if>' /proc/interrupts           # header + the NIC's IRQ rows: per-CPU counts show where IRQs land (Ch. 42)
 ```
 
 **Interpreting:** `lstopo` is the map you tune against (Ch. 43) — it shows which logical CPUs are SMT siblings and which cores share an L2/L3, so you can leave siblings idle (Ch. 43) and keep a thread and its data on one NUMA node (Ch. 16). These are the runtime counterparts to the boot-time isolation in Appendix C.
@@ -147,9 +144,10 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
 
 ```
    objdump -d -M intel --no-show-raw-insn ./app          # disassemble (Intel syntax; Ch. 4)
-   objdump -drwС ./app | c++filt                          # demangled disassembly
+   objdump -drwC ./app | c++filt                          # demangled disassembly
    g++ -O2 -S -masm=intel -o - x.cpp | c++filt            # asm straight from source (Godbolt-at-home; Ch. 4)
-   nm --defined-only -C ./app | wc -l                     # exported symbol count (visibility hygiene; App D.4)
+   nm -D --defined-only -C ./app | wc -l                  # exported (dynamic) symbol count (visibility hygiene; App D.4)
+   g++ ... -Wl,--emit-relocs -o app                       # BOLT needs relocations kept to reorder functions (App D.6)
    perf record -e cycles:u -j any,u ./app                 # LBR data for BOLT
    perf2bolt -p perf.data -o app.fdata ./app              # convert perf profile for BOLT (Ch. 22)
    llvm-bolt ./app -o ./app.bolt -data=app.fdata \

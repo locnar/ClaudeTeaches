@@ -52,7 +52,7 @@ Codegen-shaping flags from Ch. 20–22:
 Control inlining and code placement (Ch. 12 front-end, Ch. 22):
 
 - **Inlining controls** — `-finline-limit=N` (GCC, raise the inlining threshold), `__attribute__((always_inline))`/`[[gnu::always_inline]]` and `noinline` for per-function control (Ch. 22). **Two-edged** (Ch. 12): more inlining removes call overhead and enables cross-call optimization, but **bloats code** and can thrash the I-cache/µop cache (Ch. 12) — a front-end-bound regression. Inline the *hot, small, hot-path* functions; *don't* force-inline large or cold ones. Measure I-cache/front-end counters (Ch. 2, 12), not just "did it inline."
-- **`-freorder-blocks-and-partition`** (Ch. 12, 22) — split each function into **hot and cold parts** and place the cold parts (error paths, unlikely branches) elsewhere, so the hot path is contiguous in the I-cache (Ch. 12). **Worthwhile** for hot-path code; pairs with `[[likely]]`/`[[unlikely]]` and `__builtin_expect` (Ch. 12–13) telling the compiler which paths are cold.
+- **`-freorder-blocks-and-partition`** (Ch. 12, 22) — split each function into **hot and cold parts** and place the cold parts (error paths, unlikely branches) in `.text.unlikely`, so the hot path is contiguous in the I-cache (Ch. 12). **GCC only, and already on at `-O2`/`-O3` on x86** — nothing to add, just don't pass `-fno-reorder-blocks-and-partition`; Clang does not accept the flag (its analogue is `-fsplit-machine-functions`, which needs a profile). Without PGO it splits only what you *mark* cold, so pair it with `[[likely]]`/`[[unlikely]]`, `[[gnu::cold]]` and `__builtin_expect` (Ch. 12–13). If you BOLT the binary (D.6), note that BOLT's own instructions ask GCC users to build with `-fno-reorder-blocks-and-partition` and let BOLT do the splitting.
 - **`-falign-functions=N`/`-falign-loops=N`/`-falign-labels`** (Ch. 12) — align hot functions/loops to cache-line/16-byte boundaries so they don't straddle lines or fetch boundaries (Ch. 12 front-end). The defaults are usually fine; tune `-falign-loops` for a measured hot loop that's sensitive to fetch alignment (a *measure-it* micro-knob, Ch. 12).
 - **`-fno-reorder-blocks`/`-fno-reorder-functions`** — rarely wanted; the reordering *helps* (let PGO/BOLT do it better, D.6).
 - **Section placement** — `__attribute__((section("...")))` / `[[gnu::hot]]`/`[[gnu::cold]]` to group hot code (Ch. 12). `[[gnu::hot]]` on hot functions and `[[gnu::cold]]` on error handlers guides placement and inlining.
@@ -61,9 +61,9 @@ Control inlining and code placement (Ch. 12 front-end, Ch. 22):
 
 The three highest-leverage *whole-program* optimizations (Ch. 22) — applied to the build as a whole, not per-flag-per-TU:
 
-- **LTO (Link-Time Optimization)** — `-flto` (and `-flto=auto`/`=N` for parallelism); link with the same flag and a plugin-aware linker. **Optimizes across translation-unit boundaries** (Ch. 22): inlining, devirtualization (Ch. 14), and constant propagation that stop at the `.o` boundary in a normal build now happen whole-program. **Strongly recommended** for hot-path builds — often a real win, especially for devirtualization (Ch. 14) and cross-module inlining. Use **ThinLTO** (`-flto=thin`, Clang/modern GCC) for much faster link times at near-full-LTO quality. Cost: longer link/build, occasionally exposes latent UB (Ch. 21 — LTO sees more, optimizes harder).
+- **LTO (Link-Time Optimization)** — `-flto` (and `-flto=auto`/`=N` for parallelism); link with the same flag and a plugin-aware linker. **Optimizes across translation-unit boundaries** (Ch. 22): inlining, devirtualization (Ch. 14), and constant propagation that stop at the `.o` boundary in a normal build now happen whole-program. **Strongly recommended** for hot-path builds — often a real win, especially for devirtualization (Ch. 14) and cross-module inlining. Use **ThinLTO** (`-flto=thin`, **Clang/LLD only** — GCC rejects it) for much faster link times at near-full-LTO quality; GCC has no ThinLTO — its scalable equivalent is partitioned WHOPR LTO (`-flto=auto`/`-flto=N`, `-flto-partition=balanced`). Cost: longer link/build, occasionally exposes latent UB (Ch. 21 — LTO sees more, optimizes harder).
 - **PGO (Profile-Guided Optimization)** — two-phase (Ch. 22): build instrumented (`-fprofile-generate`), run on **representative** workload (Ch. 3 — a captured/replayed session, Ch. 75, is ideal) to collect profiles, rebuild with `-fprofile-use`. The compiler then *knows* which branches are taken (Ch. 13), which functions are hot (Ch. 12), what to inline and how to lay out code — driving the D.5 decisions with *data* instead of heuristics. **High-value** for branchy hot paths; the catch (Ch. 22) is the profile must *match production* (a backtest-trained profile that mis-predicts the open's branches can mis-optimize — feed it captured open data, Ch. 75).
-- **BOLT** (Binary Optimization and Layout Tool) — a **post-link** optimizer (Ch. 22) that re-lays-out the *final binary* using a `perf` profile (Ch. 2) — reordering basic blocks and functions for I-cache/I-TLB locality (Ch. 12) better than the compiler can pre-link. Applied *after* LTO+PGO for an extra front-end win on large hot paths. Profile it on production-like load (Ch. 76). The LTO→PGO→BOLT stack is the Ch. 22 endgame for squeezing front-end/layout latency.
+- **BOLT** (Binary Optimization and Layout Tool) — a **post-link** optimizer (Ch. 22) that re-lays-out the *final binary* using a `perf` profile (Ch. 2) — reordering basic blocks and functions for I-cache/I-TLB locality (Ch. 12) better than the compiler can pre-link. Applied *after* LTO+PGO for an extra front-end win on large hot paths. Two prerequisites: link with **`-Wl,--emit-relocs`** (or `-q`) and keep the binary unstripped, or BOLT falls back to a mode that cannot reorder functions; and feed it **LBR** samples — `perf record -e cycles:u -j any,u -- ./app`, `perf2bolt -p perf.data -o perf.fdata ./app`, then `llvm-bolt ./app -o app.bolt -data=perf.fdata -reorder-blocks=ext-tsp -reorder-functions=hfsort` (Appendix I.9). Profile it on production-like load (Ch. 76). The LTO→PGO→BOLT stack is the Ch. 22 endgame for squeezing front-end/layout latency.
 
 ## D.7 Diagnostics (`-Wpadded`, `-Wfloat-equal`, `-fopt-info`) and sanitizers
 
@@ -78,8 +78,8 @@ Flags that *find problems* rather than change codegen — build-time and test-ti
   - **`-fsanitize=undefined`** (UBSan) — the UB-as-vulnerability catcher (Ch. 72.2.2); run in CI, fix every finding.
   - **`-fsanitize=thread`** (TSan) — data races (Ch. 30–33, 40); essential for lock-free code, and the tool that catches the weak-memory bugs ARM would expose (Appendix A.1).
   - **`-fsanitize=memory`** (MSan, Clang) — uninitialized reads.
-  - **`-fsanitize=cfi`** (Ch. 72.4.4, needs LTO) — control-flow-integrity *hardening* (production-capable, measure its cost — Ch. 72.3); distinct from the test-only sanitizers above.
-  - Pair sanitizer builds with `-fno-omit-frame-pointer -g` (D.4) for usable reports, and with **fuzzing** (`-fsanitize=fuzzer`, libFuzzer — Ch. 72.4.8) on the wire parsers.
+  - **`-fsanitize=cfi`** (**Clang only**; Ch. 72.4.4, needs `-flto -fvisibility=hidden`) — control-flow-integrity *hardening* (production-capable, measure its cost — Ch. 72.3); GCC has no CFI sanitizer — its hardware-assisted analogue is `-fcf-protection=branch|return|full` (CET, Ch. 72.4.4); distinct from the test-only sanitizers above.
+  - Pair sanitizer builds with `-fno-omit-frame-pointer -g` (D.4) for usable reports, and with **fuzzing** (`-fsanitize=fuzzer`, **Clang only**/libFuzzer; with GCC use AFL++'s `afl-g++-fast` — Ch. 72.4.8) on the wire parsers.
 
 ## D.8 A representative hot-path build line
 
@@ -90,12 +90,12 @@ Pulling it together (GCC, single-socket Ice Lake target; adapt `-march`):
    g++ -std=c++23 -O2 -march=icelake-server -mtune=icelake-server \
        -fno-math-errno -fno-semantic-interposition -fvisibility=hidden \
        -fno-omit-frame-pointer \
-       -freorder-blocks-and-partition \
-       -flto=auto \
+       -flto=auto -Wl,--emit-relocs \
        -DNDEBUG ...
+   #   (-freorder-blocks-and-partition is already on at -O2 -- D.5; --emit-relocs is for the BOLT step)
    #   + explicit FTZ/DAZ at runtime (Ch.27), not -ffast-math
    #   + PGO: -fprofile-generate → run on captured session (Ch.75) → -fprofile-use
-   #   + BOLT post-link with a production perf profile (Ch.22)
+   #   + BOLT post-link with a production LBR perf profile (perf record -j any,u -> perf2bolt -> llvm-bolt; Ch.22, D.6)
    #   + per-kernel: [[gnu::hot]], targeted -O3 / always_inline where MEASURED to help
 
    # Test/CI build (NOT production):

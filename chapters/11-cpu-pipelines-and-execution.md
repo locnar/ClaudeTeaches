@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile each with `perf stat -e cycles,instructions,fp_arith_inst_retired.scalar_double, L1-dcache-load-misses,branch-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, FP add ~4-cycle latency, ~2/cycle throughput), `-O2 -march=native` (no fast-math), pinned, turbo off (illustrative; the *ratio* is the point):
+Profile each with `perf stat -e cycles,instructions,fp_arith_inst_retired.scalar_double,L1-dcache-load-misses,branch-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, FP add ~4-cycle latency, ~2/cycle throughput), `-O2 -march=native` (no fast-math), pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                               chains=1 (serial)      chains=4 (split)
