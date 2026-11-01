@@ -5,9 +5,9 @@
 **Method.**
 1. A scripted structural sweep over every file (headers, section numbering, teaser chain, every `Ch. N` / `§N.M` / `Appendix X` reference, README outline vs. real headings).
 2. An agent review: eight *book-wide* checks (cross-reference targets, chapter chain, reference-machine consistency, recurring latency numbers, duplication/placement, glossary & bibliography, Appendices C/D/H/I accuracy) plus a *two-lens per-chapter review* (technical-accuracy lens and editorial/conventions lens). The per-chapter pass completed for **Ch. 1–17** before the author asked for the review workflow to be wrapped up; **Ch. 18–76 received only the book-wide checks** and still need the per-chapter pass.
-3. Verification: the planned adversarial-verifier stage did not run. Instead, every quoted passage (538 of 541) was mechanically confirmed to exist in the named file, and the author of this report personally re-verified the headline items marked ✅ below (by reading the passage, by compiling/running the listing with GCC 13.3 / Clang 18, or by web lookup). Everything else is a reviewer finding of stated confidence, listed in full in [`2026-10-30-findings-full.md`](2026-10-30-findings-full.md).
+3. Verification: the planned adversarial-verifier stage did not run. Instead, every quoted passage (538 of 541) was mechanically confirmed to exist in the named file, and the author of this report personally re-verified the headline items marked ✅ below (by reading the passage, by compiling/running the listing with GCC 13.3 / Clang 18, or by web lookup). Everything else is a reviewer finding of stated confidence, listed in full in the three `2026-10-30-findings-*.md` files.
 
-**Totals (first pass).** 541 findings: 49 high, 213 medium, 279 low; the continuation run adds Ch. 18–76 (Ch. 47–56 so far: 250 more findings, 11 high) and an adversarial verdict on every finding — see the full table. The book-wide checks alone produced 212 of them, which is why most of the systemic issues below affect every Part, not just Ch. 1–17.
+**Totals (first pass).** 541 findings: 49 high, 213 medium, 279 low; the continuation run has so far added Ch. 18–46 (594 findings: 380 confirmed, 4 refuted, 198 lens duplicates, 12 verifier-added) with an adversarial verdict on every finding, and Ch. 47–56 (250 findings, verification pending); Ch. 57–76 and the appendices are in progress. Across everything verified so far: 909 confirmed, 24 refuted, 481 duplicates. The book-wide checks alone produced 212 of them, which is why most of the systemic issues below affect every Part, not just Ch. 1–17.
 
 ---
 
@@ -33,6 +33,11 @@
 | 15 | **Ch. 53's decoder benchmark neither builds nor measures.** The build line says `-std=c++20` but the listing uses `std::byteswap` (C++23): GCC 13 fails with "'byteswap' is not a member of 'std'". Built with `-std=c++23 -O2`, the binary-overlay loop is hoisted (one `movbe` + `imul rax,rax,5000000`, no loop) and the program prints `binary overlay: 0.0 ns/msg`, so the "~8–15 ns vs ~10× for FIX text" table cannot come from this code. The §53.5 "verified Clang output" shows `bswap` and the wrong argument registers; with `-march=x86-64-v3` Clang emits `movbe`. | `53:69, 53:117–132, 53:185` | ✅ compiled and run |
 | 16 | **`SO_BUSY_POLL` does not make `epoll_wait` busy-poll.** Ch. 47's headline technique pairs the socket option with an `epoll` loop, but the option only governs a blocking receive; epoll busy-polls only with `net.core.busy_poll` or the per-instance `EPIOCSPARAMS` ioctl (6.9+). | `47:119` | reviewer, kernel source; consistent with `socket(7)` |
 | 17 | **`IORING_OP_SEND_ZC` posts two CQEs**, not one: the result CQE carries `IORING_CQE_F_MORE` (buffer still owned by the kernel) and a later `IORING_CQE_F_NOTIF` CQE is the only signal the buffer may be reused. Ch. 49 describes "a CQE when the buffer is free", which leads readers into exactly the reuse bug the section warns about. | `49:74` | reviewer, uapi header |
+| 18 | **Three benchmark listings allocate a one-element ring.** `std::vector<T> buf_{CAP};` (Ch. 34 SPSC ring, Ch. 37 Disruptor, Ch. 40 TSan demo) selects the initializer-list constructor for integral `T`, so the ring has ONE element holding the value 1024/4096 and every push writes out of bounds. The verifier built them with ASan (heap-buffer-overflow on the first push); the Ch. 40 `-O2` build segfaults instead of printing "done" as the text claims. Every number in those three §N.3 tables comes from UB. | `34:64`, `37:69`, `40:50` | ✅ verifier compiled, ASan |
+| 19 | **Ch. 41's futex ping-pong has a lost-wakeup deadlock**: the `FUTEX_WAIT` expected value is re-read after the loop condition, so a store+wake landing between the two loads puts both threads to sleep. | `41:87/91` | ✅ verifier reproduced with a widened window |
+| 20 | **Ch. 43 asserts in ten places that an idle SMT sibling still halves the store buffer/ROB.** Intel SDM Vol. 3A §8.10.1: when a logical processor is halted, the partitioned resources are recombined for the active one. The chapter's HT-off-vs-idle-sibling comparison rests on the wrong mechanism. | `43:37, 50, 52, 100–105, 125, 142–165` | ✅ verifier, SDM |
+| 21 | **Ch. 44's CAT recipe contradicts itself and cannot run on the reference machine**: `L3:0=ff0ff` is a non-contiguous mask (forbidden on Intel, `sparse_masks=0`), and 20-bit masks (`fffff`, `00f00`) cannot be written on a 12-way Xeon Gold 6326 (`cbm_mask=fff`). | `44:73` | ✅ verifier, resctrl docs |
+| 22 | **A dozen §N.3 measurements in Ch. 18–46 collapse under the optimizer or measure the harness** (strcmp inside the timed loop; loop-invariant calls hoisted; counters folded to one `add`; `rng() \| 1` making the scan trivially zero; a runtime `memory_order` that GCC maps to `seq_cst`; `reserve()` instead of touching a 200 MB buffer). The verifier compiled each listing with the stated flags and showed the collapse in the asm or the output. See §6. | Ch. 20, 21, 23, 24, 28, 29, 30, 31, 33, 38, 42, 46 | ✅ verifier compiled/ran each |
 ---
 
 ## 2. Structural sweep (clean)
@@ -132,6 +137,19 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 | Ch. 29 §29.3 | downclock table "@ 3.5 GHz (full turbo)" under a "turbo off" header | self-contradictory environment | ✅ read |
 | Ch. 51 §51.3, Ch. 52 §52.3 | ~40 ms Nagle/delayed-ACK stall on a one-write ping-pong | no unacked data exists when the next small write happens, so Nagle never holds it; needs write-write-read | ✅ read, protocol semantics |
 | Ch. 53 §53.3 | binary overlay ~8–15 ns vs FIX text ~10× slower | the decode has a loop-invariant argument and no side effect; GCC 13 hoists it (`imul rax,rax,5000000`) and the program prints 0.0 ns/msg | ✅ compiled and run |
+| Ch. 20 §20.3 | error-code vs `expected` vs throw ~0.3 ns apart | `strcmp(mode,…)` sits inside the per-message loop: two PLT calls per message, biased by match order (verifier measured throw *winning*) | ✅ verifier compiled & ran |
+| Ch. 21 §21.3 | `__restrict__` ~5× faster | GCC/Clang `-O3` version the plain loop with a runtime overlap check and vectorize both; identical inner loops | ✅ verifier `-fopt-info-vec` |
+| Ch. 23 §23.3 | heap `new`+touch page-faults every iteration | 4 KiB chunks are re-carved from the resident top chunk; `minflt` identical to the reuse case | ✅ verifier ran under `getrusage` |
+| Ch. 24 §24.3 | heap vs pool allocation cost | timed region is a single `add`: `new`/`delete` elided (`-fallocation-dce`), pool pop/push dead-store-eliminated | ✅ verifier disassembled |
+| Ch. 28 §28.3 | `tzcnt` vs naive scan | `rng() \| 1` sets bit 0 in every word: both modes compute 0 and the scan loop never iterates | ✅ verifier ran (`acc=0`) |
+| Ch. 29 §29.3 | strict vs fast-math dot product | loop-invariant `dot()` is outer-loop-vectorized across `REPS`; strict build equals the vectorized ones | ✅ verifier compiled |
+| Ch. 30 §30.3 | relaxed/release/seq_cst store cost table | a runtime `memory_order` maps to `seq_cst` in GCC's builtins: one `xchg` store site, no plain `mov` | ✅ verifier disassembled |
+| Ch. 31 §31.3 | sharded-counter Mops/s | the sharded loop folds to a single store of `per` | ✅ verifier disassembled |
+| Ch. 33 §33.3 | padded vs unpadded counters | each thread body folds to one `addq $200000000` — no coherence traffic measured | ✅ verifier disassembled |
+| Ch. 34/37/40 §N.3 | SPSC ring, Disruptor, TSan demo | one-element ring (headline row 18) | ✅ ASan |
+| Ch. 38 §38.3 | "does HALO fire at -O2?" (GCC) | GCC has no coroutine frame elision at all (bugzilla 100579); Clang does | ✅ verifier ran both |
+| Ch. 42 §42.3 | pinned+isolated p99.9 ≈ 28 cycles | `samples.reserve(N)` never touches the 200 MB buffer; a first-touch fault every 1,024 samples dominates the tail | ✅ verifier ran |
+| Ch. 46 §46.3 | warming a scattered ~512 KB working set | the index formula repeats every 16 iterations: 16 lines in one L1 set, 16 pages | ✅ verifier enumerated |
 
 ---
 
@@ -178,7 +196,7 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 
 ## 9. What was *not* reviewed, and what remains
 
-- **Ch. 18–76 prose and code are receiving the per-chapter two-lens review in a continuation run** (the first pass was stopped after Ch. 17 at the author's request and resumed on request); Ch. 47–56 results are already folded into §§1, 5 and 6 above, the rest will follow in the findings table. The density of problems found in Ch. 1–17 (≈20 findings per chapter, 1–4 high) and the book-wide checks' hits in later chapters (Ch. 29, 41, 43–47, 51–57, 60, 62, 75–76) suggest the same density there; the §3 stale-reference list already covers them mechanically.
+- **Ch. 18–76 prose and code are receiving the per-chapter two-lens review in a continuation run** (the first pass was stopped after Ch. 17 at the author's request and resumed on request); Ch. 18–56 results are folded into §§1, 5 and 6 above; Ch. 57–76 and the appendices will follow in the findings tables. The density of problems found in Ch. 1–17 (≈20 findings per chapter, 1–4 high) and the book-wide checks' hits in later chapters (Ch. 29, 41, 43–47, 51–57, 60, 62, 75–76) suggest the same density there; the §3 stale-reference list already covers them mechanically.
 - Appendices A, B, J, K, L were covered only by the cross-reference and chain checks.
 - Benchmark numbers are "representative" by design (CLAUDE.md); this review did **not** flag the absence of real runs, only internal contradictions and physical impossibilities. Three of the flagged experiments (Ch. 10, 13 and the GCC flag claims) were reproduced on a GCC 13.3 box; the rest are reasoning or reviewer-compiled.
 
@@ -364,7 +382,7 @@ If the author wants the smallest set of additions that closes the gaps they name
 ## Files in this review
 
 - `review/2026-10-30-consistency-review-and-gap-analysis.md` — this report.
-- `review/2026-10-30-findings-full.md` — all 541 findings grouped by file, with quotes, problem statements and suggested fixes.
+- `review/2026-10-30-findings-part1-ch01-26.md`, `…-part2-ch27-52.md`, `…-part3-ch53-76-appendices-bookwide.md` — every finding grouped by file with the verifier's verdict (confirmed / refuted / duplicate / verifier-added), severity, quote, problem and suggested fix.
 - `review/2026-10-30-stale-crossrefs.md` — the mechanically detected stale cross-references (fenced: near-certain; prose: heuristic).
 - `review/2026-10-30-gap-verification.md` — the skeptical coverage pass over the 92 merged items: verdict, grep evidence, where the closest existing coverage is, refined placement and priority reasoning.
 - `review/2026-10-30-gap-proposals-raw.txt` — the 163 raw gap proposals from the fourteen lenses (title, placement, scope bullets, claimed existing coverage, grep evidence), keyed by the source tags used in §10.
