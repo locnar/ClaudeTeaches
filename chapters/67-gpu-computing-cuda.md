@@ -26,7 +26,7 @@ The discipline that makes GPU use *correct* — and the chapter's measurement th
      threads execute in WARPS of 32 (a warp = 32 threads running the SAME instruction in lockstep — SIMD!)
    each thread has an index → computes on its own data element (data-parallel)
 
-   host (CPU) ──PCIe(Ch.54)──► GPU: copy data → launch kernel → copy result back
+   host (CPU) ──PCIe(Ch.66)──► GPU: copy data → launch kernel → copy result back
 ```
 
 - **Threads, blocks, warps.** You launch a **grid** of thread **blocks**; each block runs on an SM; threads execute in **warps of 32** — a warp is 32 threads running the *same* instruction in lockstep (SIMT = SIMD with a thread abstraction — Ch. 29). Massive parallelism = many warps across many SMs.
@@ -43,10 +43,10 @@ The discipline that makes GPU use *correct* — and the chapter's measurement th
 **Execution flow and its overheads:**
 
 ```
-   1. cudaMemcpy host→device   (PCIe transfer — Ch.54, bandwidth-bound for big data)
+   1. cudaMemcpy host→device   (PCIe transfer — Ch.66, bandwidth-bound for big data)
    2. kernel<<<grid,block>>>(...)   (launch overhead ~µs + the actual compute)
    3. cudaMemcpy device→host   (PCIe transfer back)
-   → end-to-end = transfer + launch + compute + transfer  — NOT just the kernel (§55.3)
+   → end-to-end = transfer + launch + compute + transfer  — NOT just the kernel (§67.3)
 ```
 
 The model: **a GPU runs thousands of threads (in warps of 32, SIMT/SIMD) across many SMs — massive data-parallel throughput, hiding memory latency with occupancy. Memory is a hierarchy (global/shared/registers) with coalescing and divergence as the key perf levers (the GPU versions of cache layout — Ch. 8, and branches — Ch. 13). But it's a PCIe device (Ch. 66): every use costs a host↔device transfer + launch + transfer — so it's a *throughput* device for *big batch* work, measured end-to-end, and disqualified from the latency-bound order path by the PCIe round-trip.**
@@ -65,13 +65,13 @@ __global__ void saxpy(float* y, const float* x, float a, int n) {
 // host: cudaMemcpy h2d (TIME IT), launch kernel (TIME IT), cudaMemcpy d2h (TIME IT)
 //   end_to_end = h2d + launch + kernel + d2h     ← the real cost
 //   kernel_only = kernel                          ← the flattering, misleading number
-//   compare to a CPU SIMD version (Ch.28) for the same work.
+//   compare to a CPU SIMD version (Ch.29) for the same work.
 ```
 
 Representative results — a mid-range GPU over PCIe Gen4 x16, vector op (illustrative; the *gap* is the point):
 
 ```
-   problem size      CPU (SIMD, Ch.28)   GPU kernel-only   GPU end-to-end (w/ transfer)   verdict
+   problem size      CPU (SIMD, Ch.29)   GPU kernel-only   GPU end-to-end (w/ transfer)   verdict
    small (1K elems)  ~0.5 µs             ~2 µs (launch!)   ~10 µs (transfer + launch)     CPU wins (PCIe floor)
    medium (1M)       ~300 µs             ~20 µs            ~600 µs (transfer-bound)        ~tie / CPU (transfer)
    large (100M)      ~30 ms              ~2 ms             ~8 ms (transfer dominates)      GPU wins (amortized)

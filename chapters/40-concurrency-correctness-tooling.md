@@ -21,7 +21,7 @@ But sanitizers have a fundamental limit that defines the rest of the chapter: **
 The sanitizers are **runtime** tools (compile with `-fsanitize=...`, run the instrumented binary); each instruments different things and catches a different bug class. Knowing the division of labor is essential — they're complementary, not interchangeable.
 
 - **ThreadSanitizer (TSan, `-fsanitize=thread`)** — **data races and some deadlocks.** Instruments memory accesses and synchronization operations (atomics, locks, thread create/join) to build the **happens-before** relation (Ch. 30). It flags a **data race**: two accesses to the same memory, at least one a write, not ordered by a happens-before edge. Crucially, TSan reports a race *if the two accesses execute under the observed interleaving* — it understands the *synchronization*, so it catches races that didn't manifest as wrong values this run (it's not just "did the values clash," it's "is there a missing happens-before edge"). This is exactly the tool for missing acquire/release (Ch. 30), unsynchronized shared access (Ch. 31), and the subtle ordering bugs in lock-free code. **The single most important concurrency tool.** Cost: ~5-15× slowdown, ~5-10× memory — for testing, not production.
-- **AddressSanitizer (ASan, `-fsanitize=address`)** — **memory errors.** Use-after-free (the Ch. 36 reclamation bug, dangling coroutine handles — Ch. 38), heap/stack buffer overflows (Ch. 9, 72), use-after-return, double-free, leaks (with LSan). Instruments allocations with redzones and a shadow map. Catches the *memory-corruption* consequences of concurrency bugs (a freed lock-free node dereferenced). Cost: ~2× slowdown. **Run it alongside TSan** (separate builds — they're incompatible together) — TSan finds the race, ASan finds the UAF the race causes.
+- **AddressSanitizer (ASan, `-fsanitize=address`)** — **memory errors.** Use-after-free (the Ch. 36 reclamation bug, dangling coroutine handles — Ch. 38), heap/stack buffer overflows (Ch. 72), use-after-return, double-free, leaks (with LSan). Instruments allocations with redzones and a shadow map. Catches the *memory-corruption* consequences of concurrency bugs (a freed lock-free node dereferenced). Cost: ~2× slowdown. **Run it alongside TSan** (separate builds — they're incompatible together) — TSan finds the race, ASan finds the UAF the race causes.
 - **UndefinedBehaviorSanitizer (UBSan, `-fsanitize=undefined`)** — **undefined behavior.** Signed integer overflow (Ch. 27, 72 — price/qty math), strict-aliasing violations and misaligned access (Ch. 21), null/invalid pointer use, shifts past width (Ch. 28), invalid enum/bool values. Cheap (~little overhead); compatible with ASan. Catches the UB that miscompiles (Ch. 21) — relevant because aliasing/UB bugs interact viciously with concurrency.
 - **What none of them catch (the limit — §40.1, §40.5):**
   - **Bugs on un-executed paths/interleavings.** TSan only sees the interleaving the scheduler happened to produce *this run* — it doesn't explore *all* interleavings. A race reachable only under a rare interleaving you didn't hit goes unreported. (This is why you need stress testing — §40.4.1 — to *produce* the interleavings, and model checking — §40.4.3 — to *exhaust* them.)
@@ -81,7 +81,7 @@ int main() {
 Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative:
 
 ```
-   ./race          (plain, x86):     "done" — PASSES. x86-TSO hides the missing acquire/release (Ch. 29).
+   ./race          (plain, x86):     "done" — PASSES. x86-TSO hides the missing acquire/release (Ch. 30).
                                        runs millions of times, never visibly wrong. → false confidence.
 
    ./race_tsan     (TSan):           ==================
@@ -93,7 +93,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), i
 
    UAF variant     (ASan):           ==================
                                        ERROR: AddressSanitizer: heap-use-after-free
-                                         READ ... by lock-free reader, freed by reclaimer (Ch. 35)
+                                         READ ... by lock-free reader, freed by reclaimer (Ch. 36)
 ```
 
 Read it: the buggy ring **passes ordinary testing on x86** — the `relaxed` ordering is *wrong* (the consumer can read a slot before the producer's write is visible), but x86-TSO (Ch. 30) happens to enforce enough ordering that it never visibly fails, so a million test iterations give *false confidence*. **TSan flags the data race on the first run** — it reasons about the *missing happens-before edge* (the `head_` published relaxed, consumed relaxed → no synchronizes-with — Ch. 30), not about whether values actually clashed, so it catches the latent bug that would only *manifest* on ARM (Appendix A) or under a rare x86 interleaving. That's the entire value: **TSan converts a rare, architecture-dependent, silent ordering bug into a deterministic failure with both stack traces.** Fix it (release on the store, acquire on the load — Ch. 30, 34) and TSan goes quiet. The ASan line shows the complementary catch: a use-after-free from a reclamation bug (Ch. 36). The workflow this dictates: **build and run the concurrency tests under TSan (and ASan, and UBSan) routinely — they find what x86 testing structurally cannot.**

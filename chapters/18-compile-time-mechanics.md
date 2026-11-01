@@ -70,7 +70,7 @@ constexpr std::array<std::uint8_t, 256> build_parity() {
     std::array<std::uint8_t, 256> t{};
     for (int i = 0; i < 256; ++i) {              // C++20: loops allowed in constexpr
         int p = 0, v = i;
-        while (v) { p ^= 1; v &= v - 1; }        // popcount parity (Ch. 27)
+        while (v) { p ^= 1; v &= v - 1; }        // popcount parity (Ch. 28)
         t[i] = std::uint8_t(p);
     }
     return t;
@@ -109,7 +109,7 @@ RUNTIME (the hot-path lookup itself):
 BUILD-TIME / SIZE (the price of (b)):
    $ size ct_table
       text    data     bss        <- kParity's 256 bytes appear in .rodata (text/rodata), no init code
-   build time: a few ms more for the constexpr evaluation (negligible here; can balloon — §17.5)
+   build time: a few ms more for the constexpr evaluation (negligible here; can balloon — §18.5)
 ```
 
 The lessons:
@@ -141,14 +141,14 @@ The judgment call: move work to compile time when its inputs are genuinely known
 The highest-leverage compile-time technique for the hot path: **generate lookup tables at compile time** so the runtime is a single indexed load (Ch. 13.4.2) instead of computation or branching. C++20's expanded `constexpr` makes this clean — write the table-builder as a normal function and assign it to a `static constexpr` array:
 
 ```cpp
-// Generate at compile time; runtime is one load. (Ch. 12 lookup tables, Ch. 27 bit tables.)
+// Generate at compile time; runtime is one load. (Ch. 13 lookup tables, Ch. 28 bit tables.)
 static constexpr auto kDigitPairs = [] {                 // "00".."99" for fast integer formatting
     std::array<char, 200> t{};
     for (int i = 0; i < 100; ++i) { t[2*i] = char('0'+i/10); t[2*i+1] = char('0'+i%10); }
     return t;
 }();
 
-static constexpr auto kTickSize = [] {                   // price-band → tick size (Ch. 26)
+static constexpr auto kTickSize = [] {                   // price-band → tick size (Ch. 27)
     std::array<std::int64_t, kNumBands> t{};
     for (std::size_t b = 0; b < kNumBands; ++b) t[b] = tick_for_band(b);
     return t;

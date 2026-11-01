@@ -44,7 +44,7 @@ The mental error to avoid: assuming "SmartNIC" means "faster." A DPU is a *place
 A DPU has **two** boundaries, and confusing them is the root of most DPU latency mistakes:
 
 ```
-   wire  ◄──[boundary 1: Ethernet]──►  DPU  ◄──[boundary 2: PCIe, Ch.54]──►  host
+   wire  ◄──[boundary 1: Ethernet]──►  DPU  ◄──[boundary 2: PCIe, Ch.66]──►  host
 ```
 
 - **Boundary 1 (wire ↔ DPU):** Ethernet. The DPU sees packets here *first*, before the host. Work done at boundary 1 and *terminated there* (drop/redirect/reply inline) is the latency win — it never crosses boundary 2.
@@ -106,10 +106,10 @@ The master technique is the **partition** — deciding which work goes on the DP
 ```
    ON THE DPU (boundary-1 terminal — wins):
      • inline filter/drop/redirect (XDP-offload, P4)         — host never sees the dropped packets
-     • on-NIC RDMA, storage, capture (Ch.53, 63)             — terminal, zero host-core cost
-     • security/isolation, crypto (Ch.60)                    — hostile traffic dies on the NIC
-     • the order pipeline IN FABRIC (FPGA-DPU, Ch.57)        — deterministic ns, terminal
-     • housekeeping/telemetry/control (Ch.51)                — off the host's hot cores entirely
+     • on-NIC RDMA, storage, capture (Ch.63, 75)             — terminal, zero host-core cost
+     • security/isolation, crypto (Ch.72)                    — hostile traffic dies on the NIC
+     • the order pipeline IN FABRIC (FPGA-DPU, Ch.69)        — deterministic ns, terminal
+     • housekeeping/telemetry/control (Ch.61)                — off the host's hot cores entirely
 
    ON THE HOST (keep here):
      • complex/evolving strategy logic                       — too big/changeable for fabric, faster on x86

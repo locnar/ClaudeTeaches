@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 42 (core pinning — steering is its receive-side counterpart), Ch. 55 (NIC features — RSS, queues, filters), Ch. 56 (DDIO — steering to the right core keeps data L3-hot on the right L3), Ch. 44 (CAT — the isolated core the flow steers to), Ch. 47 (native I/O — the receive path), Ch. 16 (NUMA).
 >
-> **Leads into:** Ch. 64 (the fabric that delivers the flows). The receive-side deep-dive: getting the right packet to the right core with no cross-core handoff, and scaling receive across cores without scattering a feed.
+> **Leads into:** Ch. 60 (the fabric that delivers the flows). The receive-side deep-dive: getting the right packet to the right core with no cross-core handoff, and scaling receive across cores without scattering a feed.
 
 ---
 
@@ -23,8 +23,8 @@ Receiving a packet is a chain from wire to queue to core to cache, and each link
 ```
    wire -> NIC -> [which RX queue?] -> [which core polls it?] -> [which L3? (DDIO)] -> decode
                         │                      │                      │
-                     RSS (hash)          queue<->core map        NIC-local socket (Ch.15,66)
-                     or flow steering     (IRQ affinity /         + CAT ways (Ch.65)
+                     RSS (hash)          queue<->core map        NIC-local socket (Ch.16,66)
+                     or flow steering     (IRQ affinity /         + CAT ways (Ch.44)
                      (exact match)         poll assignment)
 ```
 

@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
     auto* a = static_cast<std::uint64_t*>(
         mmap(nullptr, BYTES, PROT_READ | PROT_WRITE, flags, -1, 0));
     if (a == MAP_FAILED) { std::perror("mmap"); return 1; }
-    std::memset(a, 1, BYTES);                                // pre-fault every page (Ch. 22, 25)
+    std::memset(a, 1, BYTES);                                // pre-fault every page (Ch. 23, 26)
 
     std::mt19937_64 rng(12345);
     std::vector<std::uint32_t> idx(PROBES);

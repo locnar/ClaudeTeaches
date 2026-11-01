@@ -2,7 +2,7 @@
 
 # Chapter 22 — Build Toolchain for Speed
 
-> **Prerequisites:** Ch. 4 (reading asm — the only way to confirm what a flag actually did), Ch. 12 (code layout / I-cache — the front-end effects LTO/PGO/BOLT optimize), Ch. 11 & 20 (vectorization and aliasing — what `-O3`/`-march` unlock), Ch. 3 (benchmarking — every flag claim is a measurement), Ch. 14 & 19 (devirtualization, `-fno-exceptions`/`-fno-rtti`).
+> **Prerequisites:** Ch. 4 (reading asm — the only way to confirm what a flag actually did), Ch. 12 (code layout / I-cache — the front-end effects LTO/PGO/BOLT optimize), Ch. 29 & 21 (vectorization and aliasing — what `-O3`/`-march` unlock), Ch. 3 (benchmarking — every flag claim is a measurement), Ch. 14 & 20 (devirtualization, `-fno-exceptions`/`-fno-rtti`).
 >
 > **Leads into:** Part IV (Memory Management) and beyond — every later chapter's code is built with these flags. Directly ties to **Appendix D** (the categorized flag reference) and **Appendix C** (system tuning). PGO/BOLT here is the production-scale version of the layout work in Ch. 12. Closes **Part III**.
 

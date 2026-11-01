@@ -42,11 +42,11 @@ Measure two things: the **latency** effect of the batching offloads (interrupt c
    $ ethtool -k <iface>                          # show offload settings (gro, lro, tso, rx/tx checksum)
    $ ethtool -K <iface> gro off lro off          # disable receive coalescing (latency)
    $ ethtool -C <iface> rx-usecs 0 rx-frames 1   # disable interrupt coalescing (interrupt per packet)
-   $ ethtool -G <iface> rx 4096                   # size the RX ring for bursts (Ch.48)
+   $ ethtool -G <iface> rx 4096                   # size the RX ring for bursts (Ch.53)
    $ ethtool -l/-L <iface>                         # show/set RSS queue count
    $ ethtool -T <iface>                            # show hardware-timestamping capabilities
 
-   # Measure RX latency (wire-to-app) under each config, ideally with HARDWARE timestamps (Ch.16,50):
+   # Measure RX latency (wire-to-app) under each config, ideally with HARDWARE timestamps (Ch.17,58):
    #   app_recv_time - nic_hw_rx_timestamp  = the software-stack latency the NIC config affects
 ```
 
@@ -56,10 +56,10 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP) + 
    RX config                                   wire-to-app latency (p50 / p99)   CPU      note
    default (GRO on, interrupt coalescing on)   ~8 µs / ~30 µs                    low      coalescing ADDS latency
    GRO/LRO off, coalescing off (IRQ/packet)    ~5 µs / ~12 µs                    higher   no batching delay, more IRQs
-   + busy-poll (SO_BUSY_POLL / NAPI)           ~3 µs / ~6 µs                     high     no interrupt latency/jitter (Ch.39)
-   + kernel bypass (ef_vi/Onload — Ch.52)      ~1 µs / ~2 µs                     100%     no kernel stack at all
+   + busy-poll (SO_BUSY_POLL / NAPI)           ~3 µs / ~6 µs                     high     no interrupt latency/jitter (Ch.41)
+   + kernel bypass (ef_vi/Onload — Ch.62)      ~1 µs / ~2 µs                     100%     no kernel stack at all
 
-   software timestamp vs HARDWARE timestamp:   sw includes all the above latency; hw = true wire arrival (Ch.16,50)
+   software timestamp vs HARDWARE timestamp:   sw includes all the above latency; hw = true wire arrival (Ch.17,58)
 ```
 
 Read it: the **batching offloads add latency** — GRO coalescing and interrupt coalescing *hold* packets to process them in groups (throughput/CPU efficiency), which is the *opposite* of what a latency path wants; turning them off drops the latency (and tightens the tail — less batching jitter) at the cost of more interrupts/CPU. **Busy-polling** (Ch. 41) removes the interrupt latency *and jitter* entirely (no waiting for an interrupt, no handler, no context switch) — lower and more *deterministic* — at the cost of a core pegged at 100%. And **kernel bypass** (Ch. 62) removes the stack, reaching ~1 µs. The other crucial point is the **hardware timestamp** row: a *software* receive timestamp (when your code read the packet) *includes* all the stack/config latency above — so it's not the true arrival time; the **NIC hardware timestamp** (Ch. 17, 58) is the *actual* wire-arrival moment, which is what you need for honest latency measurement (Ch. 76) and PTP (Ch. 58). The configuration lesson: **for a latency RX path, disable the batching offloads, busy-poll, size the RX ring for bursts (Ch. 53), steer the feed to the right core (RSS), capture hardware timestamps — and bypass the kernel for the ultra-hot feed (Ch. 62).** Keep the cheap offloads (checksum); kill the batching ones.

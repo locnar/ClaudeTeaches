@@ -23,11 +23,11 @@ But "disable HT" is not a universal answer — it's a *per-core* (or per-box) de
 ```
    one PHYSICAL core, two LOGICAL CPUs (siblings):
    ┌──────────────────────────────────────────────────────────────┐
-   │ front-end (fetch/decode/µop-cache — Ch.11)   shared/alternated │
-   │ execution ports (ALU/LD/ST/FP/vector — Ch.10) COMPETITIVELY    │  ← the big one for latency
-   │ L1i / L1d / L2 cache (Ch.6)                    COMPETITIVELY    │  ← sibling evicts your data
-   │ TLB (Ch.14)                                    shared          │
-   │ branch predictors (Ch.12-13)                   shared/polluted │
+   │ front-end (fetch/decode/µop-cache — Ch.12)   shared/alternated │
+   │ execution ports (ALU/LD/ST/FP/vector — Ch.11) COMPETITIVELY    │  ← the big one for latency
+   │ L1i / L1d / L2 cache (Ch.7)                    COMPETITIVELY    │  ← sibling evicts your data
+   │ TLB (Ch.15)                                    shared          │
+   │ branch predictors (Ch.13-14)                   shared/polluted │
    │ store buffer, load buffer                      PARTITIONED      │  ← split in half (statically)
    │ ROB / reservation stations                     partitioned/shared│
    └──────────────────────────────────────────────────────────────┘
@@ -72,7 +72,7 @@ int main() {
     constexpr int N = 8192;                       // ~L1/L2 working set
     constexpr long REPS = 2'000'000;
     std::vector<std::uint64_t> a(N, 1);
-    // a mixed workload: dependent + independent ops + loads (uses ports + L1/L2 — Ch.6,10)
+    // a mixed workload: dependent + independent ops + loads (uses ports + L1/L2 — Ch.7,11)
     std::vector<std::uint32_t> samples; samples.reserve(REPS);
     for (long r = 0; r < REPS; ++r) {
         std::uint64_t t0 = __builtin_ia32_rdtsc();

@@ -76,10 +76,10 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), s
 
 ```
    configuration                                  RTT (small request/response)
-   TCP_NODELAY OFF (default), delayed-ACK on      ~40,000 µs (~40 ms!)   <- Nagle + delayed-ACK DEADLOCK (§47.5)
+   TCP_NODELAY OFF (default), delayed-ACK on      ~40,000 µs (~40 ms!)   <- Nagle + delayed-ACK DEADLOCK (§51.5)
    TCP_NODELAY ON (sender), delayed-ACK on        ~30-60 µs              <- Nagle gone; occasional ACK delay
    TCP_NODELAY ON + TCP_QUICKACK (both)           ~20-40 µs              <- both tamed; full kernel-stack speed
-   (context) busy-poll + bypass (Ch.44,52)        ~1-5 µs                <- the ultra-hot path
+   (context) busy-poll + bypass (Ch.47,62)        ~1-5 µs                <- the ultra-hot path
 
    the default costs ~1000x. ONE setsockopt is the difference between 40 ms and 40 µs.
 ```

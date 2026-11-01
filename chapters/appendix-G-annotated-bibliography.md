@@ -27,7 +27,7 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **The Linux kernel documentation** — especially `Documentation/admin-guide/` (kernel parameters, `nohz_full`/`isolcpus`/RCU), the scheduler/RT docs, and the networking stack docs. The basis of **Part VII** (Ch. 41–46) and **Appendix C**.
 - **The `perf` / `perf_events` documentation and the PMU event references.** How to drive the hardware counters and top-down analysis of **Ch. 2** (and the measurement methods of Appendix E).
 - **The exchange protocol specifications** — Nasdaq **ITCH/OUCH**, the **FIX**, **SBE**, and **FAST** specs. The wire formats decoded in **Ch. 53** and glossaried in Appendix F.1.
-- **PCIe base specification (and vendor PCIe tuning notes).** The host-device boundary, posted/non-posted transactions, and round-trip cost of **Ch. 66** (and the offload Parts IX).
+- **PCIe base specification (and vendor PCIe tuning notes).** The host-device boundary, posted/non-posted transactions, and round-trip cost of **Ch. 66** (and the offload Part XI).
 
 ## G.3 Books
 

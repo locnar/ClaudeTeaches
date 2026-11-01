@@ -31,10 +31,10 @@ The latency reality, and the through-line to the rest of the book, is that **the
      2. YOU call read(5, ...) → get the data          (you do the actual I/O, non-blocking)
      → two steps: notification THEN the syscall to move data; you manage the buffers
 
-   COMPLETION model (io_uring — Ch.45, Windows IOCP):
+   COMPLETION model (io_uring — Ch.48, Windows IOCP):
      1. you SUBMIT "read N bytes from socket 5 into buffer B"
      2. completion → "your read is DONE, B has the data"  (the kernel did the I/O for you)
-     → one round-trip; the kernel does the data movement; fewer syscalls (Ch.45)
+     → one round-trip; the kernel does the data movement; fewer syscalls (Ch.48)
 ```
 
 This chapter is the **readiness** model (`epoll`); Ch. 48 is **completion** (io_uring). Readiness is the classic Linux model; completion is newer, with fewer syscalls and better for high I/O rates (Ch. 48).
@@ -48,10 +48,10 @@ This chapter is the **readiness** model (`epoll`); Ch. 48 is **completion** (io_
 
 ```
    per packet through the kernel stack:  NIC IRQ → driver → IP/TCP processing → socket buffer
-                                          → epoll_wait wakes (context switch — Ch.39) → read() syscall → copy to user
+                                          → epoll_wait wakes (context switch — Ch.41) → read() syscall → copy to user
    → MICROSECONDS per packet, plus a context switch if epoll_wait was blocked.
-   the techniques (§44.4): batch syscalls, edge-trigger, busy-poll (avoid the block/wake switch)
-   the escapes (later): io_uring (fewer syscalls — Ch.45), kernel bypass (no kernel — Ch.52)
+   the techniques (§47.4): batch syscalls, edge-trigger, busy-poll (avoid the block/wake switch)
+   the escapes (later): io_uring (fewer syscalls — Ch.48), kernel bypass (no kernel — Ch.62)
 ```
 
 The model: **non-blocking sockets + `epoll` give event-driven, readiness-based I/O that scales to many connections on one thread (the alternative to thread-per-connection). `epoll` notifies you *which* sockets are ready (O(ready)); you do non-blocking reads/writes. The cost is syscalls + the readiness round-trip + a context switch when `epoll_wait` blocks — minimized by batching/edge-triggering/busy-polling, and ultimately escaped by completion-based I/O (io_uring — Ch. 48) or bypass (Ch. 62).**
@@ -64,7 +64,7 @@ Measure the **round-trip latency** of the kernel TCP stack — send a small mess
 // epoll_rtt.cpp — TCP echo round-trip latency: blocking vs epoll vs busy-poll (sketch).
 // Build: g++ -O2 -std=c++20 epoll_rtt.cpp -o epoll_rtt
 // Run:  ./epoll_rtt server &   ;   taskset -c 2 ./epoll_rtt client 127.0.0.1
-//   (over loopback here; real latency is over the NIC — Ch.49 — and far higher than loopback)
+//   (over loopback here; real latency is over the NIC — Ch.55 — and far higher than loopback)
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -77,16 +77,16 @@ Measure the **round-trip latency** of the kernel TCP stack — send a small mess
 #include <arpa/inet.h>
 #include <unistd.h>
 
-// ... setup elided: socket(), TCP_NODELAY (Ch.47!), connect/accept ...
+// ... setup elided: socket(), TCP_NODELAY (Ch.51!), connect/accept ...
 // Client measures: write(req); read(reply); record the round-trip; repeat.
 // Server: read(req); write(reply) as fast as possible (echo).
 
 int main(int argc, char** argv) {
     // (illustrative — the point is the measured numbers below; full socket setup omitted)
     // Key knobs that matter for the measurement:
-    //   - setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, 1)   // disable Nagle (Ch.47) — critical!
+    //   - setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, 1)   // disable Nagle (Ch.51) — critical!
     //   - O_NONBLOCK + epoll, vs blocking read, vs SO_BUSY_POLL
-    // Client loop (warm — Ch.43 — then measured):
+    // Client loop (warm — Ch.46 — then measured):
     //   for N iters: t0=rdtsc; write(fd,&req,8); read(fd,&rep,8); t1=rdtsc; samples.push_back(t1-t0);
     std::printf("see representative numbers below\n");
     return 0;
@@ -97,13 +97,13 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), l
 
 ```
    model (loopback TCP echo round-trip)     p50        p99        notes
-   blocking read (thread-per-conn)          ~6 µs      ~25 µs     blocks → context switch each way (Ch.39)
-   epoll (blocking epoll_wait)              ~5 µs      ~20 µs     epoll_wait sleeps → switch + cold (Ch.39,43)
+   blocking read (thread-per-conn)          ~6 µs      ~25 µs     blocks → context switch each way (Ch.41)
+   epoll (blocking epoll_wait)              ~5 µs      ~20 µs     epoll_wait sleeps → switch + cold (Ch.41,46)
    epoll + SO_BUSY_POLL (no block)          ~3 µs      ~7 µs      busy-poll avoids the block/wake switch
-   (preview) io_uring polled (Ch.45)        ~2.5 µs    ~5 µs      fewer syscalls
-   (preview) kernel bypass (Ch.52)          ~1 µs      ~2 µs      no kernel stack — the real HFT path
+   (preview) io_uring polled (Ch.48)        ~2.5 µs    ~5 µs      fewer syscalls
+   (preview) kernel bypass (Ch.62)          ~1 µs      ~2 µs      no kernel stack — the real HFT path
 
-   even busy-polled, the kernel stack is MICROSECONDS — the floor is bypass (Ch.52).
+   even busy-polled, the kernel stack is MICROSECONDS — the floor is bypass (Ch.62).
 ```
 
 Read it: the **blocking** and **blocking-`epoll`** models cost ~5-6 µs round-trip on *loopback* (no real network!) — dominated by the **syscalls** (`read`/`write`/`epoll_wait`) and the **context switch** each time `epoll_wait`/`read` sleeps and wakes (Ch. 41), plus the cold restart (Ch. 46). **Busy-polling** (`SO_BUSY_POLL`, or busy-looping non-blocking reads on a dedicated core — Ch. 41) removes the block/wake switch and nearly halves the latency (~3 µs) — the biggest win available *within* the kernel model, and why a latency-sensitive `epoll` loop on a dedicated core busy-polls rather than blocks. But the headline lesson is the *floor*: **even perfectly busy-polled, the kernel TCP stack is microseconds** — the per-packet stack traversal (driver → IP/TCP → socket buffer → copy) is irreducible within the kernel. io_uring (Ch. 48) shaves the syscalls; **kernel bypass (Ch. 62) — removing the kernel from the path entirely — is what gets to ~1 µs and below**, which is why it's *the* HFT data path. The kernel native I/O of this chapter is the baseline you measure the rest of Part VIII against: optimize it (busy-poll, batch — §47.4) for the *non-ultra-hot* I/O, and bypass it (Ch. 62) for the tick-to-trade path. (And note `TCP_NODELAY` — Ch. 51 — is non-negotiable: without it, Nagle's algorithm batches small sends and adds *milliseconds*.)

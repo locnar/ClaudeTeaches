@@ -2,9 +2,9 @@
 
 # Chapter 32 — Spinlocks, Backoff & Contention Control
 
-> **Prerequisites:** Ch. 30 (atomics & memory ordering — a spinlock is an atomic acquire/release protocol), Ch. 31 (shared-nothing — a spinlock is for the sharing you *couldn't* eliminate), Ch. 7 & 32-preview (cache coherence / false sharing — the lock line bounces), Ch. 41 (context switching — what blocking costs), Ch. 6/42 (isolated/pinned cores — where spinning is viable).
+> **Prerequisites:** Ch. 30 (atomics & memory ordering — a spinlock is an atomic acquire/release protocol), Ch. 31 (shared-nothing — a spinlock is for the sharing you *couldn't* eliminate), Ch. 7 & 33-preview (cache coherence / false sharing — the lock line bounces), Ch. 41 (context switching — what blocking costs), Ch. 6/42 (isolated/pinned cores — where spinning is viable).
 >
-> **Leads into:** Ch. 33 (false sharing — padding the lock), Ch. 34 (lock-free — the alternative when even a good spinlock contends), Ch. 37 (Disruptor — busy-spin waiting), Ch. 41, 42, 43, 45 (scheduling — why spinning needs an isolated core). Futex internals tie to Ch. 47 (syscalls).
+> **Leads into:** Ch. 33 (false sharing — padding the lock), Ch. 34 (lock-free — the alternative when even a good spinlock contends), Ch. 37 (Disruptor — busy-spin waiting), Ch. 41, 42, 43, 45 (scheduling — why spinning needs an isolated core). Futex internals tie to Ch. 41 (syscalls).
 
 ---
 
@@ -24,7 +24,7 @@ But spinning is dangerous if misused, and this chapter is as much about *content
    spinlock (contended):   loop { check lock }  until free   — busy-wait, NO kernel, ~tens of ns
                            good IF: section is short AND the core is dedicated (holder runs)
    blocking mutex (contended): futex_wait syscall → SLEEP → (holder unlocks) → futex_wake → wake
-                           ~microseconds: syscall + context switch (Ch. 39) + cold cache on wake
+                           ~microseconds: syscall + context switch (Ch. 41) + cold cache on wake
                            good IF: section is long OR the core is shared (let other work run)
 ```
 
@@ -199,7 +199,7 @@ For high contention (or when fairness/latency-tail matter), **queue locks** elim
 
 - P. McKenney, *Is Parallel Programming Hard?* — locking, contention, and when to avoid locks (ties Ch. 31, 34).
 - The "Mechanical Sympathy" community and Carl Cook's *"When a Microsecond Is an Eternity"* — busy-spin/wait strategies on dedicated cores in HFT.
-- Ch. 30 (*Atomics*) — the acquire/release a lock is built on; Ch. 31 (*Foundations*) — eliminating the sharing; Ch. 33 (*False Sharing*) — padding the lock; Ch. 34 (*Lock-Free*) — the alternative to locking; Ch. 37 (*Disruptor*) — busy-spin waiting strategies; Ch. 41, 42, 43, 45 (*Scheduling*) — why spinning needs an isolated core; Ch. 47 (*Syscalls*) — futex cost.
+- Ch. 30 (*Atomics*) — the acquire/release a lock is built on; Ch. 31 (*Foundations*) — eliminating the sharing; Ch. 33 (*False Sharing*) — padding the lock; Ch. 34 (*Lock-Free*) — the alternative to locking; Ch. 37 (*Disruptor*) — busy-spin waiting strategies; Ch. 41, 42, 43, 45 (*Scheduling*) — why spinning needs an isolated core; Ch. 41 (*Syscalls*) — futex cost.
 - **Appendix E** — context-switch and uncontended/contended lock latency numbers (the spin-vs-block crossover); **Appendix F** — TTAS/MCS/futex/convoy glossary.
 
 ---

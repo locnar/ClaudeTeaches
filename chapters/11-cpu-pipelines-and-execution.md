@@ -34,7 +34,7 @@ A modern x86 core is a little dataflow machine wearing a sequential-ISA costume.
   ┌─────────┐  ┌──────┐  ┌────────┐  ┌─────────────┐  ┌──────────────────┐  ┌────────┐
   │  fetch  │─►│decode│─►│ rename │─►│  scheduler  │─►│ execution ports   │─►│ retire │
   │ (L1i,   │  │ →µops│  │(remove │  │ (reservation │  │ (ALU/LD/ST/FP/   │  │(commit │
-  │  Ch.11) │  │      │  │ false  │  │  stations,   │  │  vector/branch)  │  │ in     │
+  │  Ch.12) │  │      │  │ false  │  │  stations,   │  │  vector/branch)  │  │ in     │
   │         │  │      │  │ deps)  │  │  reorder buf)│  │  ~10 ports        │  │ order) │
   └─────────┘  └──────┘  └────────┘  └─────────────┘  └──────────────────┘  └────────┘
 ```
@@ -94,7 +94,7 @@ The signature of a dependency-chain bottleneck is **low IPC with low cache-miss 
 ```cpp
 // dep_chain.cpp — same sum, one serial chain vs four independent chains.
 // Build: g++ -O2 -std=c++20 -march=native dep_chain.cpp -o dep_chain
-//   (NOTE: -O2 WITHOUT -ffast-math, so the compiler must preserve FP order — §10.5.)
+//   (NOTE: -O2 WITHOUT -ffast-math, so the compiler must preserve FP order — §11.5.)
 // Run pinned, turbo off: taskset -c 2 ./dep_chain 1   |   ./dep_chain 4
 #include <cstdint>
 #include <cstdio>

@@ -24,7 +24,7 @@ The canonical low-latency market-data recovery architecture has **three channels
    1. INCREMENTAL MULTICAST (A + B)   the live feed: every update, sequenced, sent twice (two paths)
         seq: 100 101 102 [ ] 104 ...  <- gap at 103 detected by sequence discontinuity
                           │
-   2. RETRANSMISSION       ───────────> request "resend 103" (unicast, often TCP — Ch.69), off hot path
+   2. RETRANSMISSION       ───────────> request "resend 103" (unicast, often TCP — Ch.52), off hot path
         (fills small, recent gaps)      exchange resends the specific missing message(s)
 
    3. SNAPSHOT / REFRESH   ───────────> a periodic full state-of-book image (multicast or on request)

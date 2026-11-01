@@ -54,7 +54,7 @@ Measure the RDMA latency tiers — one-sided **WRITE** (lowest, no remote CPU), 
    $ ib_write_lat <server>     # one-sided RDMA write latency (half round-trip / ping-pong)
    $ ib_read_lat  <server>     # RDMA read (a full round-trip — fetch from remote)
    $ ib_send_lat  <server>     # two-sided send/recv latency
-   # measure registration cost: time ibv_reg_mr for various buffer sizes (a SETUP cost — §53.5)
+   # measure registration cost: time ibv_reg_mr for various buffer sizes (a SETUP cost — §63.5)
 ```
 
 Representative results — InfiniBand HDR / RoCEv2 on a tuned intra-DC fabric, polled CQ, dedicated core (illustrative; the *tiers* are the point):
@@ -64,10 +64,10 @@ Representative results — InfiniBand HDR / RoCEv2 on a tuned intra-DC fabric, p
    RDMA WRITE (one-sided)             ~0.8-1.5 µs (RTT for a ping-pong)  remote CPU NOT involved — lowest
    RDMA READ (one-sided)              ~1.5-2.5 µs (RTT)                  a full round-trip to fetch
    SEND/RECV (two-sided)              ~1.2-2 µs                          both CPUs involved
-   (context) kernel-bypass UDP (Ch.52) ~1-2 µs (local)                  comparable for local send/recv
-   (context) kernel stack TCP (Ch.44)  ~5-20 µs                         the baseline RDMA beats
+   (context) kernel-bypass UDP (Ch.62) ~1-2 µs (local)                  comparable for local send/recv
+   (context) kernel stack TCP (Ch.47)  ~5-20 µs                         the baseline RDMA beats
 
-   memory REGISTRATION (ibv_reg_mr):  ~µs to ms (pins pages + syscall)  — a SETUP cost, NEVER on hot path (§53.5)
+   memory REGISTRATION (ibv_reg_mr):  ~µs to ms (pins pages + syscall)  — a SETUP cost, NEVER on hot path (§63.5)
 ```
 
 Read it: RDMA delivers **single-digit-microsecond (sub-2µs) cross-host** latency — far below the kernel stack (Ch. 47, ~5-20µs) and comparable to local kernel bypass (Ch. 62), but *across machines*. The **one-sided WRITE is lowest** (the remote CPU isn't involved — the NIC just DMAs the data in), **READ is a round-trip** (fetch from remote — higher), and **SEND/RECV is two-sided** (both CPUs). The tier choice maps to the access pattern (§63.4.1): WRITE to *push* data to a known remote location (publication — Ch. 35), READ to *pull* from remote, SEND/RECV for message-passing semantics. The crucial operational number is **registration**: `ibv_reg_mr` costs microseconds-to-milliseconds (it pins pages and syscalls — Ch. 23) — so it's a **setup** cost; registering memory on the hot path would inject that latency into every message (§63.5). Register all RDMA buffers at startup (the pre-allocation discipline of Part IV). The measurement discipline: **poll the CQ** (busy-poll — Ch. 41, no interrupts) on a dedicated core, **register at setup**, and use the standard `perftest` tools (`ib_*_lat`) plus hardware timestamps (Ch. 55, 58) for the true numbers. RDMA is the intra-DC messaging floor.

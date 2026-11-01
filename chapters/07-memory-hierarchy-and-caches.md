@@ -37,15 +37,15 @@ The good news is that the hardware is *trying to help you*: caches keep recently
 Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each a cache of the one below it. A modern core sees roughly:
 
 ```
-   core ── L1d (32-48 KiB, ~1ns, per-core) ── L1i (instructions; Ch.11)
+   core ── L1d (32-48 KiB, ~1ns, per-core) ── L1i (instructions; Ch.12)
             │
             L2 (~1-2 MiB, ~4ns, per-core)
             │
             L3 / LLC (tens of MiB, ~15-20ns, SHARED across cores on the socket)
             │
-            DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.15)
+            DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.16)
             │
-            (… and far below: NVMe/disk, Ch.63 — irrelevant to the hot path)
+            (… and far below: NVMe/disk, Ch.75 — irrelevant to the hot path)
 ```
 
 Two structural facts shape everything:
@@ -106,7 +106,7 @@ The classic experiment that makes the whole hierarchy *visible* is a **pointer-c
 ```cpp
 // cache_sweep.cpp — reveal L1/L2/L3/DRAM by measuring pointer-chase latency vs size.
 // Build: g++ -O2 -std=c++20 cache_sweep.cpp -o cache_sweep
-// Run pinned with fixed frequency (Ch.3, 5):  taskset -c 2 ./cache_sweep
+// Run pinned with fixed frequency (Ch.3, 6):  taskset -c 2 ./cache_sweep
 #include <chrono>
 #include <cstdint>
 #include <cstdio>

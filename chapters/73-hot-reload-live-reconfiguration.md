@@ -24,9 +24,9 @@ The core idea: **config is immutable once published; updating means building a n
    CONTROL THREAD (off hot path)                 HOT PATH (reads every tick)
    ─────────────────────────────                 ───────────────────────────
    1. build new Config v2 (alloc, parse,         cfg = config_ptr.load(acquire);   // one atomic load
-      VALIDATE — §61.4.3, off-path)              use cfg->param, cfg->limit, ...    // read a FROZEN, consistent version
+      VALIDATE — §73.4.3, off-path)              use cfg->param, cfg->limit, ...    // read a FROZEN, consistent version
    2. config_ptr.store(&v2, release);  ◄──swap──►  (reader either sees v1 or v2, NEVER a mix)
-   3. reclaim v1 once no reader holds it (Ch.35)
+   3. reclaim v1 once no reader holds it (Ch.36)
         ▲ the ONLY hot-path-visible change is the single atomic pointer store
 ```
 

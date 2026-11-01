@@ -21,18 +21,18 @@ And it must be **lossless and gap-free**: a capture with holes is useless for re
 Capture is an **append-only journal**: events are written once, in arrival order, never modified — the same write-ahead-log (WAL) discipline databases use for durability and recovery, applied to the market/order stream:
 
 ```
-   HOT PATH                         CAPTURE RING (Ch.33)        WRITER (off-path)              STORAGE
+   HOT PATH                         CAPTURE RING (Ch.34)        WRITER (off-path)              STORAGE
    ────────                         ───────────────────         ────────────────              ───────
-   on each event:                   ┌──────────────────┐        drain (batched, Ch.36)         append-only journal
-     • timestamp (NIC/PTP, Ch.50)   │ ev ev ev ev ev …│  ───►   • write sequentially            ┌─[seq, ts, bytes]─┐
-     • copy raw bytes + seq to ring │ (lock-free SPSC) │        • io_uring/O_DIRECT (Ch.45)      │ append, append,  │
+   on each event:                   ┌──────────────────┐        drain (batched, Ch.37)         append-only journal
+     • timestamp (NIC/PTP, Ch.58)   │ ev ev ev ev ev …│  ───►   • write sequentially            ┌─[seq, ts, bytes]─┐
+     • copy raw bytes + seq to ring │ (lock-free SPSC) │        • io_uring/O_DIRECT (Ch.48)      │ append, append,  │
      • bump producer seq            └──────────────────┘        • fsync/barrier for durability   │ append … (WAL)   │
      └─ return (no disk, no syscall)                            └─ never touches the hot path     └─time-indexed────┘
 ```
 
 The model's properties:
 
-- **Append-only / write-ahead.** Events are appended in order; nothing is updated in place. Append-only writes are *sequential* (the fastest disk access pattern, even on NVMe — §75.4.3), recovery-friendly (replay the log forward), and naturally tamper-evident (you detect edits to an append-only signed log). This is the WAL idea (Ch. 23's "persist before you act" generalized): the journal *is* the durable truth.
+- **Append-only / write-ahead.** Events are appended in order; nothing is updated in place. Append-only writes are *sequential* (the fastest disk access pattern, even on NVMe — §75.4.3), recovery-friendly (replay the log forward), and naturally tamper-evident (you detect edits to an append-only signed log). This is the write-ahead-log idea ("persist before you act", generalized): the journal *is* the durable truth.
 - **Each record is self-describing and sequenced:** a monotonic **sequence number** (for gap detection — §75.4.4), an accurate **timestamp** (NIC hardware / PTP — Ch. 55, 58, so the time is *wire-accurate*, not when software happened to look), the **raw bytes** (captured losslessly — §75.4.1), and enough framing to parse it back. Compact binary (§75.4.2), not text.
 - **Time-indexed.** The journal is indexed by time (and sequence) so replay and research can seek to "09:31:42" or "sequence N" without scanning from the start — periodic index checkpoints / snapshots (§75.4.4) bound the seek and the replay-from cost (ties Ch. 74's snapshot-bounded recovery).
 - **Two capture altitudes.** You can capture at the **line/wire level** (every packet off the NIC, below the application — §75.4.1, the most faithful and the compliance gold standard) and/or at the **application level** (normalized events, the inputs the Ch. 74 core actually consumed). Wire capture replays the *whole stack*; application capture replays the *core*. Production systems often do both: wire for compliance/forensics, application for fast deterministic core replay.

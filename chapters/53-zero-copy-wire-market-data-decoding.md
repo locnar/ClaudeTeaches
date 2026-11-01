@@ -84,7 +84,7 @@ struct AddOrder { std::uint8_t type; std::uint64_t seq, id; std::uint8_t side;
 
 struct Parsed { std::uint64_t seq, id, price; std::uint32_t qty; char side; };
 
-// zero-copy decode: load fields in place with bswap (Ch.20,27) — no payload copy.
+// zero-copy decode: load fields in place with bswap (Ch.21,28) — no payload copy.
 Parsed decode_binary(const std::uint8_t* p) {
     Parsed r;
     std::uint64_t seq; std::memcpy(&seq, p+1, 8);  r.seq = std::byteswap(seq);       // safe load + swap
@@ -94,7 +94,7 @@ Parsed decode_binary(const std::uint8_t* p) {
     std::uint64_t px;  std::memcpy(&px,  p+30, 8); r.price = std::byteswap(px);
     return r;
 }
-// FIX-like text decode: scan "55=AAPL|44=12345|38=100|54=1|..." — field scan + from_chars (Ch.27).
+// FIX-like text decode: scan "55=AAPL|44=12345|38=100|54=1|..." — field scan + from_chars (Ch.28).
 Parsed decode_fix(const char* s, std::size_t n) {
     Parsed r{}; const char* end = s + n;
     while (s < end) {
@@ -129,9 +129,9 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `
 
 ```
    encoding                         ns / message    note
-   fixed-binary overlay (ITCH/SBE)  ~8-15 ns        in-place loads + bswap — ~free (§48.2.2, §48.5)
-   FIX text parse (from_chars)      ~80-200 ns      field scan + text→int conversion (Ch.27) — ~10x more
-   FAST (bit-unpacking)             ~100-300 ns     stop-bit/presence-map decode (Ch.27) — complex
+   fixed-binary overlay (ITCH/SBE)  ~8-15 ns        in-place loads + bswap — ~free (§53.2.2, §53.5)
+   FIX text parse (from_chars)      ~80-200 ns      field scan + text→int conversion (Ch.28) — ~10x more
+   FAST (bit-unpacking)             ~100-300 ns     stop-bit/presence-map decode (Ch.28) — complex
 
    binary is ~10x faster to decode → use binary (SBE/ITCH) for the hot feed; FIX where flexibility wins.
 ```
@@ -189,7 +189,7 @@ The zero-copy overlay's promise — "field access is just a load" — is verifia
 ```asm
 ; r.seq = byteswap( load 8 bytes at p+1 ):
         mov     rax, qword ptr [rdi + 1]    ; load the wire field IN PLACE (no copy)
-        bswap   rax                         ; big-endian → host (Ch.27) — one instruction
+        bswap   rax                         ; big-endian → host (Ch.28) — one instruction
         mov     qword ptr [rsi], rax        ; store into the parsed local
 ```
 
@@ -200,7 +200,7 @@ This is the proof that **zero-copy decode of a fixed-binary field is a load + a 
 ```asm
         lea     rax, [rcx + r8]             ; offset + len
         cmp     rax, rdx                    ; > buf_size ?
-        ja      .Lreject                    ; rarely taken (valid packets pass) — predicted (Ch.12)
+        ja      .Lreject                    ; rarely taken (valid packets pass) — predicted (Ch.13)
         ... read the field ...
 ```
 
@@ -208,7 +208,7 @@ This is the proof that **zero-copy decode of a fixed-binary field is a load + a 
 
 ```asm
         movzx   eax, byte ptr [rdi]         ; message type byte
-        jmp     qword ptr [.Ljt + 8*rax]    ; jump table over message types (Ch.13)
+        jmp     qword ptr [.Ljt + 8*rax]    ; jump table over message types (Ch.14)
 ```
 
 The verification habits: **confirm field access is a `mov`(+`bswap`), not a `call memcpy` or a misaligned trap** (the zero-copy + safe-load promise — §53.2.2); **confirm bounds checks are cheap predicted branches** (so safety is ~free — §53.6); **confirm the type dispatch is a jump table/lookup** (Ch. 14), not a branch chain; and for bulk fixed-width parsing, **confirm vectorization** (Ch. 29) where it applies. The decode loop is the hottest loop in the system — read its asm and ensure it's loads + swaps + predicted branches, nothing more.

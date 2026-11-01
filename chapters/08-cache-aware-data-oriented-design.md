@@ -54,7 +54,7 @@ struct Book {
     std::vector<std::int64_t> price;       // all prices, contiguous
     std::vector<std::int64_t> total_qty;   // all quantities, contiguous
     std::vector<std::uint32_t> order_count;
-    // cold fields live in their own arrays (or a separate cold struct, §7.2.2)
+    // cold fields live in their own arrays (or a separate cold struct, §8.2.2)
 };
 ```
 
@@ -103,7 +103,7 @@ Let's put a number on it with the running order-book example: scan every level a
 ```cpp
 // aos_vs_soa.cpp — same sum, two layouts. Profile both with perf stat.
 // Build: g++ -O2 -std=c++20 -march=native aos_vs_soa.cpp -o aos_vs_soa
-// Run pinned, turbo off (Ch.3,5):  taskset -c 2 ./aos_vs_soa aos   |   ... soa
+// Run pinned, turbo off (Ch.3,6):  taskset -c 2 ./aos_vs_soa aos   |   ... soa
 #include <cstdint>
 #include <cstdio>
 #include <cstring>

@@ -175,7 +175,7 @@ The costs of §20.2 are visible in the binary, and the verification settles wher
 
 ```
 $ readelf -S a.out | grep -E 'eh_frame|gcc_except|text.unlikely'
-  [ ] .text.unlikely    ...      <- landing pads / cleanup (cold — Ch. 11)
+  [ ] .text.unlikely    ...      <- landing pads / cleanup (cold — Ch. 12)
   [ ] .eh_frame         ...      <- stack-unwinding descriptors (every function)
   [ ] .gcc_except_table ...      <- LSDA: which catch handles which region   (binary SIZE cost)
 $ size a.out      # vs the same program built -fno-exceptions: smaller .text, no eh tables

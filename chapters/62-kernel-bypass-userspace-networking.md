@@ -21,7 +21,7 @@ The cost — and the reason this is a deliberate, advanced choice — is that yo
 **The kernel stack vs bypass, structurally:**
 
 ```
-   KERNEL STACK (Ch.44):  wire → NIC → IRQ → driver → IP/UDP/TCP stack → socket buf → syscall+copy → app
+   KERNEL STACK (Ch.47):  wire → NIC → IRQ → driver → IP/UDP/TCP stack → socket buf → syscall+copy → app
                           microseconds; interrupt + context switch + copy per packet
 
    KERNEL BYPASS:         wire → NIC → DMA into USER-SPACE buffer → app POLLS the ring → parse in place
@@ -46,22 +46,22 @@ The model: **kernel bypass maps the NIC's rings into user space and uses a poll-
 Measure the RX latency floor across the tiers built through the networking chapters — kernel stack (Ch. 47), busy-poll (Ch. 55), AF_XDP (Ch. 61), and full bypass (DPDK/ef_vi) — ideally with hardware timestamps (Ch. 55, 58) for the true wire-to-app number.
 
 ```
-   # DPDK: build a poll-mode RX loop (rte_eth_rx_burst) on a dedicated isolated core (Ch.40,42);
-   #   measure NIC-hw-timestamp (Ch.49) → app-sees-packet time = the wire-to-app RX latency.
-   # ef_vi: ef_vi_receive_poll on a dedicated core; lowest-latency raw L2 access (Ch.49.4.3).
-   # Compare against the kernel stack (Ch.44) and AF_XDP (Ch.51) on the same NIC/traffic.
+   # DPDK: build a poll-mode RX loop (rte_eth_rx_burst) on a dedicated isolated core (Ch.42,45);
+   #   measure NIC-hw-timestamp (Ch.55) → app-sees-packet time = the wire-to-app RX latency.
+   # ef_vi: ef_vi_receive_poll on a dedicated core; lowest-latency raw L2 access (Ch.55.4.3).
+   # Compare against the kernel stack (Ch.47) and AF_XDP (Ch.61) on the same NIC/traffic.
 ```
 
 Representative results — HFT-grade NIC (Solarflare/ExaNIC) + dedicated isolated core, hardware timestamps, turbo off (illustrative; the *tiers* are the point):
 
 ```
    RX path                              wire-to-app latency (p50 / p99)    CPU       notes
-   kernel stack, blocking (Ch.44)       ~5 µs / ~20 µs                     low       syscalls + stack + switch (Ch.39)
-   kernel stack, busy-poll (Ch.44,49)   ~3 µs / ~6 µs                      high      no block/wake switch
-   AF_XDP zero-copy (Ch.51)             ~2 µs / ~4 µs                      high      standard Linux, near-bypass
+   kernel stack, blocking (Ch.47)       ~5 µs / ~20 µs                     low       syscalls + stack + switch (Ch.41)
+   kernel stack, busy-poll (Ch.47,55)   ~3 µs / ~6 µs                      high      no block/wake switch
+   AF_XDP zero-copy (Ch.61)             ~2 µs / ~4 µs                      high      standard Linux, near-bypass
    DPDK poll-mode driver                ~1 µs / ~2 µs                      100%      no kernel; owns the NIC
    ef_vi (raw vendor, Solarflare)       ~0.8 µs / ~1.3 µs                  100%      lowest software latency
-   (context) FPGA inline (Ch.57)        ~tens-hundreds of NS               —         hardware, no software at all
+   (context) FPGA inline (Ch.69)        ~tens-hundreds of NS               —         hardware, no software at all
 
    each tier removes a layer; bypass (DPDK/ef_vi) removes the KERNEL — the big step to sub-µs.
 ```

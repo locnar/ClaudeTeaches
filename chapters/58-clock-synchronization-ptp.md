@@ -25,7 +25,7 @@ For HFT this is both a **measurement** tool and a **compliance** requirement. As
 ```
    GPS / atomic ──► GRANDMASTER clock (the authoritative time source)
                         │  PTP messages (Sync, Follow_Up, Delay_Req, Delay_Resp)
-                        ▼      ... timestamped IN HARDWARE by each NIC's PHC (Ch.49) ...
+                        ▼      ... timestamped IN HARDWARE by each NIC's PHC (Ch.55) ...
    network (PTP-aware switches = BOUNDARY/TRANSPARENT clocks correct for switch delay)
                         │
                         ▼
@@ -43,7 +43,7 @@ For HFT this is both a **measurement** tool and a **compliance** requirement. As
 **The clock hierarchy, recapped (ties Ch. 17):**
 
 ```
-   on-host intervals (Ch.16):   rdtsc / CLOCK_MONOTONIC  — fast, monotonic, NOT cross-host comparable
+   on-host intervals (Ch.17):   rdtsc / CLOCK_MONOTONIC  — fast, monotonic, NOT cross-host comparable
    cross-host comparison (this chapter): PTP-disciplined PHC + hardware timestamps — synced, comparable
    wall-clock / compliance:     PTP-synced CLOCK_REALTIME (via phc2sys) — traceable to UTC
 ```
@@ -61,7 +61,7 @@ Two measurements: the **PTP synchronization quality** (how well-synced are the c
    $ pmc -u -b 0 'GET CURRENT_DATA_SET'   # query current offset/path-delay
    $ phc2sys -s <iface> -m          # discipline system clock to PHC; logs the PHC↔sys offset
 
-   # True wire-to-wire latency (cross-host, hardware timestamps — Ch.49):
+   # True wire-to-wire latency (cross-host, hardware timestamps — Ch.55):
    #   exchange-side or upstream packet hw-timestamp (T_in)  vs  our order packet hw-timestamp (T_out)
    #   tick-to-trade = T_out - T_in   — VALID because both are on PTP-synced grandmaster time
 ```

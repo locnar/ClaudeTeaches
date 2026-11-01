@@ -35,7 +35,7 @@ For async I/O, **stackless C++20 coroutines** are the standard modern choice (lo
 
 ```
    1. allocates the coroutine FRAME (holds locals-across-suspend + resume point + promise)
-        → in general, via operator new  ← THE HAZARD (a malloc per call — Ch. 22)
+        → in general, via operator new  ← THE HAZARD (a malloc per call — Ch. 23)
    2. runs the body until the first suspend point
    3. returns a HANDLE to the caller (the coroutine is now suspended, or running)
    ... later: resume(handle) continues from the suspend point; final suspend destroys the frame
@@ -103,7 +103,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `
 ```
    scenario                                  ns/coro     allocs/call    note
    HALO fires (frame elided to stack)        ~2-5 ns     0.000          zero-overhead — the goal
-   HALO does NOT fire (frame heap-allocated) ~60-120 ns  1.000          a MALLOC per coroutine (Ch. 22)!
+   HALO does NOT fire (frame heap-allocated) ~60-120 ns  1.000          a MALLOC per coroutine (Ch. 23)!
    suspend/resume (real await, elided)       ~5-15 ns    0              the per-co_await overhead
 
    the difference is ENTIRELY whether the compiler elided the frame allocation.

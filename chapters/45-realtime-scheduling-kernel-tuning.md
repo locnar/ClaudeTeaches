@@ -24,13 +24,13 @@ The discipline, and the reason this chapter exists as its own thing, is that **j
 
 ```
    isolcpus=2-7        remove cores 2-7 from the general scheduler's load-balancing pool
-                       → nothing is auto-scheduled there; only explicitly-pinned tasks run (Ch. 40)
+                       → nothing is auto-scheduled there; only explicitly-pinned tasks run (Ch. 42)
    nohz_full=2-7       make cores 2-7 TICKLESS when ≤1 task runs on them
                        → NO periodic timer interrupt → the hot loop runs uninterrupted
    rcu_nocbs=2-7       offload RCU callback processing off cores 2-7 onto housekeeping cores
                        → no RCU softirq work on the hot cores
-   irqaffinity=0,1     default IRQ affinity = housekeeping cores only (ties Ch. 40)
-   (+ Ch.5: mitigations=, intel_pstate=, nosmt or HT handling — Ch.41, hugepages, etc.)
+   irqaffinity=0,1     default IRQ affinity = housekeeping cores only (ties Ch. 42)
+   (+ Ch.6: mitigations=, intel_pstate=, nosmt or HT handling — Ch.43, hugepages, etc.)
 ```
 
 - **`isolcpus`** — the foundation: the scheduler won't *place* tasks on these cores (so no surprise threads), and won't *load-balance* onto them. You then explicitly pin your hot threads there (Ch. 42). (Newer kernels prefer the `cpuset`/`cgroup` v2 isolation interface and `isolcpus` is somewhat deprecated, but the concept is identical.)
@@ -56,8 +56,8 @@ The standard scheduling-jitter instrument is **`cyclictest`** (from `rt-tests`):
    $ cyclictest -m -p 80 -i 200 -h 400 -a 5 -t 1 -D 60       # core 5, 200us interval, 60s
    # ... run "stress-ng --cpu 8" etc. on the box to create contention ...
 
-   # After: core 5 isolated (isolcpus,nohz_full,rcu_nocbs=5), IRQs routed away (Ch.40),
-   #        hot thread RT (-p 80), HT sibling idle (Ch.41)
+   # After: core 5 isolated (isolcpus,nohz_full,rcu_nocbs=5), IRQs routed away (Ch.42),
+   #        hot thread RT (-p 80), HT sibling idle (Ch.43)
    $ cyclictest -m -p 80 -i 200 -h 400 -a 5 -t 1 -D 60
 ```
 
@@ -66,10 +66,10 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), i
 ```
    configuration                                    min    avg    max        what's in the max
    stock core, busy system (SCHED_OTHER)            2 µs   15 µs  ~3,000 µs   CFS preemption, tick, IRQs, kworkers
-   pinned only (Ch.40), default kernel              2 µs    3 µs   ~250 µs    no migration, but tick + IRQs + RCU remain
+   pinned only (Ch.42), default kernel              2 µs    3 µs   ~250 µs    no migration, but tick + IRQs + RCU remain
    pinned + isolcpus + RT priority                  1 µs    2 µs    ~40 µs    no preemption, but tick still fires
-   + nohz_full + rcu_nocbs + IRQs away (Ch.40)      1 µs   1.2 µs   ~5 µs     tickless, quiet — tail nearly GONE
-   + mitigations=off, C-states limited (Ch.5)       1 µs   1.0 µs   ~2 µs     firmware/spec-exec noise removed too
+   + nohz_full + rcu_nocbs + IRQs away (Ch.42)      1 µs   1.2 µs   ~5 µs     tickless, quiet — tail nearly GONE
+   + mitigations=off, C-states limited (Ch.6)       1 µs   1.0 µs   ~2 µs     firmware/spec-exec noise removed too
 ```
 
 Read it the Ch. 1 way: **the min/avg barely move; the MAX — the tail — drops from ~3 ms to ~2 µs**, three orders of magnitude, as you add each isolation layer. Pinning alone (Ch. 42) removes migration but leaves the **timer tick, IRQs, and RCU** (max ~250 µs). Adding `isolcpus` + RT priority stops **preemption** (~40 µs) but the **tick still fires** every ms. Only **`nohz_full` + `rcu_nocbs`** (tickless) + **IRQs routed away** (Ch. 42) get the core genuinely quiet (~5 µs), and the last bit comes from the **firmware/spec-exec layer** (Ch. 6 — C-states waking the core, mitigations). This is the canonical low-latency-tuning result and the verification loop: **`cyclictest` max is your jitter; each isolation knob removes one source; tune-measure-repeat until the max is flat.** The remaining spikes after full tuning point at the *last* noise sources (a stray IPI, a SMI from firmware — Ch. 6, an un-offloaded kernel thread) — chase them with `cyclictest -b` (break-trace) / `ftrace` and `/proc/interrupts`. A production latency box is signed off when `cyclictest` (and the real app's tail) shows a flat distribution under realistic load.

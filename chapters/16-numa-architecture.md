@@ -129,7 +129,7 @@ Control where pages land, from coarsest to finest:
 - **`numactl` at launch (process-level).** Wrap the process: `numactl --cpunodebind=0 --membind=0 ./app` forces both CPU and memory to node 0 — the simplest way to make a *single-node* service entirely local. `--preferred=0` is a softer variant (fall back if node 0 is full); `--interleave=all` round-robins pages across nodes — use it **only** for bandwidth-bound, widely-shared structures where no single node is "home," *never* for latency-bound per-thread data.
 - **First-touch discipline (the default policy, used deliberately).** Within a multi-node process, get per-node placement for free by having **each thread initialize (first-write) the memory it will own**, while pinned to its node. The pattern:
   ```cpp
-  // On each worker thread, pinned to its node (Ch. 40), BEFORE the hot loop:
+  // On each worker thread, pinned to its node (Ch. 42), BEFORE the hot loop:
   for (std::size_t i = lo; i < hi; ++i) my_buffer[i] = 0;   // first-touch → pages land on THIS node
   // ... now my_buffer[lo..hi) is local to this thread. Do NOT pre-zero it on the main thread.
   ```

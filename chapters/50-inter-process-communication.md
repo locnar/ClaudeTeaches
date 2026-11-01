@@ -21,14 +21,14 @@ The catch — and the reason IPC needs its own chapter beyond Ch. 26/34 — is t
 **The IPC spectrum, by whether the kernel is in the per-message path:**
 
 ```
-   KERNEL-MEDIATED (a syscall + copy per message — microseconds, Ch.39,44):
+   KERNEL-MEDIATED (a syscall + copy per message — microseconds, Ch.41,47):
      pipes / FIFOs        - byte stream through a kernel buffer; simple, slow
      Unix domain sockets  - like TCP but on-host; faster than TCP, still kernel + copy
      POSIX/SysV msg queues - kernel-managed message queues; kernel + copy
      signals/eventfd       - notification only, not bulk data
 
    SHARED MEMORY (NO kernel per message — nanoseconds, the hot-path IPC):
-     mmap'd shared segment (Ch.25) + a lock-free ring (Ch.33) inside it
+     mmap'd shared segment (Ch.26) + a lock-free ring (Ch.34) inside it
        → producer writes a slot, advances a shared index; consumer reads the SAME pages
        → kernel involved ONLY at setup (shm_open/mmap); zero syscalls per message
 ```
@@ -66,11 +66,11 @@ Measure the gap that justifies shared memory: producer→consumer message latenc
 #include <sys/mman.h>
 #include <unistd.h>
 
-// Shared-memory SPSC ring: head/tail (padded — Ch.32) and slots, all in ONE mmap'd region.
-// Indices are integers; slots hold fixed-size PODs; NO pointers (Ch.46.5).
+// Shared-memory SPSC ring: head/tail (padded — Ch.33) and slots, all in ONE mmap'd region.
+// Indices are integers; slots hold fixed-size PODs; NO pointers (Ch.50.5).
 struct Ring {
     static constexpr std::size_t CAP = 1024;
-    alignas(64) std::atomic<std::uint64_t> head{0};   // producer writes (own cache line — Ch.32)
+    alignas(64) std::atomic<std::uint64_t> head{0};   // producer writes (own cache line — Ch.33)
     alignas(64) std::atomic<std::uint64_t> tail{0};   // consumer writes
     alignas(64) std::uint64_t slot[CAP];              // fixed-size message slots
 };
@@ -79,11 +79,11 @@ int main(int argc, char** argv) {
     bool shm = (argc < 2) || std::strcmp(argv[1], "shm") == 0;
     constexpr long N = 5'000'000;
 
-    // MAP_SHARED|MAP_ANONYMOUS region survives fork() and is shared by parent+child (Ch.25).
+    // MAP_SHARED|MAP_ANONYMOUS region survives fork() and is shared by parent+child (Ch.26).
     void* mem = mmap(nullptr, sizeof(Ring), PROT_READ|PROT_WRITE,
                      MAP_SHARED|MAP_ANONYMOUS, -1, 0);
     Ring* r = new (mem) Ring();
-    std::memset(mem, 0, sizeof(Ring));                 // pre-fault (Ch.22,25)
+    std::memset(mem, 0, sizeof(Ring));                 // pre-fault (Ch.23,26)
 
     int pfd[2]; if (!shm) pipe(pfd);
 
@@ -116,11 +116,11 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), p
 
 ```
    IPC mechanism                         throughput        ns/msg     note
-   pipe (kernel-mediated)                ~3-8 Mmsg/s       ~150-300 ns  write+read syscalls + copies (Ch.39,44)
+   pipe (kernel-mediated)                ~3-8 Mmsg/s       ~150-300 ns  write+read syscalls + copies (Ch.41,47)
    Unix domain socket                    ~5-10 Mmsg/s      ~120-250 ns  faster than pipe, still kernel+copy
-   shared-memory SPSC ring (busy-poll)   ~80-150 Mmsg/s    ~7-15 ns     NO kernel per message — like threads (Ch.33)
+   shared-memory SPSC ring (busy-poll)   ~80-150 Mmsg/s    ~7-15 ns     NO kernel per message — like threads (Ch.34)
 
-   the shared-memory ring is ~20x faster — same as the in-PROCESS SPSC ring (Ch.33.3).
+   the shared-memory ring is ~20x faster — same as the in-PROCESS SPSC ring (Ch.34.3).
 ```
 
 Read it: the **shared-memory ring is ~20× faster than a pipe** and lands at *the same ~7-15 ns/msg as the in-process SPSC ring* (Ch. 34.3) — because, at the hardware level, *it is the same thing*: a lock-free ring over shared cache lines, just with the producer and consumer in different processes (§50.2). The **pipe** pays a `write` syscall (copy user→kernel) and a `read` syscall (copy kernel→user) **per message** — the per-syscall cost (Ch. 41, 47) plus copies dominate, capping it at single-digit Mmsg/s. The lesson is unambiguous: **for hot-path IPC, use a shared-memory lock-free ring — it makes the process boundary as cheap as a thread boundary; reserve pipes/sockets/msg-queues for control-plane/low-rate IPC** where the convenience (kernel handles framing/lifecycle) outweighs the latency. (Note the ring's details that carry over from Ch. 34: padded head/tail — Ch. 33, power-of-two — Ch. 28, acquire/release — Ch. 30, pre-faulted — Ch. 23/26, integer indices — §50.5.)

@@ -26,7 +26,7 @@ The **order book** is the aggregated set of resting buy orders (**bids**) and se
 - **Depth** is the size available beyond the top — level 2, level 3, and deeper. A "deep book" update touches a level away from the top; a "top-of-book" update moves the BBO. This distinction drives data-structure choice (Ch. 24–25: array-of-pointers vs. intrusive lists for levels; BBO fast path vs. deep-book path).
 - The **NBBO** (National Best Bid and Offer) is the best bid/ask *across all venues* for a US-equity symbol — a consolidated view a strategy compares its local book against.
 
-**Building the book** from a feed is the feed handler's core job (Ch. 25, 53): apply each incremental message (add / modify / delete / execute) to the right price level, maintaining the sorted levels and the BBO, so downstream strategy code can read a coherent snapshot cheaply (ties Ch. 34's seqlock publication).
+**Building the book** from a feed is the feed handler's core job (Ch. 25, 53): apply each incremental message (add / modify / delete / execute) to the right price level, maintaining the sorted levels and the BBO, so downstream strategy code can read a coherent snapshot cheaply (ties Ch. 35's seqlock publication).
 
 ## J.3 The order lifecycle
 
@@ -65,7 +65,7 @@ The wire formats the decoder chapters parse (Ch. 53). Two axes: **market data vs
 The functions the process-topology chapter (Ch. 74) maps onto separate processes:
 
 - **Feed handler** — receives market data (J.4), performs A/B arbitration and gap recovery, decodes messages (J.5).
-- **Book builder** — applies decoded messages to maintain order books and the BBO (J.2), publishing snapshots to strategies (Ch. 34).
+- **Book builder** — applies decoded messages to maintain order books and the BBO (J.2), publishing snapshots to strategies (Ch. 35).
 - **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — outside this book's scope, but the thing everything else serves).
 - **Order gateway / OMS** — encodes and sends orders (J.3), tracks their state machine, handles acks/fills/cancels.
 - **Pre-trade risk** — enforces limits on the order path (J.3) before anything reaches the wire.
@@ -80,9 +80,9 @@ One market event, from wire to wire — the narrative Ch. 76 measures:
 3. The book builder **applies** it, updating the affected price level and the BBO (J.2, Ch. 25).
 4. The strategy sees the changed book, evaluates its signal, and **decides** to act.
 5. Pre-trade **risk** validates the intended order (J.3).
-6. The order gateway **encodes** the order (OUCH/SBE — J.5) and writes it to the wire (Ch. 52, 55).
+6. The order gateway **encodes** the order (OUCH/SBE — J.5) and writes it to the wire (Ch. 51, 55).
 
-Each hop has a latency budget; the sum, measured wire-to-wire with hardware timestamps (Ch. 56, Appendix K.5), is the **tick-to-trade** number the whole book exists to minimize (Ch. 1, 76). The physical floor beneath it — colocation, cabling, the exchange link — is Appendix K.
+Each hop has a latency budget; the sum, measured wire-to-wire with hardware timestamps (Ch. 58, Appendix K.5), is the **tick-to-trade** number the whole book exists to minimize (Ch. 1, 76). The physical floor beneath it — colocation, cabling, the exchange link — is Appendix K.
 
 ## J.8 References
 
