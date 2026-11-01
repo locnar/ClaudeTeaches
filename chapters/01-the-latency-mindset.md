@@ -2,7 +2,7 @@
 
 # Chapter 1 — The Latency Mindset
 
-> **Prerequisites:** Solid C++17/20 and Linux fundamentals. No special hardware or tooling yet — this chapter is about *how to think*, not what to install. A C++20 compiler (GCC 11+ or Clang 14+) is enough to run the one worked example.
+> **Prerequisites:** Solid C++17/20 and Linux fundamentals. No special hardware or tooling yet — this chapter is about *how to think*, not what to install. The one worked example uses C++23's `<print>` as written (GCC 14+, or Clang 18+ with libc++); GCC 13 / Clang 17 can use the `std::format` fallback in §1.3, and older compilers `printf`/iostreams.
 >
 > **Leads into:** Ch. 2 (*Measure First: Profiling & Hardware Performance Counters*) and Ch. 3 (*Micro-benchmarking Done Right*) turn the mindset established here into tools and rigor. Appendix E (*Latency Numbers Every Trading Developer Should Know*) is the quantitative companion to §1.2.3's budget.
 
@@ -108,8 +108,9 @@ The sample is synthetic so the chapter is self-contained and reproducible on the
 
 ```cpp
 // latency_shape.cpp — why the mean lies on a heavy-tailed latency sample.
-// Build: g++ -std=c++20 -O2 latency_shape.cpp -o latency_shape
-//   (Clang: clang++ -std=c++20 -O2 ...). No external deps.
+// Build: g++ -std=c++23 -O2 latency_shape.cpp -o latency_shape      (GCC 14+ / libstdc++ 14)
+//   (Clang 18+: clang++ -std=c++23 -stdlib=libc++ -O2 ...). No external deps.
+//   <print> is C++23 -- see the note below for the C++20 fallback.
 #include <algorithm>
 #include <cstdint>
 #include <print>      // C++23 <print>; see note below for the C++20 fallback.
@@ -198,7 +199,7 @@ Read that output the way a hot-path engineer reads it:
 
 This is the entire mindset in one program: **the mean told you the system was fine; the percentiles told you the truth.**
 
-> **C++20 fallback for `<print>`.** `std::println` (`<print>`, P2093) ships in GCC 14+ and Clang 17+ (libc++). On an older toolchain, replace the `std::println(...)` calls with `std::cout << std::format(...) << '\n';` (`<format>`, C++20, GCC 13+/Clang 14+), or with classic `printf`/iostreams. We use `<print>` throughout the book for *off-hot-path* output and explain in Ch. 71 why formatted I/O never belongs on the hot path itself.
+> **C++20 fallback for `<print>`.** `std::println` (`<print>`, P2093) ships in GCC 14+ (libstdc++ 14) and Clang 18+ (libc++ 18; the `stdout`/`FILE*` overloads used here were already in libc++ 17) — see Appendix H — and needs `-std=c++23`. On an older toolchain, replace the `std::println(...)` calls with `std::cout << std::format(...) << '\n';` (`<format>`, C++20, GCC 13+/Clang 14+), or with classic `printf`/iostreams. We use `<print>` throughout the book for *off-hot-path* output and explain in Ch. 71 why formatted I/O never belongs on the hot path itself.
 
 ---
 

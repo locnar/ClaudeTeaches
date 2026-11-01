@@ -41,12 +41,12 @@ Compiler front-end features; these are gated by *language* macros (predefined by
 | Concepts (Ch. 19) | P0734 | GCC 10 | Clang 10 | `__cpp_concepts >= 201907` | SFINAE / `std::enable_if` |
 | Coroutines (Ch. 38–39) | P0912 | GCC 10 | Clang 8 (`-fcoroutines-ts` earlier) | `__cpp_impl_coroutine` | callbacks / state machines by hand |
 | `[[likely]]` / `[[unlikely]]` (Ch. 12) | P0479 | GCC 9 | Clang 12 | `__has_cpp_attribute(likely)` | `__builtin_expect(x, 1/0)` |
-| `[[assume]]` (Ch. 21) | P1774 | GCC 13 | Clang 19 | `__has_cpp_attribute(assume)` | `__builtin_assume` (Clang/GCC-13), `__builtin_unreachable()` in the else |
+| `[[assume]]` (Ch. 21) | P1774 | GCC 13 | Clang 19 | `__has_cpp_attribute(assume)` | `__builtin_assume(x)` (Clang) / `__attribute__((assume(x)))` (GCC 13+); GCC has no `__builtin_assume` — portable idiom `if (!(x)) __builtin_unreachable();` |
 | `if consteval` (Ch. 18) | P1938 | GCC 12 | Clang 14 | `__cpp_if_consteval >= 202106` | `std::is_constant_evaluated()` (C++20) |
 | Deducing `this` (Ch. 19) | P0847 | GCC 14 | Clang 18 | `__cpp_explicit_this_parameter` | CRTP (Ch. 19) or duplicated const/non-const overloads |
 | Multidimensional `operator[]` (Ch. 29) | P2128 | GCC 12 | Clang 17 | `__cpp_multidimensional_subscript` | `operator()` or a single flattened index |
 
-**Trading relevance.** `[[likely]]`/`[[unlikely]]` and `[[assume]]` are the direct hot-path levers (Ch. 12, 21) — but note the fallback (`__builtin_expect`/`__builtin_assume`) is universally available and is what the standard attributes lower to anyway, so portability here costs nothing. `consteval`/`constinit` move work and initialization to compile time (Ch. 18) — high value for lookup tables and configuration baked at build time. Deducing `this` is a nicety that can replace some CRTP boilerplate (Ch. 19), but CRTP remains the portable, well-understood choice.
+**Trading relevance.** `[[likely]]`/`[[unlikely]]` and `[[assume]]` are the direct hot-path levers (Ch. 12, 21) — but note the fallbacks are what the standard attributes lower to anyway: `__builtin_expect` is universal, while the assume fallback is compiler-specific (`__builtin_assume` on Clang, `__attribute__((assume))` on GCC 13+, else the `__builtin_unreachable()` idiom) — so portability here costs a one-line macro at most. `consteval`/`constinit` move work and initialization to compile time (Ch. 18) — high value for lookup tables and configuration baked at build time. Deducing `this` is a nicety that can replace some CRTP boilerplate (Ch. 19), but CRTP remains the portable, well-understood choice.
 
 ## H.4 Concurrency & execution
 

@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with the dTLB counters: `perf stat -e cycles,instructions, dtlb_load_misses.miss_causes_a_walk,dtlb_load_misses.walk_active, dtlb_load_misses.walk_completed,L1-dcache-load-misses ./tlb` (run `./tlb` and `./tlb huge`; the `huge` run needs reserved hugepages — `sysctl vm.nr_hugepages=...` or a hugetlbfs mount; see §15.4.1). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *direction* is the point):
+Profile both with the dTLB counters: `perf stat -e cycles,instructions,dtlb_load_misses.miss_causes_a_walk,dtlb_load_misses.walk_active,dtlb_load_misses.walk_completed,L1-dcache-load-misses ./tlb` (run `./tlb` and `./tlb huge`; the `huge` run needs reserved hugepages — `sysctl vm.nr_hugepages=...` or a hugetlbfs mount; see §15.4.1). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *direction* is the point):
 
 ```
                                           4K pages           2M huge pages
@@ -170,7 +170,7 @@ The unifying point: **TLB pressure is a function of how many pages you touch and
 
 **Exercises**
 
-1. **Measure the translation tax.** Build `tlb.cpp`, run 4 KB vs 2 MB (reserve hugepages via `sysctl vm.nr_hugepages`), and `perf stat -e dtlb_load_misses.walk_completed, dtlb_load_misses.walk_active,L1-dcache-load-misses`. Confirm: same data-cache misses, but walks collapse and ns/probe drops on 2 MB. What fraction of cycles was `walk_active` on 4 KB?
+1. **Measure the translation tax.** Build `tlb.cpp`, run 4 KB vs 2 MB (reserve hugepages via `sysctl vm.nr_hugepages`), and `perf stat -e dtlb_load_misses.walk_completed,dtlb_load_misses.walk_active,L1-dcache-load-misses`. Confirm: same data-cache misses, but walks collapse and ns/probe drops on 2 MB. What fraction of cycles was `walk_active` on 4 KB?
 2. **Find the TLB cliff.** Sweep the region size from 64 KB up to 4 GiB with random probes on 4 KB pages; plot ns/probe and `dtlb_load_misses.walk_completed`. Identify the knees at the dTLB reach (~256 KB) and STLB reach (~8 MB). Repeat on 2 MB pages — where do the knees move?
 3. **Sequential vs random at page scale.** Run the §15.3 probe sequentially vs randomly over the same 1 GiB region (4 KB pages). How much does the *page-walk* count differ for identical bytes touched? Explain via translation prefetching (§15.2.2).
 4. **Container layout and the TLB.** Build the same key set as a contiguous `std::vector`/ `flat_map` (Ch. 25) and as a node-based `std::map`. Traverse each; compare `dtlb_load_misses.walk_completed`. Quantify the "one TLB miss per scattered node" effect (§15.4.2).

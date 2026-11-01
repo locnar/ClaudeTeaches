@@ -66,7 +66,9 @@ Measure per-message decode latency across the encoding spectrum (§53.2.1): fixe
 
 ```cpp
 // decode.cpp — decode latency: fixed-binary overlay vs FIX text parse.
-// Build: g++ -O2 -std=c++20 -march=native decode.cpp -o decode
+// Build: g++ -O2 -std=c++23 -march=native decode.cpp -o decode
+//   (std::byteswap is C++23 <bit>: GCC 12+/libstdc++ 12, Clang 14+/libc++ 14 -- Appendix H;
+//    on C++20 toolchains substitute __builtin_bswap64/__builtin_bswap32.)
 // Run pinned:  taskset -c 2 ./decode
 #include <cstdio>
 #include <cstdint>

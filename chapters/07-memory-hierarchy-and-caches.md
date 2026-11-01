@@ -107,6 +107,7 @@ The classic experiment that makes the whole hierarchy *visible* is a **pointer-c
 // cache_sweep.cpp — reveal L1/L2/L3/DRAM by measuring pointer-chase latency vs size.
 // Build: g++ -O2 -std=c++20 cache_sweep.cpp -o cache_sweep
 // Run pinned with fixed frequency (Ch.3, 6):  taskset -c 2 ./cache_sweep
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>

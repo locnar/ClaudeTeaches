@@ -235,15 +235,16 @@ Two things to confirm, both the *point* of the chapter:
 
 1. **The hot path is contiguous.** The bytes that run on the common case (`mov/imul/add/ret`) are a straight sequence with no cold code between them — they pack densely into L1i lines and the DSB. The unlikely arm is a single forward `jne` to `.Lcold`, which the static predictor treats as not-taken (Ch. 13), and whose target lives elsewhere.
 
-2. **The cold code is in a different section.** Check the section table — the cold body and `handle_gap` land in **`.text.unlikely`**, physically separated from `.text.hot`/`.text`:
+2. **The cold code is in a different section.** Check the section table of the *object file* — the cold body (`process.cold`) and `handle_gap` land in **`.text.unlikely`**, physically separated from `.text` (a `.text.hot` section appears only when something is marked `[[gnu::hot]]` or a PGO profile says so):
 
    ```
-   $ readelf -S a.out | grep -E '\.text'
-     [12] .text             PROGBITS  ... AX
-     [13] .text.hot         PROGBITS  ... AX      <- hot functions clustered
-     [14] .text.unlikely    PROGBITS  ... AX      <- cold arms + [[gnu::cold]] fns here
-   $ objdump -d --section=.text.unlikely a.out | grep handle_gap   # confirms placement
+   $ g++ -O2 -std=c++20 -c process.cpp && readelf -SW process.o | grep -E '\.text'
+     [ 1] .text             PROGBITS  ... AX
+     [ 5] .text.unlikely    PROGBITS  ... AX      <- cold arms (process.cold) + [[gnu::cold]] fns here
+   $ nm -C a.out | grep -E 'process|handle_gap'       # linked binary: cold pieces sit at distant addresses
    ```
+
+   In the linked executable GNU ld's default script folds the `.text.unlikely` (and `.text.hot`) *input* sections into the single `.text` *output* section — cold input first, hot after — so `readelf -S a.out` shows only `.text`; the separation survives as address distance, which is what `nm` shows.
 
    That separation is what keeps the kilobytes of `handle_gap` (and every other cold handler) out of the hot path's L1i working set. Without `[[unlikely]]`/`[[gnu::cold]]` (or with the `BLOAT` inline of §12.3), the cold body would be emitted *inline* in `process`, padding the hot bytes and spilling the DSB.
 
@@ -268,7 +269,7 @@ The verification habit: for a hot function, **disassemble it and confirm the com
 
 **Exercises**
 
-1. **Measure the bloat.** Build `frontend.cpp` lean and with `-DBLOAT`, run both pinned/ turbo-off, and `perf stat -e cycles,instructions,idq_uops_not_delivered.core,idq.dsb_uops, idq.mite_uops,frontend_retired.l1i_miss,L1-dcache-load-misses,branch-misses`. Confirm: same data-cache and branch behavior, but the bloat build is Front-End-Bound (high `idq_uops_not_delivered`, DSB→MITE). What's the IPC of each?
+1. **Measure the bloat.** Build `frontend.cpp` lean and with `-DBLOAT`, run both pinned/ turbo-off, and `perf stat -e cycles,instructions,idq_uops_not_delivered.core,idq.dsb_uops,idq.mite_uops,frontend_retired.l1i_miss,L1-dcache-load-misses,branch-misses`. Confirm: same data-cache and branch behavior, but the bloat build is Front-End-Bound (high `idq_uops_not_delivered`, DSB→MITE). What's the IPC of each?
 2. **Verify the section split.** Compile the §12.5 dispatcher with `-O2 -freorder-blocks-and-partition`. Disassemble `process` (Ch. 4) and confirm the hot path is a contiguous fall-through with the rare arm tail-jumping out. Run `readelf -S` / `objdump -d --section=.text.unlikely` and confirm `handle_gap` landed in `.text.unlikely`. Now remove `[[unlikely]]`/`[[gnu::cold]]` — where does the cold body go?
 3. **DSB coverage of a loop.** Take a hot loop and grow its body (add inlined helpers) until `idq.mite_uops` overtakes `idq.dsb_uops`. Find the size where it spills the µop cache. Does `-falign-loops=32` change the threshold?
 4. **PGO the dispatcher.** Build a small message-dispatch program instrumented (`-fprofile-generate`), replay a representative message mix, rebuild `-fprofile-use`. Diff the section placement and the front-end counters vs the non-PGO build. Did hot functions cluster?

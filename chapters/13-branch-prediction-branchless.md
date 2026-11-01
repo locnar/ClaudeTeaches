@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with `perf stat -e cycles,instructions,branches,branch-misses, L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *ratio* is the point):
+Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                                  sorted (predictable)   shuffled (unpredictable)
@@ -241,7 +241,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 
 **Exercises**
 
-1. **Measure the mispredict cost.** Build `branch.cpp`, run `sorted` vs `shuffled` pinned/ turbo-off with `perf stat -e cycles,instructions,branches,branch-misses, L1-dcache-load-misses`. Confirm: same instructions and memory, but ~50% `branch-misses` and ~4× slowdown on shuffled. What's the IPC of each? Which top-down bucket (Ch. 2) is shuffled?
+1. **Measure the mispredict cost.** Build `branch.cpp`, run `sorted` vs `shuffled` pinned/ turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Confirm: same instructions and memory, but ~50% `branch-misses` and ~4× slowdown on shuffled. What's the IPC of each? Which top-down bucket (Ch. 2) is shuffled?
 2. **Did the compiler go branchless?** Disassemble the §13.3 loop at `-O1`, `-O2`, `-O3` (Ch. 4). At which level does the `jcc` become a `cmov`/masked add? When it does, re-run §13.3 — does the sorted/shuffled gap disappear? Explain why.
 3. **`cmov` vs branch on predictable data.** Take a *highly predictable* branch (e.g. 99% one-way) and force a branchless version (explicit `cmov`/mask). Measure both. Is branchless *slower*? Tie the result to the control-vs-data-dependency trade-off (§13.4.1, §13.6).
 4. **Build a dispatch table.** Replace an `if/else` (or `switch`) message-type classifier with a `constexpr` lookup table indexed by the type byte. Measure on a mixed (unpredictable) message stream. Compare against the branch chain *and* against sorting the stream by type first (§13.4.3).
