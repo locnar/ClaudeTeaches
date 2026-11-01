@@ -387,7 +387,7 @@ If the author wants the smallest set of additions that closes the gaps they name
 ## Files in this review
 
 - `review/2026-10-30-consistency-review-and-gap-analysis.md` — this report.
-- `review/2026-10-30-findings-part1-ch01-26.md`, `…-part2-ch27-52.md`, `…-part3-ch53-76-appendices-bookwide.md` — every finding grouped by file with the verifier's verdict (confirmed / refuted / duplicate / verifier-added), severity, quote, problem and suggested fix.
+- `review/2026-10-30-findings-part1-ch01-26.md`, `…-part2-ch27-52.md`, `…-part3-ch53-76.md`, `…-part4-appendices-frontmatter-bookwide.md` — every finding grouped by file with the verifier's verdict (confirmed / refuted / duplicate / verifier-added), severity, quote, problem and suggested fix.
 - `review/2026-10-30-stale-crossrefs.md` — the mechanically detected stale cross-references (fenced: near-certain; prose: heuristic).
 - `review/2026-10-30-gap-verification.md` — the skeptical coverage pass over the 92 merged items: verdict, grep evidence, where the closest existing coverage is, refined placement and priority reasoning.
 - `review/2026-10-30-gap-proposals-raw.txt` — the 163 raw gap proposals from the fourteen lenses (title, placement, scope bullets, claimed existing coverage, grep evidence), keyed by the source tags used in §10.
