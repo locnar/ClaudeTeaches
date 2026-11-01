@@ -80,6 +80,24 @@ Prose stale references confirmed by reviewers include blockquotes and tables, e.
 2. Hand-fix Appendices H–L (their map is different: PTP 56→58, security 60→72, FPGA 68→69, tooling 38→40, false sharing 32→33, seqlock 34→35, `std::execution` 40→39, logging 59→71, bit tricks 27→28).
 3. Extend the consistency sweep so fenced references are checked, and add the title-keyword heuristic used here as a standing test.
 
+**Status (2026-11-01): remap applied** (work-queue item P0-1, branch `claude/nice-sagan-lcm5yd`). The fenced-block
+remap was re-run with `tools/review/`-style tooling over the 64 original chapter files plus Appendix D only (never the
+twelve inserted chapters): 213 fenced references rewritten by script (`Ch.N`, `Ch. N`, ranges/lists such as `Ch.62-63`
+and `Ch. 6,11,14,43`, and `§N.M`), with every proposed change read before applying and 13 further fenced references
+hand-fixed afterwards (inserted-chapter diagrams `54:27` → Ch. 52, `57:26/27` → Ch. 16/44, `59:27` → Ch. 58, and
+Appendix I/L command comments). 49 prose references were corrected by hand with judgement, including every item in
+the confirmed list above (`22:5`, `28:7`, `30:7`, `31:5`/`32:5`, `32:7/202`, `37:187`, `40:24`, `57:7`, `75:35`,
+Ch. 60's seven colocation pointers → Appendix K, Appendices C:45, E:3, G:30, H (nine refs), I (eight), J (four),
+K (three), L (two)). Result: the detector's FENCED STALE count fell from 140 to 7 (all seven are heuristic false
+positives on now-correct numbers — e.g. `50:69 "padded — Ch.33"` *is* False Sharing) and its fenced `ok` count rose
+from 25 to 148; the structural sweep is unchanged. 156 of the 172 flagged prose rows were reviewed and left alone as
+false positives (ranges such as "Ch. 7–10" meaning "this and the next chapters", a chapter's own `§N.x` references,
+and targets whose keywords the heuristic misreads); every `§N.M`/`Ch. N.M` reference in the book was also verified to
+resolve to an existing heading. Deliberately **not** changed: Ch. 17's six "Ch. 6" clocksource pointers (a content gap,
+item P1-6), `19:237` "inlining (Ch. 11)" (ambiguous — Ch. 11 is used consistently for back-end scheduling across call
+boundaries), Appendix H:58 `std::jthread` (Ch. 30) (neither Ch. 30 nor 31 mentions it), and the no-space `Ch.NN`
+spelling inside fenced ASCII diagrams and tables, where inserting a space would break column alignment.
+
 ---
 
 ## 4. Systemic issue: numbers that disagree with each other

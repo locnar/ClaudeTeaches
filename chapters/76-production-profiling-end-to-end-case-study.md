@@ -23,13 +23,13 @@ Low-latency systems must be observed **continuously, in production, at near-zero
 ```
    PRODUCTION (always-on, ~free)                    OFFLINE / CI (deep, expensive)
    ─────────────────────────────                    ─────────────────────────────
-   • per-stage timestamps (TSC/PTP, Ch.16/50)       • perf/VTune/top-down (Ch.2) on a replay
+   • per-stage timestamps (TSC/PTP, Ch.17/58)       • perf/VTune/top-down (Ch.2) on a replay
    • HdrHistogram per stage (Ch.3) — the tail        • flame graphs, PMU counters (Ch.2)
-   • eBPF/bpftrace low-overhead tracing (Ch.51)      • deterministic replay (Ch.62-63) + golden diff
-   • capture every tick/order (Ch.63)                • latency-regression gate (§64.4.1)
-   • counters: drops, gaps, queue depths, restarts   • simulation harness (§64.4.3)
+   • eBPF/bpftrace low-overhead tracing (Ch.61)      • deterministic replay (Ch.74-75) + golden diff
+   • capture every tick/order (Ch.75)                • latency-regression gate (§76.4.1)
+   • counters: drops, gaps, queue depths, restarts   • simulation harness (§76.4.3)
         │                                                      ▲
-        └──────── capture (Ch.63) feeds offline analysis & replay ───────┘
+        └──────── capture (Ch.75) feeds offline analysis & replay ───────┘
 ```
 
 The two halves and how they connect:

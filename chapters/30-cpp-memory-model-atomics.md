@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 7 (cache coherence/MESI — atomics are coherence operations; the cost is cache-line traffic), Ch. 11 (out-of-order execution — the hardware reordering atomics constrain), Ch. 21 (the compiler reordering atomics also constrain), Ch. 4 (reading asm — §30.5 reads the emitted barriers), Ch. 33-preview (false sharing — the cost of contended atomics).
 >
-> **Leads into:** the rest of Part VI — Ch. 31 (threading), 31 (spinlocks), 32 (false sharing — the cost of atomics), 33 (lock-free structures built on these orderings), 34 (seqlocks), 35 (reclamation). This chapter is the *foundation* every lock-free pattern in Part VI rests on. ARM's weaker model is Appendix A.
+> **Leads into:** the rest of Part VI — Ch. 31 (threading), 32 (spinlocks), 33 (false sharing — the cost of atomics), 34 (lock-free structures built on these orderings), 35 (seqlocks), 36 (reclamation). This chapter is the *foundation* every lock-free pattern in Part VI rests on. ARM's weaker model is Appendix A.
 
 ---
 
@@ -95,12 +95,12 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, x8
 ```
    UNCONTENDED store (single thread):
    relaxed   ~0.3 ns/store     plain mov — no barrier
-   release   ~0.3 ns/store     plain mov on x86! (TSO gives release free — §29.5)
+   release   ~0.3 ns/store     plain mov on x86! (TSO gives release free — §30.5)
    seq_cst   ~5-7 ns/store     xchg/mfence — full barrier, ~20x the relaxed store
 
    CONTENDED fetch_add (M cores hammering one line):
    M=1       ~6 ns/op          uncontended RMW (the atomic itself, line stays local)
-   M=2       ~40 ns/op         line ping-pongs between 2 cores (HITM — Ch. 6/32)
+   M=2       ~40 ns/op         line ping-pongs between 2 cores (HITM — Ch. 7/33)
    M=4       ~110 ns/op        ... worse; cache line bounces among 4 cores
    M=8       ~250 ns/op        contention dominates; ~negative scaling
 ```
@@ -139,7 +139,7 @@ The single most clarifying thing about the memory model is *seeing what each ord
         mov     qword ptr [rdi], rsi
 
 ; x.store(v, seq_cst):    needs a full barrier — xchg (implicitly locked) or mov+mfence
-        xchg    qword ptr [rdi], rsi        ; the seq_cst store is ~20x the relaxed store (§29.3)
+        xchg    qword ptr [rdi], rsi        ; the seq_cst store is ~20x the relaxed store (§30.3)
 
 ; x.load(acquire)  AND  x.load(seq_cst)  AND  x.load(relaxed):  IDENTICAL — plain load (TSO)
         mov     rax, qword ptr [rdi]

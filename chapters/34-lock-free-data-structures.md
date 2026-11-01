@@ -58,7 +58,7 @@ The SPSC ring is the structure that matters most, so measure *it*: producer→co
 #include <new>
 #include <vector>
 
-template <class T, std::size_t CAP>   // CAP must be a power of two (Ch. 27: index & (CAP-1))
+template <class T, std::size_t CAP>   // CAP must be a power of two (Ch. 28: index & (CAP-1))
 class SpscRing {
     static_assert((CAP & (CAP - 1)) == 0, "power of two");
     std::vector<T> buf_{CAP};
@@ -69,7 +69,7 @@ public:
         std::size_t h = head_.load(std::memory_order_relaxed);
         if (h - tail_.load(std::memory_order_acquire) == CAP) return false;  // full
         buf_[h & (CAP - 1)] = v;
-        head_.store(h + 1, std::memory_order_release);                       // publish (Ch. 29)
+        head_.store(h + 1, std::memory_order_release);                       // publish (Ch. 30)
         return true;
     }
     bool pop(T& v) {
@@ -102,10 +102,10 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), p
 
 ```
    SPSC ring, padded head/tail:        ~80-150 Mmsg/s   (~7-12 ns/msg)   <- one line each way
-   SPSC ring, head/tail SAME line:     ~25 Mmsg/s        (~40 ns/msg)     <- false sharing (Ch. 32): 3-5x worse
+   SPSC ring, head/tail SAME line:     ~25 Mmsg/s        (~40 ns/msg)     <- false sharing (Ch. 33): 3-5x worse
    + batching (amortize index loads):  ~300+ Mmsg/s                      <- read opposite index less often
 
-   vs a std::mutex-protected queue:    ~10-20 Mmsg/s     (lock + futex under contention — Ch. 31)
+   vs a std::mutex-protected queue:    ~10-20 Mmsg/s     (lock + futex under contention — Ch. 32)
 ```
 
 Read it: the padded SPSC ring hands off a message in ~7-12 ns — each operation touches the producer's `head` line and the consumer's `tail` line, plus the slot, with one cache-line transfer per direction (the inherent cost of moving data between cores, Ch. 7); no lock, no syscall, no allocation. **Putting `head` and `tail` on the same cache line (no padding) is 3-5× slower** — the exact false-sharing bug of Ch. 33 in the hottest structure, the most common SPSC mistake. **Batching** (reading the opposite index less frequently — caching it locally and only re-reading when the cached value says full/empty) amortizes the cross-core read and pushes throughput much higher. And the whole thing dwarfs a mutex-protected queue (Ch. 32). The lessons that carry: **pad head/tail (Ch. 33), use power-of-two capacity (Ch. 28: `& (CAP-1)`, no modulo), acquire/release ordering (Ch. 30: publish with release, observe with acquire), pre-allocate the buffer (no hot-path allocation — Ch. 23), and batch to amortize the cross-core index reads.** This SPSC ring — correct, padded, batched — is the data-plane primitive most of the system runs on.

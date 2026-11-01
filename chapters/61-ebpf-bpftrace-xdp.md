@@ -50,7 +50,7 @@ The key question for production use: **how much does a probe cost?** Measure the
 ```
    # bpftrace one-liners (the observability payoff):
    $ bpftrace -e 'kprobe:vfs_read { @ = hist(nsecs); }'                  # histogram of read latency
-   $ bpftrace -e 'tracepoint:syscalls:sys_enter_* { @[probe] = count(); }'  # syscall counts (Ch.39!)
+   $ bpftrace -e 'tracepoint:syscalls:sys_enter_* { @[probe] = count(); }'  # syscall counts (Ch.41!)
    $ bpftrace -e 'uprobe:/path/app:process_message { @start[tid] = nsecs; }
                   uretprobe:/path/app:process_message /@start[tid]/
                     { @lat = hist(nsecs - @start[tid]); }'                # YOUR function's latency dist
@@ -71,7 +71,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), i
      @[ns]:  [1K, 2K)  ████████  ...  [256K, 512K)  ▏  ← the rare slow tail you couldn't see otherwise
 
    the lesson: tracepoints/USDT are cheap (use freely); UPROBES are expensive (a kernel trap per hit) —
-   do NOT put a uprobe on a hot-path function called millions of times/sec (§51.5).
+   do NOT put a uprobe on a hot-path function called millions of times/sec (§61.5).
 ```
 
 Read it: eBPF observability's value is that it gives you **production latency distributions** (the histogram — the p99.9 tail you can't see from averages, Ch. 1) for *any* function, *live*, without recompiling — `bpftrace` one-liners answer "what's slow right now" in seconds. But the **overhead varies by probe type by orders of magnitude**: **tracepoints** (~tens of ns, stable kernel instrumentation) and **USDT** (markers you place) are *cheap* — fine to run in production broadly. **kprobes** are dynamic and slightly more. **uprobes** (probing a user-space function) are *expensive* — each hit is a **trap into the kernel** (~hundreds of ns to µs), so a uprobe on a function called *millions of times per second on the hot path* adds enormous overhead and *changes the latency you're trying to measure* (the observer effect — §61.5). The discipline: **use cheap tracepoints/USDT freely for production observability; use uprobes sparingly and never on the hottest functions; and never run tracing *in* the tick-to-trade loop** — trace *near* the hot path to understand it, off the critical path. The right model: instrument with **USDT markers** at key boundaries (you control where, they're cheap), use **tracepoints/kprobes** for kernel-side latency (syscalls — Ch. 41, scheduling, block I/O), and reach for a uprobe only for ad-hoc debugging of a *non*-hottest function.

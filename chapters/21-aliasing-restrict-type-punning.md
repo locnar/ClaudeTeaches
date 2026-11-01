@@ -93,7 +93,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, AV
 ```
                               plain (may alias)     restrict (no alias)
 ns / element                     ~0.50 ns              ~0.09 ns        <- ~5x faster
-vectorized? (§20.5)              scalar / guarded      packed SIMD
+vectorized? (§21.5)              scalar / guarded      packed SIMD
 instructions retired             more (scalar)         far fewer (8-16/iter folded)
 L1-dcache accesses               ~same data            ~same data      <- memory NOT the cause
 ```

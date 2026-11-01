@@ -111,8 +111,8 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), p
 ```
    structure                       throughput        ns/msg     note
    Disruptor (batched, padded)     ~250-400 Mmsg/s   ~3-5 ns    batching amortizes coordination
-   SPSC ring (Ch. 33, per-msg)     ~80-150 Mmsg/s    ~7-12 ns   one coordination per message
-   std::mutex queue                ~10-20 Mmsg/s     ~60 ns     lock + contention (Ch. 31)
+   SPSC ring (Ch. 34, per-msg)     ~80-150 Mmsg/s    ~7-12 ns   one coordination per message
+   std::mutex queue                ~10-20 Mmsg/s     ~60 ns     lock + contention (Ch. 32)
 
    under a burst (consumer briefly stalls, then catches up):
    Disruptor max-batch observed:   hundreds-thousands of entries in one batch  ← latency RECOVERS
@@ -184,7 +184,7 @@ Batching is the Disruptor's throughput-and-latency engine, and it's *automatic* 
 - The LMAX Disruptor project (and `disruptor-cpp` ports) — the reference implementation, padding discipline, sequence barriers, and wait strategies (§37.4-§37.5).
 - M. Thompson, *"Mechanical Sympathy"* blog and talks — the cache-aware design philosophy behind the Disruptor (ties Ch. 7–10, 33).
 - Ch. 34 references (Vyukov, Michael-Scott) — the ring-buffer/queue foundations the Disruptor builds on and surpasses.
-- The Aeron messaging system (Thompson et al.) — the Disruptor's ideas extended to networked/IPC messaging (ties Ch. 26, 50).
+- The Aeron messaging system (Thompson et al.) — the Disruptor's ideas extended to networked/IPC messaging (ties Ch. 50, 65).
 
 ## 37.8 Additional Reading
 

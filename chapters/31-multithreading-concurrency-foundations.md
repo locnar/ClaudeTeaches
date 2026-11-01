@@ -2,7 +2,7 @@
 
 # Chapter 31 — Multithreading & Concurrency Foundations
 
-> **Prerequisites:** Ch. 30 (atomics & the memory model — the cost of sharing this chapter designs *around*), Ch. 7 & 32-preview (cache coherence / false sharing — the physical cost of contention), Ch. 16 (NUMA — cross-socket sharing), Ch. 1 (tail latency — contention spikes the tail), Ch. 3 (measuring scalability curves).
+> **Prerequisites:** Ch. 30 (atomics & the memory model — the cost of sharing this chapter designs *around*), Ch. 7 & 33-preview (cache coherence / false sharing — the physical cost of contention), Ch. 16 (NUMA — cross-socket sharing), Ch. 1 (tail latency — contention spikes the tail), Ch. 3 (measuring scalability curves).
 >
 > **Leads into:** Ch. 32 (spinlocks/contention control — when you *must* share), Ch. 33 (false sharing), Ch. 34–37 (lock-free structures, seqlocks, Disruptor — the shared-nothing-friendly communication primitives), Ch. 41–46 (scheduling/pinning — the OS side of keeping threads on cores), Ch. 74 (process topology — shared-nothing across processes).
 
@@ -60,7 +60,7 @@ The diagnostic for a concurrency design is its **scalability curve**: throughput
 #include <chrono>
 #include <new>
 
-struct alignas(std::hardware_destructive_interference_size) Padded {  // own cache line (Ch. 32)
+struct alignas(std::hardware_destructive_interference_size) Padded {  // own cache line (Ch. 33)
     std::uint64_t v = 0;
 };
 
@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     auto t0 = std::chrono::steady_clock::now();
     std::vector<std::thread> ts;
     for (int t = 0; t < M; ++t) ts.emplace_back([&, t]{
-        // (pin to core t here — sched_setaffinity / Ch. 40)
+        // (pin to core t here — sched_setaffinity / Ch. 42)
         if (sharded) { std::uint64_t s = 0; for (long i=0;i<per;++i) s++; local[t].v = s; }  // no sharing
         else for (long i = 0; i < per; ++i) shared.fetch_add(1, std::memory_order_relaxed);  // shared line
     });

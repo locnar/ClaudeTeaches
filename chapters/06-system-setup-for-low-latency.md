@@ -63,7 +63,7 @@ The right way to *see* system jitter — independent of any application — is *
 
 ```bash
 # Measure wake-up latency: 1 thread per CPU, 10us interval, highest RT prio, for a while.
-# -m locks memory (no page-fault jitter, Ch.22); -p99 RT priority; -h builds a histogram.
+# -m locks memory (no page-fault jitter, Ch.23/26); -p99 RT priority; -h builds a histogram.
 sudo cyclictest --smp -p99 -m -i 10 -h 200 -D 60s
 ```
 

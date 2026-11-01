@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 27 (integer arithmetic — scaled prices and the integer math this chapter accelerates), Ch. 13 (branchless programming — bit tricks are the branchless toolkit), Ch. 11 (op latency/throughput — intrinsics have their own), Ch. 4 (reading asm — §28.5 confirms the single instruction), Ch. 25 (order book — bitmaps index its levels).
 >
-> **Leads into:** Ch. 29 (SIMD — the vector generalization of these bit ops), Ch. 34 (lock-free — bitmap free-lists and CAS on packed words), Ch. 53 (wire decoding — field packing/unpacking, branch-free integer parsing), Ch. 24 (pools — bitmap-managed free-lists). Companion to Ch. 13 & 26.
+> **Leads into:** Ch. 29 (SIMD — the vector generalization of these bit ops), Ch. 34 (lock-free — bitmap free-lists and CAS on packed words), Ch. 53 (wire decoding — field packing/unpacking, branch-free integer parsing), Ch. 24 (pools — bitmap-managed free-lists). Companion to Ch. 13 & 27.
 
 ---
 
@@ -73,12 +73,12 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `
                     ns / op       notes
 tzcnt (countr_zero) ~0.4 ns       one ~3-cyc instruction, pipelined
 popcnt (popcount)   ~0.4 ns       one ~3-cyc instruction
-scan (naive loop)   ~2-8 ns       data-dependent loop + branch mispredicts (Ch. 12)
+scan (naive loop)   ~2-8 ns       data-dependent loop + branch mispredicts (Ch. 13)
 
 intrinsic latency/throughput (Agner Fog / llvm-mca):
    popcnt/lzcnt/tzcnt   ~3 cyc latency, 1/cyc throughput          (cheap everywhere)
    blsr/blsi/and/shift  ~1 cyc                                    (trivial)
-   pdep/pext  Intel:    ~3 cyc      |   AMD pre-Zen3: ~tens-hundreds cyc (microcoded!)  <- §27.6
+   pdep/pext  Intel:    ~3 cyc      |   AMD pre-Zen3: ~tens-hundreds cyc (microcoded!)  <- §28.6
 ```
 
 Read it the Ch. 11/13 way: the intrinsic is a flat ~3-cycle op; the naive scan is a *variable-length loop with a data-dependent branch* (Ch. 13) whose cost depends on where the first set bit is and mispredicts along the way — several × slower and with a tail. The single instruction is both faster and *deterministic*. The op-latency block is the cost model to keep: `popcnt`/`lzcnt`/`tzcnt`/`blsr` are cheap and pipelined (use freely), while **`pdep`/`pext` carry the vendor warning** (§28.6) — verify the target before relying on them. As always, confirm the compiler emitted the instruction (§28.5): `std::countr_zero` *should* be a single `tzcnt`, but check.

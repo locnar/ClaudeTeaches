@@ -97,7 +97,7 @@ Let's make this concrete with a deliberately memory-bound microbenchmark — a p
 ```cpp
 // perf_demo.cpp — same work, two memory access patterns. Profile with perf.
 // Build: g++ -O2 -std=c++20 -fno-omit-frame-pointer perf_demo.cpp -o perf_demo
-//   (-fno-omit-frame-pointer so perf can unwind stacks for flame graphs; Ch. 21.)
+//   (-fno-omit-frame-pointer so perf can unwind stacks for flame graphs; Ch. 22.)
 // Run:   ./perf_demo seq      (sequential, cache-friendly)
 //        ./perf_demo rand     (random pointer-chase, cache-hostile)
 #include <algorithm>

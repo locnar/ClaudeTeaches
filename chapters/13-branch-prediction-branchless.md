@@ -128,12 +128,12 @@ A **conditional move** (`cmov` on x86) computes *both* possible results and sele
 
 ```cpp
 // Branchy: a control dependency the predictor must guess.
-int r = (a > b) ? a : b;          // may compile to a branch OR a cmov (§12.5)
+int r = (a > b) ? a : b;          // may compile to a branch OR a cmov (§13.5)
 
 // Branchless idioms the compiler recognizes (and you can write explicitly):
 int r = (a > b) ? a : b;          // max — std::max; compilers emit cmov/maxss readily
 int s = x & -(int)cond;           // select 0 or x with a mask (cond is 0/1)
-int sel = b ^ ((a ^ b) & -(int)(a > b));   // branchless select a:b  (Ch. 27)
+int sel = b ^ ((a ^ b) & -(int)(a > b));   // branchless select a:b  (Ch. 28)
 ```
 
 The critical trade-off, and the whole reason `cmov` is not a free win: **`cmov` replaces a *control* dependency with a *data* dependency** (Ch. 11). The branch version, *when predicted correctly*, breaks the dependency — the core speculates past it and overlaps work, so a well-predicted branch can be *faster* than a `cmov` because the `cmov` forces the result to wait for the condition's inputs (and lengthens the dependency chain). `cmov` wins precisely when the branch is **unpredictable**: you trade a ~15–20-cycle mispredict (sometimes) for a ~1–2-cycle `cmov` (always). The rule:

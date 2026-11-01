@@ -78,7 +78,7 @@ double run(int M) {
     auto t0 = std::chrono::steady_clock::now();
     std::vector<std::thread> ts;
     for (int t = 0; t < M; ++t) ts.emplace_back([&, t]{
-        // (pin to core t — Ch. 40).  Each thread writes ONLY its own counter — logically independent.
+        // (pin to core t — Ch. 42).  Each thread writes ONLY its own counter — logically independent.
         for (long i = 0; i < N; ++i) data[t].v++;           // but unpadded counters share lines!
     });
     for (auto& th : ts) th.join();

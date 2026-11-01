@@ -32,37 +32,37 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 11, 12).
 ```
    perf stat -e cycles,instructions,\
    cache-references,cache-misses,\
-   branches,branch-misses ./app                 # the classic six (Ch. 2, 12)
+   branches,branch-misses ./app                 # the classic six (Ch. 2, 13)
    perf stat -e L1-dcache-load-misses,LLC-load-misses,\
-   dTLB-load-misses,iTLB-load-misses ./app      # cache/TLB breakdown (Ch. 7, 14)
+   dTLB-load-misses,iTLB-load-misses ./app      # cache/TLB breakdown (Ch. 7, 15)
    perf stat --topdown ./app                    # top-down: retiring / bad-spec / front-end / back-end
    perf stat --td-level 2 ./app                 # drill one level deeper (needs recent perf + CPU)
    toplev.py -l3 --no-desc ./app                # pmu-tools top-down, level 3 (Andi Kleen's toplev)
 ```
 
-**Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 11); **bad speculation** → branch mispredicts (Ch. 12); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 7, 10); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).
+**Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 12); **bad speculation** → branch mispredicts (Ch. 13); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 7, 11); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).
 
 ## I.3 `perf c2c`, `perf mem` & false-sharing / HITM
 
-Finding cache-line contention and load latency (Ch. 7, 32).
+Finding cache-line contention and load latency (Ch. 7, 33).
 
 ```
    perf c2c record ./app                        # capture cache-to-cache transfers
-   perf c2c report -NN --stdio                  # HITM (modified-line steals) ranked by cache line + offset (Ch. 32)
+   perf c2c report -NN --stdio                  # HITM (modified-line steals) ranked by cache line + offset (Ch. 33)
    perf mem record ./app                        # sample load/store with data source + latency
    perf mem report --stdio                      # where loads are served from (L1/L2/L3/DRAM/remote)
 ```
 
-**Interpreting:** `perf c2c` is *the* false-sharing detector (Ch. 32) — it points at the exact cache line and the two offsets whose writers are ping-ponging it; the fix is padding/alignment (`alignas(std::hardware_destructive_interference_size)`, Ch. 32). `perf mem` reveals a memory-bound loop's data source — lots of remote-DRAM hits means a NUMA-placement problem (Ch. 16).
+**Interpreting:** `perf c2c` is *the* false-sharing detector (Ch. 33) — it points at the exact cache line and the two offsets whose writers are ping-ponging it; the fix is padding/alignment (`alignas(std::hardware_destructive_interference_size)`, Ch. 33). `perf mem` reveals a memory-bound loop's data source — lots of remote-DRAM hits means a NUMA-placement problem (Ch. 16).
 
 ## I.4 VTune quick recipes
 
 When you want the GUI top-down tree and memory-access modeling (Ch. 2).
 
 ```
-   vtune -collect uarch-exploration -r r_ue ./app     # top-down microarchitecture (Ch. 2, 10-12)
+   vtune -collect uarch-exploration -r r_ue ./app     # top-down microarchitecture (Ch. 2, 11-13)
    vtune -collect memory-access -r r_mem ./app        # loads/stores, NUMA, bandwidth (Ch. 7, 16)
-   vtune -collect threading -r r_thr ./app            # lock contention, wait time (Ch. 30-32)
+   vtune -collect threading -r r_thr ./app            # lock contention, wait time (Ch. 31-33)
    vtune -collect hotspots -knob sampling-mode=hw ./app
    vtune-gui r_ue                                      # open a result in the GUI
 ```
@@ -132,14 +132,14 @@ Inspecting and tuning the RX/TX path (Ch. 51, 53, 55, 56).
    ethtool -c eth0                              # interrupt coalescing settings (Ch. 55)
    ethtool -C eth0 rx-usecs 0 adaptive-rx off    # disable coalescing for lowest latency (Ch. 55)
    ethtool -S eth0 | grep -iE 'drop|miss|err|fifo'   # hardware drops — RX overruns at the open (Ch. 53)
-   ethtool -T eth0                              # hardware-timestamping capabilities (Ch. 56)
+   ethtool -T eth0                              # hardware-timestamping capabilities (Ch. 58)
    ss -tim                                       # per-socket TCP info: rtt, cwnd, retrans (Ch. 51)
    tcpdump -i eth0 -nn -ttt 'udp port 12345'     # inter-packet deltas on a market-data feed
-   ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 56)
-   phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 56)
+   ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 58)
+   phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 58)
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 53) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 56, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 53) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 58, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 

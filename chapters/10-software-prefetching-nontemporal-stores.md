@@ -57,7 +57,7 @@ The single parameter that decides whether a software prefetch helps or hurts is 
 The arithmetic is intuitive: you want to issue the prefetch roughly **`memory_latency / per_iteration_work`** iterations ahead. If a DRAM miss is ~80 ns and each loop iteration does ~10 ns of useful work, you need to prefetch ~8 iterations ahead so the fetch (started 8 iterations ago) completes right as you arrive. Too few iterations of lead and the fetch isn't done; too many and the line is evicted (or you've issued so many that LFBs/cache overflow).
 
 ```cpp
-constexpr int PD = 8;  // prefetch distance — TUNE THIS PER LOOP, empirically (§9.3)
+constexpr int PD = 8;  // prefetch distance — TUNE THIS PER LOOP, empirically (§10.3)
 for (std::size_t i = 0; i < n; ++i) {
     __builtin_prefetch(&data[index[i + PD]], 0, 0);  // fetch the line I'll need PD iters later
     process(data[index[i]]);                          // ... while I work on this one
@@ -87,7 +87,7 @@ Software prefetch lives or dies by the distance, so the essential experiment is 
 ```cpp
 // prefetch_sweep.cpp — find the prefetch distance that best hides miss latency.
 // Build: g++ -O2 -std=c++20 -march=native prefetch_sweep.cpp -o prefetch_sweep
-// Run pinned, turbo off (Ch.3,5): taskset -c 2 ./prefetch_sweep
+// Run pinned, turbo off (Ch.3,6): taskset -c 2 ./prefetch_sweep
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
