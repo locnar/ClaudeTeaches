@@ -56,6 +56,8 @@ The scripted sweep found the *structure* in good shape — these are not problem
 
 Minor structural nits: Ch. 5 labels its forward references "**Connects forward to:**" where the other 75 chapters say "**Leads into:**"; Ch. 76 has no closing `*Next:*` line; Ch. 9 is the only Part II chapter that never names the reference machine; Ch. 4:7 lists the chapters with a *Verify the codegen* section as "Ch. 9, 13–14, 18–21, 27–29" but the real set is 9–14, 19–21, 27–30, 39, 53, 71 (Ch. 18 has none).
 
+- **Status: fixed 2026-11-01** — the stale book-shape metadata of §1 row 2 (README legend, preface, Ch. 1, Ch. 76 close and Leads-into, CLAUDE.md status block and TOC note, `tools/book-pdf/README.md`) and the Ch. 5 "Connects forward to" label nit above. The Ch. 76 teaser, Ch. 9 machine note and Ch. 4:7 list are unchanged.
+
 ---
 
 ## 3. Systemic issue: stale cross-references after the Phase-3 renumber

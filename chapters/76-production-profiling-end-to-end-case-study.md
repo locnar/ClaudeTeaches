@@ -4,7 +4,7 @@
 
 > **Prerequisites:** all of it — this is the capstone. Most directly: Ch. 2–3 (profiling / micro-benchmarking), Ch. 1 (tail-latency thinking), Ch. 17/58 (timestamps), Ch. 61 (eBPF production tracing), Ch. 74–75 (deterministic state machine + capture/replay — the basis of the regression gate), Ch. 53, 55, 58, 61, 62 (the wire path the walkthrough traces).
 >
-> **Leads into:** the Appendices (A: ARM/Graviton; C: tuning checklist; E: latency numbers; G: bibliography). The book's final chapter: continuous performance monitoring, regression detection, and a full tick-to-trade walkthrough that touches every Part.
+> **Leads into:** the Appendices (A: ARM/Graviton; C: tuning checklist; E: latency numbers; G: bibliography; I: tooling command cookbook; J: market-structure & protocol primer; L: reproducible benchmark harness). The book's final chapter: continuous performance monitoring, regression detection, and a full tick-to-trade walkthrough that touches every Part.
 
 ---
 
@@ -143,4 +143,4 @@ Replay reproduces what *did* happen; **simulation** explores what *would* happen
 
 ---
 
-*This completes the book's chapters (Ch. 1–76). From the latency mindset (Ch. 1) through the deterministic, end-to-end tick-to-trade case study of this chapter, the twelve Parts build the full low-latency toolkit — measurement and methodology, CPU microarchitecture, language mechanics, memory, numerics, concurrency, OS isolation, networking from kernel sockets through the NIC and fabric to transport, hardware acceleration, and production operations. The Appendices (A–G) follow as the standing references: the ARM port, the alternative-language survey, the system-tuning checklist, the compiler-flag reference, the latency-numbers table, the glossary, and the annotated bibliography.*
+*This completes the book's chapters (Ch. 1–76). From the latency mindset (Ch. 1) through the deterministic, end-to-end tick-to-trade case study of this chapter, the twelve Parts build the full low-latency toolkit — measurement and methodology, CPU microarchitecture, language mechanics, memory, numerics, concurrency, OS isolation, networking from kernel sockets through the NIC and fabric to transport, hardware acceleration, and production operations. The Appendices (A–L) follow as the standing references: the ARM port, the alternative-language survey, the system-tuning checklist, the compiler-flag reference, the latency-numbers table, the glossary, the annotated bibliography, the C++23/26 feature-availability matrix, the tooling command cookbook, the HFT market-structure & protocol primer, the exchange-connectivity & physical-layer survey, and the reproducible benchmark & measurement harness.*
