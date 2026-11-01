@@ -200,6 +200,46 @@ spelling inside fenced ASCII diagrams and tables, where inserting a space would 
 - **Appendix G** — Pikus "*C++ Optimization*" does not exist ✅ web; "Mark Newman" FIX/microstructure text does not exist; Cliff Click wrongly attributed to Ch. 34; multiply-cited works missing (Dean & Barroso *Tail at Scale*; Herlihy & Shavit; Boehm & Adve 2008; Michael 2004 hazard pointers; Fraser; Vyukov; Preshing); F.9 promises CUDA/MPI/FPGA/DOCA/PTP entries that G lacks.
 - **Appendix F** — wrong pointers: Maker/Taker → Appendix J.1 (not Ch. 25); NBBO → J.2 (Ch. 25/53 never mention it); LFB/MLP → Ch. 10 (not Ch. 7); RAII → Ch. 23 never uses the term; `std::span`/`mdspan` → Ch. 72/App. H (not 49/53); Drop-copy → not Ch. 74. Missing entries for heavily used terms: TSC/rdtsc (182 uses), IRQ affinity (promised by CLAUDE.md), context switch, CAS, LLC, PMU, ILP, MPKI, STLB, SIMD/AVX, USL/Amdahl/shared-nothing, TTAS/MCS/convoy, lock-free/wait-free, epoll, IPC (the inter-process sense) and shared memory.
 
+**Status (2026-11-01): fixed** (work-queue item P1-2, branch `work/item-7-prose-misstatements`) — the prose misstatements
+above and the per-chapter rows behind them, as surgical in-line edits (line structure preserved; one two-line paragraph
+added in Ch. 6): `02:80` `--topdown` = Level-1 buckets on Ice Lake (L2 from Sapphire Rapids, deeper levels via `toplev`);
+`02:185/251` sample on `mem_load_retired.l3_miss:pp` (generic `LLC-load-misses` is an offcore counting event, not PEBS-precise);
+`03:154` 16 KiB array fits the 48 KiB L1d — branch mispredicts, not cache misses, explain the result (and `perf stat` per
+benchmark via `--benchmark_filter`); `03:199` TSC is a constant-rate clock, cycles come from the PMU; `05:62` enabled
+USDT = uprobe (`int3` trap), not nanosecond-scale; `06:31/52/53/75/122/150` governors under `intel_pstate` active mode,
+retpoline/IBRS as kernel-side cost (user code untouched without `-mindirect-branch=thunk`), Ice Lake-SP *Not affected* by
+Meltdown/L1TF/MDS so KPTI/VERW are not running (what runs: Spectre v1/v2 incl. BHI, MMIO stale data, GDS), `ondemand` →
+`powersave`, `idle=poll` separated from the `max_cstate=1` caps and marked not-recommended; `09:151` AArch64 tolerates
+misaligned scalar access, faults only on exclusives/`LDAR`/`STLR`/atomics; `09:195` the 17-byte stride (no interleaved
+vector load, gather rejected), not alignment, blocks vectorization; `11:182/239/252/261` latency × throughput (ops/cycle);
+`12:144/167/258` `[[unlikely]]` only reorders blocks — `.text.unlikely` needs `[[gnu::cold]]`/PGO — and never-executed bytes
+hurt only when interleaved in the hot path's fetch lines/DSB windows; `14:62` `std::function` is one indirect call to a
+type-specific invoker with the callable inlined; `14:207/247/259` `std::visit` lowering is library/size-dependent (libstdc++
+`switch` ≤ 11 alternatives → branch chain for 3, jump table for more; function-pointer table beyond / libc++) — the §14.5
+listing is now labelled as the jump-table case with the 3-alternative branch-chain reality stated; `15:17/46/47/51/52/55/59`
+dTLB 32 × 2 MB = 64 MB, STLB ≤ ~1024 × 2 MB ≈ 2 GB (Sunny Cove), reach growth 512× per entry / ~256× total; `16:56/136/156/181`
+large `calloc` does not first-touch — culprits are `memset`/fill loops/value-initialization/`MAP_POPULATE`; `38:45/48/101/157`
+HALO is Clang-only (GCC never elides; bugzilla 100579, 115309); `43` (18 places) partitioned resources are halved only while
+both threads are active and recombine when the sibling is *halted* (`HLT`/`MWAIT`), not merely idle-spinning (`idle=poll`,
+polling threads), the HT-off vs sibling-idle gap re-attributed to sibling wake-ups; `44:34/40/49/72/73/95` 24 MiB, 12-way
+L3 (`cbm_mask` = `fff`), contiguous masks `f00`/`0ff` (Intel `sparse_masks` = 0 rejects `ff0ff`); `47:17/88/102/109/119/137/149/159`
+`SO_BUSY_POLL` governs blocking receives only — epoll busy-poll is `net.core.busy_poll` or the 6.9+ `EPIOCSPARAMS` ioctl;
+`47:136` `EPOLLEXCLUSIVE` is for several epoll instances on one fd and wakes one *or more*; `47:139` only `select` has the
+`FD_SETSIZE` limit; `49:74` `SEND_ZC` posts two CQEs (`IORING_CQE_F_MORE`, then `IORING_CQE_F_NOTIF`); `57:13/39/48/50/52`
+L3 is socket-shared — no intra-socket "wrong L3", the intra-socket cost is the handoff (HITM on queue/descriptor lines +
+wake-up), wrong-L3 only cross-socket; `61:52/68/73/77/85/91/118/132` `hist(nsecs)` → entry/return delta with a per-tid start
+map, and USDT costs a uprobe trap once traced (free only while untraced); `67:77/81/83` 1.2 GB over Gen4 x16 ≈ 50 ms →
+saxpy at 100M is CPU-wins/transfer-bound (resident-data row unchanged), lesson (2) re-stated as compute density;
+`73:38/79/106` raw-load-then-bump is a UAF race, `std::atomic<shared_ptr>`/`atomic_load` are lock-based in libstdc++ and
+libc++ — hot readers use the §73.2 raw-atomic swap + Ch. 36 reclamation. **Not changed:** the §7 bullets on Ch. 6 SMI/clocksource
+coverage and Ch. 10 `__builtin_nontemporal_store`/`sfence` (not in P1-2's list — new content/listing work), Appendices H, G
+and F (items P1-4/P1-5); the task brief's gloss of the Ch. 14:207 row ("jump table via `_S_vtable`") was inverted relative
+to the row itself — libstdc++'s `_S_vtable` function-pointer path is the *fallback* beyond 11 alternatives, the `switch`
+is the common case — so the text follows the finding row and libstdc++ source, not the gloss. Numbers introduced here that
+recur elsewhere (TLB reach, 24 MiB L3) were checked against Appendices E/F (no occurrences); book-wide reconciliation
+remains P1-3. **Hedged:** the Sunny Cove STLB 2 MB cap is written as "≤ ~1024" (the finding's figure) pending the
+Phase-4 hardware check; the pre/post-6.17 uprobe cost is stated qualitatively ("roughly halves") rather than in ns.
+
 ---
 
 ## 8. Duplication and placement

@@ -53,7 +53,7 @@ The decision that quietly determines local-vs-remote is **first-touch**: Linux's
 The consequences are the source of most accidental NUMA pain:
 
 - **The allocating thread doesn't decide; the touching thread does.** A common bug: a main/setup thread allocates *and initializes* (zeroes, `memset`, fills) a big buffer, faulting every page onto *its* node — then hands the buffer to worker threads on the *other* node, which now access it all remotely. The fix is **first-touch from the using thread**: have each worker initialize the memory it will own (§16.4).
-- **`memset`/`calloc`/zero-init at allocation places everything on one node.** Eagerly touching a buffer at allocation time (or `calloc`'s zeroing) front-loads first-touch onto the allocating thread's node. To get per-node placement you must defer the touch to the consuming thread, or bind explicitly.
+- **`memset`/value-initialization at allocation places everything on one node.** Eagerly touching a buffer at allocation time — an explicit `memset` or fill loop, `std::vector<T>(N)`/`new T[N]()` value-initialization, `MAP_POPULATE` — front-loads first-touch onto the allocating thread's node. (A *large* glibc `calloc` is not a culprit: it comes from a fresh `mmap` whose pages are already zero and are not written, so first-touch still happens at the first real write; only small `calloc`s carved from recycled heap are zeroed in place.) To get per-node placement you must defer the touch to the consuming thread, or bind explicitly.
 - **Thread migration breaks locality after the fact.** Even with correct first-touch, if the scheduler later migrates the thread to the other node (Ch. 42), its local data is now remote. NUMA locality requires **pinning** (affinity) so the thread stays on the node its data lives on — placement and affinity are a *pair*; one without the other is fragile.
 - **The policy is configurable.** Beyond default first-touch, Linux offers `bind` (force a node), `preferred` (try a node, fall back), and `interleave` (round-robin pages across nodes — good for bandwidth-bound shared structures, bad for latency-bound local ones). `numactl`, `mbind(2)`, `set_mempolicy(2)`, and `libnuma` are the controls (§16.4.1).
 
@@ -133,7 +133,7 @@ Control where pages land, from coarsest to finest:
   for (std::size_t i = lo; i < hi; ++i) my_buffer[i] = 0;   // first-touch → pages land on THIS node
   // ... now my_buffer[lo..hi) is local to this thread. Do NOT pre-zero it on the main thread.
   ```
-  This is the most important NUMA technique: **don't `memset`/`calloc` big per-thread buffers on the setup thread** (§16.2.2); defer the touch to the owner.
+  This is the most important NUMA technique: **don't `memset`/value-initialize big per-thread buffers on the setup thread** (§16.2.2); defer the touch to the owner.
 - **Explicit binding (`libnuma`/`mbind`).** For precise control, `numa_alloc_onnode(size, node)` allocates on a specific node; `mbind(2)`/`set_mempolicy(2)` set per-region or per-thread policy; `numa_alloc_interleaved` interleaves. Use these when first-touch is awkward (e.g. a shared allocator) or you need a region on a node other than the toucher's.
 - **NUMA-aware allocators (Ch. 24).** A per-node arena/pool allocator (each node has its own arena, threads draw from their local one) bakes locality into allocation, so steady-state hot-path allocations (or pre-allocations) are automatically local — the production pattern for a multi-node service. Pre-fault and `mlock` (Ch. 15, 26) per node during warm-up.
 
@@ -153,7 +153,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 
 ## 16.5 Pitfalls & anti-patterns: accidental remote allocation; cross-node sharing
 
-- **Initializing on the wrong thread (first-touch trap).** The classic bug: a setup thread `memset`s/`calloc`s/fills a big buffer (faulting all pages onto *its* node), then worker threads on other nodes use it remotely (§16.2.2). Fix: first-touch from the owning thread; never pre-zero per-thread buffers centrally.
+- **Initializing on the wrong thread (first-touch trap).** The classic bug: a setup thread `memset`s/value-initializes/fills a big buffer (faulting all pages onto *its* node), then worker threads on other nodes use it remotely (§16.2.2). Fix: first-touch from the owning thread; never pre-zero per-thread buffers centrally.
 - **Placement without pinning (or vice versa).** Correct first-touch decays the moment the scheduler migrates the thread off its node (Ch. 42); pinning a thread whose data is remote doesn't help either. They're a **pair** — always pin the thread to the node holding its data.
 - **`numactl --interleave` for latency-bound data.** Interleave is for *bandwidth*-bound shared structures; using it for per-thread latency-sensitive data guarantees ~50% of accesses are remote by design. Match policy to the access pattern (latency → bind local; bandwidth-shared → consider interleave).
 - **Cross-node false sharing.** A padded-counter omission (Ch. 33) is bad within a socket and *catastrophic* across sockets — every write is a remote HITM over UPI. Per-node/per-thread counters, padded, aggregated off the hot path.
@@ -178,7 +178,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 **Checklist — NUMA**
 
 - [ ] I confirmed the box is **multi-socket** (`numactl --hardware`) and measured **`remote_dram`/offcore** (not just cache misses) before optimizing.
-- [ ] Each hot thread's data is **first-touched by that thread**, pinned to its node — no central `memset`/`calloc` of per-thread buffers on the setup thread.
+- [ ] Each hot thread's data is **first-touched by that thread**, pinned to its node — no central `memset`/value-initialization of per-thread buffers on the setup thread.
 - [ ] Hot threads are **pinned** (Ch. 42) to a core on the node holding their data; placement and affinity are used **together**.
 - [ ] The hot path is **partitioned per node** (shared-nothing, e.g. by symbol/venue); read-mostly reference data is **replicated per node**.
 - [ ] No **cross-node false sharing** — shared writable lines are padded and per-node/per-thread, aggregated off the hot path (Ch. 33).

@@ -77,7 +77,7 @@ Raw counters are a haystack. The breakthrough that makes them usable is the **To
 - **Front-End Bound** — the back end was ready but the front end couldn't deliver µops fast enough: instruction-cache misses, I-TLB misses, decode bottlenecks, µop-cache (DSB) misses. → Ch. 12.
 - **Back-End Bound** — µops were ready but couldn't execute because a resource was unavailable. Splits further into **Memory Bound** (waiting on caches/DRAM — the big one for trading workloads, → Ch. 7–10, 15–16) and **Core Bound** (execution ports / dependency chains saturated — → Ch. 11).
 
-The power of this method is that it is **hierarchical and top-down**: you find the dominant bucket first, then drill *only* into that branch. If you are 60% Back-End Bound → Memory Bound, there is no point reading branch-misprediction counters; the memory subsystem is your problem, and Ch. 7 is your chapter. This is exactly the second question from §2.1, and it is the single most valuable habit in this chapter. On Linux, `perf stat --topdown` (Ice Lake and newer expose the full hierarchy) or Intel's `toplev` (from `pmu-tools`) computes these buckets for you.
+The power of this method is that it is **hierarchical and top-down**: you find the dominant bucket first, then drill *only* into that branch. If you are 60% Back-End Bound → Memory Bound, there is no point reading branch-misprediction counters; the memory subsystem is your problem, and Ch. 7 is your chapter. This is exactly the second question from §2.1, and it is the single most valuable habit in this chapter. On Linux, `perf stat --topdown` computes the Level-1 buckets for you (Ice Lake and newer expose them in hardware via `TOPDOWN.SLOTS`/`PERF_METRICS`; Sapphire Rapids adds Level 2 with `--td-level 2`); for the deeper levels use Intel's `toplev` (from `pmu-tools`), which derives them from ordinary counters on any generation.
 
 ### 2.2.3 Sampling vs counting
 
@@ -179,10 +179,10 @@ $ perf stat --topdown -- ./perf_demo rand
 #        3.1%      0.4%       1.2%      95.3%   <- overwhelmingly Back-End (Memory) Bound
 ```
 
-**Step 2 — sample, to learn where it lives.** In a one-function toy the answer is obvious, but the workflow is what matters. Sample on the LLC-miss event with precise (PEBS) sampling to minimize skid, then view the attribution:
+**Step 2 — sample, to learn where it lives.** In a one-function toy the answer is obvious, but the workflow is what matters. Sample on an L3-miss event that supports precise (PEBS) sampling to minimize skid — `mem_load_retired.l3_miss`, not the generic `LLC-load-misses`, which maps to an offcore-response *counting* event and is not precise even where the kernel accepts `:pp` on it — then view the attribution:
 
 ```
-$ perf record -e LLC-load-misses:pp -g -- ./perf_demo rand
+$ perf record -e mem_load_retired.l3_miss:pp -g -- ./perf_demo rand
 $ perf report --stdio | head
 # Overhead  Command    Symbol
 #   98.7%   perf_demo  [.] main            <- the chasing loop, as expected
@@ -248,7 +248,7 @@ When to reach for it: when `perf stat --topdown` has told you the *category* but
 
 1. **Reproduce the gap.** Build `perf_demo.cpp` and run `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses` on both `seq` and `rand`. Compute IPC and LLC-MPKI for each. By what factor does each metric change? Which one *doesn't* move, and why does that rule out a whole category of fix?
 2. **Top-down it.** Run `perf stat --topdown` (or `toplev -l1` from `pmu-tools`) on both modes. Which bucket dominates `rand`? Drill one level deeper (`-l2`) into that bucket. Does it say Memory Bound? Does it agree with your counter reading from exercise 1?
-3. **Localize it.** `perf record -e LLC-load-misses:pp -g` on `rand`, then `perf report`. Now rerun *without* the `:pp` (non-precise) — does the attributed line move? That shift is skid.
+3. **Localize it.** `perf record -e mem_load_retired.l3_miss:pp -g` on `rand`, then `perf report`. Now rerun *without* the `:pp` (non-precise) — does the attributed line move? That shift is skid.
 4. **Multiplexing in action.** Run `perf stat` requesting ~12 events at once and check the enabled-percentage in brackets. Are any below 100%? Split them into two runs of fewer events and compare the counts. How much did multiplexing distort them?
 5. **Flame the misses.** Generate both a cycles flame graph and an `LLC-load-misses` flame graph of `rand`. How do they differ in what they emphasize? (Builds intuition for Ch. 7.)
 

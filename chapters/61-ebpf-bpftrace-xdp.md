@@ -49,7 +49,7 @@ The key question for production use: **how much does a probe cost?** Measure the
 
 ```
    # bpftrace one-liners (the observability payoff):
-   $ bpftrace -e 'kprobe:vfs_read { @ = hist(nsecs); }'                  # histogram of read latency
+   $ bpftrace -e 'kprobe:vfs_read { @s[tid] = nsecs; } kretprobe:vfs_read /@s[tid]/ { @ = hist(nsecs - @s[tid]); delete(@s[tid]); }'   # read latency histogram (entry→return delta)
    $ bpftrace -e 'tracepoint:syscalls:sys_enter_* { @[probe] = count(); }'  # syscall counts (Ch.41!)
    $ bpftrace -e 'uprobe:/path/app:process_message { @start[tid] = nsecs; }
                   uretprobe:/path/app:process_message /@start[tid]/
@@ -65,16 +65,16 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), i
    tracepoint                        ~tens of ns            cheapest; stable; preferred
    kprobe (kernel function)          ~tens-hundreds of ns   dynamic; slight more than tracepoint
    uprobe (user function)            ~hundreds of ns - µs    a TRAP into the kernel per hit — EXPENSIVE
-   USDT (user static tracepoint)     ~tens-hundreds of ns   cheaper than uprobe; you place the marker
+   USDT (user static tracepoint)     0 untraced / uprobe when traced   a nop until attached; then it IS a uprobe (int3)
 
    bpftrace REVEALS (e.g. read latency histogram):
      @[ns]:  [1K, 2K)  ████████  ...  [256K, 512K)  ▏  ← the rare slow tail you couldn't see otherwise
 
-   the lesson: tracepoints/USDT are cheap (use freely); UPROBES are expensive (a kernel trap per hit) —
+   the lesson: tracepoints are cheap (use freely); UPROBES — and USDT markers once traced — trap into the kernel per hit —
    do NOT put a uprobe on a hot-path function called millions of times/sec (§61.5).
 ```
 
-Read it: eBPF observability's value is that it gives you **production latency distributions** (the histogram — the p99.9 tail you can't see from averages, Ch. 1) for *any* function, *live*, without recompiling — `bpftrace` one-liners answer "what's slow right now" in seconds. But the **overhead varies by probe type by orders of magnitude**: **tracepoints** (~tens of ns, stable kernel instrumentation) and **USDT** (markers you place) are *cheap* — fine to run in production broadly. **kprobes** are dynamic and slightly more. **uprobes** (probing a user-space function) are *expensive* — each hit is a **trap into the kernel** (~hundreds of ns to µs), so a uprobe on a function called *millions of times per second on the hot path* adds enormous overhead and *changes the latency you're trying to measure* (the observer effect — §61.5). The discipline: **use cheap tracepoints/USDT freely for production observability; use uprobes sparingly and never on the hottest functions; and never run tracing *in* the tick-to-trade loop** — trace *near* the hot path to understand it, off the critical path. The right model: instrument with **USDT markers** at key boundaries (you control where, they're cheap), use **tracepoints/kprobes** for kernel-side latency (syscalls — Ch. 41, scheduling, block I/O), and reach for a uprobe only for ad-hoc debugging of a *non*-hottest function.
+Read it: eBPF observability's value is that it gives you **production latency distributions** (the histogram — the p99.9 tail you can't see from averages, Ch. 1) for *any* function, *live*, without recompiling — `bpftrace` one-liners answer "what's slow right now" in seconds. But the **overhead varies by probe type by orders of magnitude**: **tracepoints** (~tens of ns, stable kernel instrumentation) are *cheap* — fine to run in production broadly. **kprobes** are dynamic and slightly more. **uprobes** (probing a user-space function) are *expensive* — each hit is a **trap into the kernel** (~hundreds of ns to µs; Linux 6.17's uprobe-syscall optimization roughly halves it), and an **enabled USDT marker *is* a uprobe** (the marker's `nop` is patched to `int3` when you attach): USDT's advantages are zero cost while *untraced*, stable typed probe points, and that *you* choose where it sits — at a boundary hit thousands, not millions, of times per second — not a cheaper trap. So a uprobe (or traced USDT) on a function called *millions of times per second on the hot path* adds enormous overhead and *changes the latency you're trying to measure* (the observer effect — §61.5). The discipline: **use cheap tracepoints freely for production observability; place USDT markers only at boundaries whose hit rate you have bounded; use uprobes sparingly and never on the hottest functions; and never run tracing *in* the tick-to-trade loop** — trace *near* the hot path to understand it, off the critical path. The right model: instrument with **USDT markers** at key boundaries (you control where; free until traced), use **tracepoints/kprobes** for kernel-side latency (syscalls — Ch. 41, scheduling, block I/O), and reach for a uprobe only for ad-hoc debugging of a *non*-hottest function.
 
 ## 61.4 Techniques
 
@@ -82,13 +82,13 @@ Read it: eBPF observability's value is that it gives you **production latency di
 
 Production observability — the eBPF tracing toolkit:
 
-- **`bpftrace` one-liners for ad-hoc investigation.** The go-to for "what's happening right now": histogram a latency (`hist(nsecs)`), count events by process/function, catch a rare condition (`/lat > 100000/`), trace a syscall (Ch. 41). A few examples that matter for HFT debugging:
+- **`bpftrace` one-liners for ad-hoc investigation.** The go-to for "what's happening right now": histogram a latency (`hist(nsecs - @start[tid])` — a delta against a stored entry time; `hist(nsecs)` alone histograms *timestamps*), count events by process/function, catch a rare condition (`/lat > 100000/`), trace a syscall (Ch. 41). A few examples that matter for HFT debugging:
   - **Syscall audit** (Ch. 41): `tracepoint:raw_syscalls:sys_enter { @[comm,...] = count(); }` — find the hidden syscalls on a "syscall-free" hot path (Ch. 41's hunt).
   - **Scheduling latency** (Ch. 41, 45): `runqlat` (BCC) — how long threads wait to run (preemption/contention).
   - **Block I/O latency** (Ch. 75): `biolatency` — disk write latency for the journaler.
   - **Your function's latency**: uprobe/uretprobe (or USDT) on `process_message` → histogram.
 - **Tracepoints — the preferred kernel hook.** Stable (don't change across kernel versions), cheap (§61.3), well-documented (`/sys/kernel/debug/tracing/events`). Prefer them over kprobes when a tracepoint exists for what you want (syscalls, scheduling, networking, block I/O).
-- **USDT — instrument your *own* app cheaply.** Place **static tracepoints** (USDT markers) at key points in your trading app (message received, decision made, order sent) — cheap, and *you* control where they are (at boundaries, not in the hottest inner loop). Then trace them with bpftrace/BCC in production. This is the way to get app-level latency visibility without expensive uprobes.
+- **USDT — instrument your *own* app at chosen boundaries.** Place **static tracepoints** (USDT markers — `<sys/sdt.h>` `DTRACE_PROBEn`) at key points in your trading app (message received, decision made, order sent) — a single `nop`, zero cost while untraced, and *you* control where they are (at boundaries, not in the hottest inner loop). Then trace them with bpftrace/BCC in production, remembering that an attached USDT marker *is* a uprobe (§61.3): the win over an ad-hoc uprobe is stable, typed probe points at sites whose hit rate you have bounded, not a cheaper trap.
 - **kprobes/uprobes — dynamic, for anything without a tracepoint.** kprobes attach to *any* kernel function (powerful, slightly more overhead); uprobes to *any* user function (expensive — §61.3, §61.5). Use for ad-hoc debugging where no tracepoint/USDT exists; mind the cost.
 - **BCC tools and continuous profiling (Ch. 76).** The `bcc-tools`/`bpftrace` tool suite (`funclatency`, `offcputime`, `runqlat`, `biolatency`, `tcplife`, ...) are ready-made; and eBPF underlies **continuous profilers** (Parca, Pyroscope) that profile production with low overhead (Ch. 76). Build eBPF observability into production monitoring.
 
@@ -115,7 +115,7 @@ The standard-Linux fast receive path — the middle ground before bypass:
 ## 61.5 Pitfalls & anti-patterns: verifier limits; tracing overhead near the hot path
 
 - **Tracing *on* the hot path (the observer effect).** Putting a probe — especially a **uprobe** (a kernel trap per hit — §61.3) — on a function called millions of times/sec *in the tick-to-trade loop* adds large overhead and **changes the latency you're measuring** (and steals cycles from the hot core — Ch. 41). Trace *near* the hot path (USDT at boundaries, kernel-side tracepoints), **never in** the critical inner loop. eBPF observability is for understanding the system, not running in it.
-- **uprobe overhead underestimated.** uprobes are *expensive* (trap into kernel — §61.3) vs cheap tracepoints/USDT. A uprobe on a hot function can dominate. Prefer **USDT** (you place cheap markers) or tracepoints; reserve uprobes for ad-hoc, non-hottest debugging.
+- **uprobe overhead underestimated.** uprobes are *expensive* (trap into kernel — §61.3) vs cheap kernel tracepoints — and a traced USDT marker pays the same trap. A uprobe (or USDT) on a hot function can dominate. Prefer tracepoints, or **USDT** markers at low-rate boundaries; reserve uprobes for ad-hoc, non-hottest debugging.
 - **Verifier rejection / fighting the verifier.** The verifier *rejects* programs it can't prove safe (unbounded loops, unbounded memory access, too-complex, too-large) — so eBPF programs are *constrained* (bounded loops, 512-byte stack, limited complexity). Complex logic may not pass; you restructure or move it to user space. Know the limits before writing a big eBPF program (§61.2).
 - **eBPF security surface (Ch. 72).** eBPF is powerful (kernel code execution) and has been a **CVE source** (verifier bugs, privilege escalation); loading eBPF needs privilege (`CAP_BPF`/root), and on a security-sensitive box you control who can load programs. The verifier makes *correct* programs safe, but eBPF itself is an attack surface to manage (Ch. 72). Lock down eBPF loading.
 - **XDP not a full-bypass replacement (Ch. 62).** XDP is in-kernel-driver (great for filtering/redirect); AF_XDP is a good fast path but not the lowest latency. For the ultra-hot tick-to-trade receive, **full bypass** (ef_vi/DPDK — Ch. 62) still wins. Use XDP/AF_XDP for filtering and a portable fast path; bypass for the floor.
@@ -129,7 +129,7 @@ The standard-Linux fast receive path — the middle ground before bypass:
 **Exercises**
 
 1. **Find the hidden syscall (ties Ch. 41).** On a "syscall-free" hot path, run `bpftrace -e 'tracepoint:raw_syscalls:sys_enter /comm=="myapp"/ { @[args] = count(); }'`. Find any syscalls on the steady-state loop; eliminate them (Ch. 41). 
-2. **Probe overhead.** Attach a uprobe vs a USDT marker vs a tracepoint to (near) a function; measure the per-hit overhead by timing the function with/without the probe. Confirm uprobe ≫ tracepoint/USDT (§61.3). Why is a uprobe expensive?
+2. **Probe overhead.** Attach a uprobe vs a USDT marker vs a tracepoint to (near) a function; measure the per-hit overhead by timing the function with/without the probe. Confirm uprobe ≈ traced USDT ≫ tracepoint, and that an *untraced* USDT marker costs nothing (§61.3). Why is a uprobe expensive?
 3. **Latency histogram.** Use `bpftrace` (or `funclatency`) to histogram your `process_message` latency in a running system; identify the tail (Ch. 1). Compare to what an in-process histogram (Ch. 3) shows — does the eBPF observer perturb it?
 4. **XDP filter.** Write an XDP program (or use `xdp-tools`) that `XDP_DROP`s all packets except your multicast group; load it and verify (with traffic) that non-matching packets never reach the socket and the CPU cost drops (§61.4.2).
 5. **AF_XDP receive.** Set up an AF_XDP socket (zero-copy if your driver supports it) receiving the feed; busy-poll the RX ring and decode (Ch. 53) from the UMEM buffers. Compare latency to a normal UDP socket (Ch. 47) and (if available) to ef_vi/DPDK (Ch. 62) (§61.4.3).
