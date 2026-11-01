@@ -52,8 +52,8 @@ Example: `TOC_DEPTH=0 MONOFONT="DejaVu Sans Mono" ./build.sh ~/Desktop/book.pdf`
 chapters/*.md ──► preprocess.py ──► build/book.md ──► pandoc (+filters,+LaTeX) ──► PDF
 ```
 
-- **`preprocess.py`** concatenates the files in reading order (preface, Ch. 1–64,
-  Appendices A–G) and fixes them up for LaTeX:
+- **`preprocess.py`** concatenates the files in reading order (preface, Ch. 1–76,
+  Appendices A–L; discovered from the `chapters/` directory, not hard-coded) and fixes them up for LaTeX:
   - emits each **Part divider once** (the source repeats the Part header in every file);
   - rewrites `# Chapter N — Title` → `# Title` and strips manual section numbers
     (`## 48.4 …` → `## …`) so **LaTeX auto-numbers** them — the numbers come out identical
@@ -88,5 +88,5 @@ make book.md            # writes build/book.md
 - Syntax highlighting is intentionally dropped in favour of uniform, always-fitting
   monochrome code — appropriate for print. Remove `wrap-code.lua` from `build.sh` to get
   Pandoc's default highlighting back (at the cost of Unicode-diagram robustness).
-- A full build typically produces a 400+ page PDF; the first Tectonic run downloads
+- A full build produces a long PDF (500+ pages); the first Tectonic run downloads
   packages and is slower.
