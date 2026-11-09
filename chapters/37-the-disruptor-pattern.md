@@ -58,7 +58,7 @@ Compare a Disruptor-style ring against a lock-free queue (Ch. 34) and a mutex qu
 #include <cstdio>
 #include <cstdint>
 #include <thread>
-#include <vector>
+#include <array>
 #include <chrono>
 #include <new>
 #include <immintrin.h>
@@ -66,7 +66,7 @@ Compare a Disruptor-style ring against a lock-free queue (Ch. 34) and a mutex qu
 template <class T, std::size_t SIZE>
 class Disruptor {
     static_assert((SIZE & (SIZE - 1)) == 0);
-    std::vector<T> ring_{SIZE};
+    std::array<T, SIZE> ring_{};   // fixed storage (std::vector<T>{SIZE} would be a ONE-element initializer list)
     alignas(std::hardware_destructive_interference_size) std::atomic<std::int64_t> cursor_{-1};   // producer
     alignas(std::hardware_destructive_interference_size) std::atomic<std::int64_t> consumed_{-1};  // consumer
 public:

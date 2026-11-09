@@ -67,7 +67,7 @@ The experiment isolates translation cost from data cost: **randomly** probe a la
 ```cpp
 // tlb.cpp — random probes over a large region; compare 4K vs 2M pages.
 // Build: g++ -O2 -std=c++20 -march=native tlb.cpp -o tlb
-// Run (4K, transparent HP off for this region — see note):  taskset -c 2 ./tlb
+// Run (4K; the code opts the region out of THP with madvise(MADV_NOHUGEPAGE)):  taskset -c 2 ./tlb
 //   To test huge pages, allocate the buffer on explicit 2M pages (mmap MAP_HUGETLB below).
 #include <cstdint>
 #include <cstdio>
@@ -88,6 +88,9 @@ int main(int argc, char** argv) {
     auto* a = static_cast<std::uint64_t*>(
         mmap(nullptr, BYTES, PROT_READ | PROT_WRITE, flags, -1, 0));
     if (a == MAP_FAILED) { std::perror("mmap"); return 1; }
+    // Keep the 4K baseline on 4K pages: with /sys/kernel/mm/transparent_hugepage/enabled = always
+    // a 1 GiB anonymous region would otherwise get 2 MB pages at fault time and the comparison collapses.
+    if (!huge && madvise(a, BYTES, MADV_NOHUGEPAGE) != 0) { std::perror("madvise"); return 1; }
     std::memset(a, 1, BYTES);                                // pre-fault every page (Ch. 23, 26)
 
     std::mt19937_64 rng(12345);
@@ -106,7 +109,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with the dTLB counters: `perf stat -e cycles,instructions,dtlb_load_misses.miss_causes_a_walk,dtlb_load_misses.walk_active,dtlb_load_misses.walk_completed,L1-dcache-load-misses ./tlb` (run `./tlb` and `./tlb huge`; the `huge` run needs reserved hugepages — `sysctl vm.nr_hugepages=...` or a hugetlbfs mount; see §15.4.1). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *direction* is the point):
+Profile both with the dTLB counters: `perf stat -e cycles,instructions,dtlb_load_misses.miss_causes_a_walk,dtlb_load_misses.walk_active,dtlb_load_misses.walk_completed,L1-dcache-load-misses ./tlb` (run `./tlb` and `./tlb huge`; the `huge` run needs reserved hugepages — `sysctl vm.nr_hugepages=...` or a hugetlbfs mount; see §15.4.1). Confirm the baseline really is on 4 KB pages: while `./tlb` runs, `grep AnonHugePages /proc/$(pidof tlb)/smaps_rollup` must read `0 kB` — the `madvise(MADV_NOHUGEPAGE)` opt-out in the listing is what guarantees that on a box whose `transparent_hugepage/enabled` is `always`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *direction* is the point):
 
 ```
                                           4K pages           2M huge pages

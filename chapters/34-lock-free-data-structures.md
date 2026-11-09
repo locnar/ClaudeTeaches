@@ -56,12 +56,13 @@ The SPSC ring is the structure that matters most, so measure *it*: producer→co
 #include <thread>
 #include <chrono>
 #include <new>
-#include <vector>
+#include <array>
 
 template <class T, std::size_t CAP>   // CAP must be a power of two (Ch. 28: index & (CAP-1))
 class SpscRing {
     static_assert((CAP & (CAP - 1)) == 0, "power of two");
-    std::vector<T> buf_{CAP};
+    std::array<T, CAP> buf_{};   // fixed, pre-allocated storage. NOT std::vector<T> buf_{CAP}: for an integral T
+                                 // that brace-init picks the initializer_list ctor -> a ONE-element vector holding CAP
     alignas(std::hardware_destructive_interference_size) std::atomic<std::size_t> head_{0}; // producer writes
     alignas(std::hardware_destructive_interference_size) std::atomic<std::size_t> tail_{0}; // consumer writes
 public:

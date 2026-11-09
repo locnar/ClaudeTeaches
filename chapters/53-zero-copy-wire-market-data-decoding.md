@@ -186,16 +186,21 @@ Surviving the microburst (§53.2.4) — the operational tuning:
 
 The zero-copy overlay's promise — "field access is just a load" — is verifiable, as is whether the parse loop stays branch-light. Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
-**In-place field load + byte-swap → `mov` + `bswap` (no copy).** The `memcpy`-into-local + `byteswap` (Ch. 21, 28) compiles to a single load and a `bswap` — *not* an actual memcpy call, *not* a payload copy:
+**In-place field load + byte-swap → a load + `bswap`, or a single `movbe` (no copy).** The `memcpy`-into-local + `byteswap` (Ch. 21, 28) compiles to a load and a swap — *not* an actual memcpy call, *not* a payload copy — and since x86-64-v3 includes MOVBE, the swap is fused into the load or the store itself. `Parsed` is returned through a hidden pointer (sret), so in `decode_binary` `rdi` is the result and `rsi` is `p`:
 
 ```asm
-; r.seq = byteswap( load 8 bytes at p+1 ):
-        mov     rax, qword ptr [rdi + 1]    ; load the wire field IN PLACE (no copy)
-        bswap   rax                         ; big-endian → host (Ch.28) — one instruction
-        mov     qword ptr [rsi], rax        ; store into the parsed local
+; r.price = byteswap( load 8 bytes at p+30 ):     (-march=x86-64-v3 — MOVBE available)
+        mov     rcx, qword ptr [rsi + 30]   ; load the wire field IN PLACE (no copy)
+        movbe   qword ptr [rdi + 16], rcx   ; byte-swapping STORE into r.price — the swap is fused
+; a bare accessor  uint64_t load_be64(const uint8_t* p)  is ONE instruction:
+        movbe   rax, qword ptr [rdi + 1]    ; byte-swapping LOAD: big-endian → host (Ch.28)
+; without MOVBE (-march=x86-64-v2) the same source is the two-instruction form:
+        mov     rcx, qword ptr [rsi + 30]
+        bswap   rcx                         ; big-endian → host — one instruction
+        mov     qword ptr [rdi + 16], rcx
 ```
 
-This is the proof that **zero-copy decode of a fixed-binary field is a load + a swap** — the `memcpy`/`bit_cast` (Ch. 21) folded away, no `call memcpy`, no buffer copy. (A `reinterpret_cast` deref would be UB and possibly a misaligned-access fault — §53.6; the `memcpy` form is safe *and* the same codegen.)
+(Clang goes further on the adjacent `seq`/`id` fields: one 16-byte `vmovdqu` + `vpshufb` swaps both at once.) This is the proof that **zero-copy decode of a fixed-binary field is a load + a swap — or one `movbe`** — the `memcpy`/`bit_cast` (Ch. 21) folded away, no `call memcpy`, no buffer copy. (A `reinterpret_cast` deref would be UB and possibly a misaligned-access fault — §53.6; the `memcpy` form is safe *and* the same codegen.)
 
 **Bounds check compiles to a cheap compare+branch (predictable).** A `if (offset + len > buf_size) return error;` before a variable-length read is a compare and a (well-predicted, rarely-taken) branch — *cheap*, and the §53.6/Ch. 72 safety is nearly free:
 
@@ -213,7 +218,7 @@ This is the proof that **zero-copy decode of a fixed-binary field is a load + a 
         jmp     qword ptr [.Ljt + 8*rax]    ; jump table over message types (Ch.14)
 ```
 
-The verification habits: **confirm field access is a `mov`(+`bswap`), not a `call memcpy` or a misaligned trap** (the zero-copy + safe-load promise — §53.2.2); **confirm bounds checks are cheap predicted branches** (so safety is ~free — §53.6); **confirm the type dispatch is a jump table/lookup** (Ch. 14), not a branch chain; and for bulk fixed-width parsing, **confirm vectorization** (Ch. 29) where it applies. The decode loop is the hottest loop in the system — read its asm and ensure it's loads + swaps + predicted branches, nothing more.
+The verification habits: **confirm field access is a `mov`(+`bswap`) or a `movbe`, not a `call memcpy` or a misaligned trap** (the zero-copy + safe-load promise — §53.2.2); **confirm bounds checks are cheap predicted branches** (so safety is ~free — §53.6); **confirm the type dispatch is a jump table/lookup** (Ch. 14), not a branch chain; and for bulk fixed-width parsing, **confirm vectorization** (Ch. 29) where it applies. The decode loop is the hottest loop in the system — read its asm and ensure it's loads + swaps + predicted branches, nothing more.
 
 ## 53.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 72)*
 
@@ -233,7 +238,7 @@ The verification habits: **confirm field access is a `mov`(+`bswap`), not a `cal
 
 **Exercises**
 
-1. **Binary vs FIX decode.** Build `decode.cpp`; compare fixed-binary overlay vs FIX text decode latency. Confirm binary is ~10× faster (§53.3). Disassemble the binary decode (§53.5) — is each field a `mov`+`bswap` (not a memcpy call)? Is the type dispatch a jump table?
+1. **Binary vs FIX decode.** Build `decode.cpp`; compare fixed-binary overlay vs FIX text decode latency. Confirm binary is ~10× faster (§53.3). Disassemble the binary decode (§53.5) — is each field a `mov`+`bswap` or a `movbe` (not a memcpy call)? Is the type dispatch a jump table?
 2. **The bounds-check.** Add a variable-length field (a count + N entries) to the binary message; decode it *without* a bounds check, then feed a packet whose count exceeds the buffer — reproduce the over-read (ASan — Ch. 40). Add the bounds check; confirm it's a cheap predicted branch (§53.5) and rejects the bad packet (§53.6, Ch. 72).
 3. **A/B arbitration.** Build two sequenced UDP streams of the same data; drop random packets from each; write an arbitrator that joins both, dedups, reorders, and emits one clean in-order stream. Inject a gap in *both* and trigger a recovery path. Measure recovery latency (§53.4.3).
 4. **Microburst survival.** Replay a captured (or synthetic) market-open burst into your receiver; tune NIC RX ring (`ethtool -G`) + `SO_RCVBUF` + `recvmmsg` until zero drops (`ethtool -S` rx_missed = 0). Measure decode latency under burst (§53.4.4).
@@ -242,7 +247,7 @@ The verification habits: **confirm field access is a `mov`(+`bswap`), not a `cal
 **Checklist — zero-copy wire decoding**
 
 - [ ] Latency-critical feeds use **fixed-binary encodings** (ITCH/SBE — ~10× faster decode than FIX text — §53.3); FIX/text uses **`from_chars`/branch-free** parsing (Ch. 28, §53.4.1) and prices parse to **scaled integers** (Ch. 27).
-- [ ] Decode is **zero-copy in place** — overlay structs read via **`memcpy`/`bit_cast`** (alignment-safe, defined — Ch. 21) with **byte-swaps** (Ch. 28), **no payload copy**; verified in the asm as `mov`+`bswap` (§53.5).
+- [ ] Decode is **zero-copy in place** — overlay structs read via **`memcpy`/`bit_cast`** (alignment-safe, defined — Ch. 21) with **byte-swaps** (Ch. 28), **no payload copy**; verified in the asm as `mov`+`bswap` or `movbe` (§53.5).
 - [ ] **Every variable-length field is bounds-checked** against the buffer (the untrusted-input boundary — §53.6, Ch. 72); the decoder is **fuzzed** (libFuzzer + ASan/UBSan — Ch. 40).
 - [ ] Reliability is built in: **sequence tracking + A/B feed arbitration + gap recovery** (snapshot/retransmit) producing one **clean in-order stream** to the book (Ch. 25) — with a **bounded reorder window + timeout** (§53.4.3).
 - [ ] The microburst is survived: **NIC RX ring sized** (`ethtool -G`), **`SO_RCVBUF` sized** (Ch. 51), **batched draining** (`recvmmsg`/busy-poll/bypass — Ch. 47, 62), and **drops detected at NIC/socket/app layers** (§53.4.4) — tested under **replayed market-open load** (Ch. 75).

@@ -207,14 +207,19 @@ Google Benchmark reports mean/median/stddev — useful for service-time *through
 // Build: g++ -O2 -std=c++20 latency_hist.cpp -lhdr_histogram -o latency_hist
 #include <hdr/hdr_histogram.h>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 
 extern std::uint32_t operation_under_test(std::uint32_t);  // your hot op
 
 int main() {
     hdr_histogram* h = nullptr;
-    // record 1 .. 10,000,000 ns with 3 significant figures of precision.
-    hdr_init(1, 10'000'000, 3, &h);
+    // record 1 ns .. 60 s with 3 significant figures of precision. The upper bound must cover the
+    // WORST tail event you could see (a >10 ms preemption, SMI or major fault): hdr_record_value
+    // refuses — and silently drops — any value above highest_trackable_value, i.e. exactly the
+    // sample a tail-latency measurement exists to catch. (Memory stays modest: ~200 KB at 3 s.f.)
+    if (hdr_init(1, INT64_C(60'000'000'000), 3, &h) != 0) { std::puts("hdr_init failed"); return 1; }
+    long dropped = 0;                                              // out-of-range samples (must be 0)
 
     constexpr int WARMUP = 100'000, MEASURE = 5'000'000;
     std::uint32_t x = 1;
@@ -225,10 +230,11 @@ int main() {
         auto t0 = clk::now();
         x = operation_under_test(x);               // dependent chain: not elided
         auto t1 = clk::now();
-        hdr_record_value(h,
-            std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+        if (!hdr_record_value(h,
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()))
+            ++dropped;                             // never ignore this: a dropped sample IS the tail
     }
-    std::printf("ignore=%u\n", x);  // keep x live so the chain can't be deleted
+    std::printf("ignore=%u dropped=%ld\n", x, dropped);  // keep x live so the chain can't be deleted
 
     std::printf("p50   = %lld ns\n", (long long)hdr_value_at_percentile(h, 50.0));
     std::printf("p99   = %lld ns\n", (long long)hdr_value_at_percentile(h, 99.0));
