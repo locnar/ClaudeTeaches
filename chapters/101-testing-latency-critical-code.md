@@ -44,4 +44,4 @@ TODO
 
 ---
 
-*Next: Ch. 102 — Production Profiling & End-to-End Case Study.*
+*Next: Ch. 102 — Performance Engineering in CI & the Profile Lifecycle.*

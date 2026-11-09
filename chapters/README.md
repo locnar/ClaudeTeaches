@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 102 chapters are grouped into thirteen Parts; sixteen appendices (A–P) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 103 chapters are grouped into thirteen Parts; sixteen appendices (A–P) follow.
 
 ---
 
@@ -1403,17 +1403,26 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 101.5 Pitfalls & anti-patterns: TODO
 - 101.6 Exercises & checklist
 
-### [102. Production Profiling & End-to-End Case Study](102-production-profiling-end-to-end-case-study.md)
-- 102.1 Why it matters: tying the whole book together
-- 102.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
-- 102.3 Measure it: a full tick-to-trade walkthrough
+### [102. Performance Engineering in CI & the Profile Lifecycle](102-performance-engineering-ci-profile-lifecycle.md)
+- 102.1 Why it matters: TODO
+- 102.2 Mental model: TODO
+- 102.3 Measure it: TODO
 - 102.4 Techniques
-  - 102.4.1 Regression detection and latency-regression gates in CI
-  - 102.4.2 Deterministic replay of captured market data
-  - 102.4.3 Simulation harnesses
-  - 102.4.4 Profiling the live system safely
-- 102.5 Pitfalls & anti-patterns: drift between test and production
+  - 102.4.1 TODO
+- 102.5 Pitfalls & anti-patterns: TODO
 - 102.6 Exercises & checklist
+
+### [103. Production Profiling & End-to-End Case Study](103-production-profiling-end-to-end-case-study.md)
+- 103.1 Why it matters: tying the whole book together
+- 103.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
+- 103.3 Measure it: a full tick-to-trade walkthrough
+- 103.4 Techniques
+  - 103.4.1 Regression detection and latency-regression gates in CI
+  - 103.4.2 Deterministic replay of captured market data
+  - 103.4.3 Simulation harnesses
+  - 103.4.4 Profiling the live system safely
+- 103.5 Pitfalls & anti-patterns: drift between test and production
+- 103.6 Exercises & checklist
 
 ## Appendices
 

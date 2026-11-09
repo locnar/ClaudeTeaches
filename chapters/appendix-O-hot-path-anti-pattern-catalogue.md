@@ -1,6 +1,6 @@
 # Appendix O — Hot-Path Anti-Pattern Catalogue
 
-> **Consolidates:** every chapter's *Pitfalls & anti-patterns* section (§N.5 or §N.6 of Ch. 1–102), read and re-sorted by **where the sin lives** rather than by chapter, with the one column no chapter provides in aggregate: **the counter, probe or signature that exposes it**. The probe invocations are Appendix I's; the fixes point at the section that develops them. Companion to Appendix C (tuning knobs), D (flags), E (latency numbers), I (commands) and M (the readiness gate); the pre-merge review checklist Ch. 102 §102.4.1 asks for.
+> **Consolidates:** every chapter's *Pitfalls & anti-patterns* section (§N.5 or §N.6 of Ch. 1–103), read and re-sorted by **where the sin lives** rather than by chapter, with the one column no chapter provides in aggregate: **the counter, probe or signature that exposes it**. The probe invocations are Appendix I's; the fixes point at the section that develops them. Companion to Appendix C (tuning knobs), D (flags), E (latency numbers), I (commands) and M (the readiness gate); the pre-merge review checklist Ch. 103 §103.4.1 asks for.
 
 **How to use this:** two ways. *As a reviewer*, read the left column of the sections that touch the change (a new queue → O.5; a new container → O.1 and O.8; a new thread → O.4 and O.6) and ask whether each row applies. *On call*, start from the **symptom** you have — a p99.9 spike every ~N minutes, a flat median with a long tail, throughput that fell when you added a core — find it in the second column, run the probe in the third, and follow the pointer. Each row is one line: **anti-pattern → how it shows up → what exposes it → the fix → where the book develops it**. The "exposes it" column names the cheapest *discriminating* evidence: a counter that moves for this pattern and not for its neighbours. Rows added by the design-pattern chapters (Ch. 41, 42, 47, 90, 91, 96) are marked ◆.
 
@@ -150,10 +150,10 @@
 | Reporting the mean; averaging percentiles; a `p99_9` gauge | the tail invisible until the incident | the histogram itself (HdrHistogram) vs the summary statistic | Full histograms, merged off-path; percentiles from enough samples | Ch. 1 §1.5, 3 §3.5, 83 §86.6 |
 | Coordinated omission; service time instead of response time | a closed-loop benchmark that cannot see the stall | compare paced-intended vs dequeue-time histograms (Appendix L.2) | Record against the intended time; paced load | Ch. 3 §3.5, 39 §42.7, Appendix L |
 | Unserialized `rdtsc` on a tiny region; converting to ns on the hot path; comparing TSC to the venue's clock | numbers off by the measurement's own cost or by a clock domain | the measured cost of the empty region; TSC↔PHC anchors | `rdtscp`/fenced pairs; convert off-path; anchor to PTP | Ch. 17 §17.5, 82 §85.6, 63 §66.5 |
-| Measuring kernel-only/component latency, not wire-to-wire; one run, no CI | optimizing a stage the tail does not live in | end-to-end HW-timestamped histogram vs the stage sum | Wire-to-wire with hardware stamps; the regression gate with confidence intervals | Ch. 102 §102.5, 72 §75.5, 75 §78.5 |
+| Measuring kernel-only/component latency, not wire-to-wire; one run, no CI | optimizing a stage the tail does not live in | end-to-end HW-timestamped histogram vs the stage sum | Wire-to-wire with hardware stamps; the regression gate with confidence intervals | Ch. 103 §103.5, 72 §75.5, 75 §78.5 |
 | Drops measured instead of age; lag without age ◆ | the strategy traded on stale data with zero drops | message age at point of use | Age histograms and budgets per consumer | Ch. 42 §42.5 |
 | Trusting `smp_affinity`, `scaling_cur_freq`, `/proc/net/igmp`, zero counters on a bypass box | the configuration says one thing, the hardware another | `effective_affinity_list`; `turbostat`; the querier; NIC vendor counters | Verify the effective state in the host fingerprint (Appendix M) | Ch. 52 §52.5, 59 §62.5, 93 §99.5, 94 §100.5 |
-| Profiling overhead / tracing everything on every CPU / `perf -C <isolated>` all day | the observer is the tail | `rtla osnoise` with and without the tool | Targeted-live tier only, armed from a housekeeping core | Ch. 2 §2.5, 49 §52.5, 92 §98.5, 95 §102.5 |
+| Profiling overhead / tracing everything on every CPU / `perf -C <isolated>` all day | the observer is the tail | `rtla osnoise` with and without the tool | Targeted-live tier only, armed from a housekeeping core | Ch. 2 §2.5, 49 §52.5, 92 §98.5, 95 §103.5 |
 | Benchmarking only the warm path; shadow traffic with side effects | the first real message is cold; a test order went to the venue | cold-vs-warm histograms; an order you did not mean to send | Measure cold; warm deliberately; shadow traffic that cannot leave the box | Ch. 53 §53.5 |
 
 ## O.12 Operational and architectural
@@ -168,7 +168,7 @@
 | Heartbeat that only catches exits; thresholds on invariants; a baseline nobody updates | a hung process trades stale; alerts that never fire or always fire | heartbeat *sequence* stalls while the process lives; invariant checks | Progress heartbeats; invariants as hard checks; baselines refreshed per release | Ch. 89 §89.5, 93 §99.5 |
 | Trusting the wire / the shared region / the operator | a malformed packet or a bad limit set takes the system down | fuzzing the decoders; validate-before-swap failures | Bounds-check at the gate; validate config off-path; four-eyes on limits | Ch. 60 §60.6, 84 §87.5, 85 §88.5, 87 §90.4.4 ◆ |
 | A mode nobody owns (shedding scattered across stages) ◆ | inconsistent behaviour under load, no record of it | the journal has no mode transitions | One owner, one word, journaled transitions | Ch. 42 §42.5 |
-| Drift between test and production; tuned once and walked away | the gate passes, production regresses | host fingerprint delta (Appendix M); the production always-on tier | Configuration as code; continuous monitoring; re-tune per kernel/firmware | Ch. 102 §102.5, 6 §6.5, 48 §51.5 |
+| Drift between test and production; tuned once and walked away | the gate passes, production regresses | host fingerprint delta (Appendix M); the production always-on tier | Configuration as code; continuous monitoring; re-tune per kernel/firmware | Ch. 103 §103.5, 6 §6.5, 48 §51.5 |
 
 ---
 
@@ -189,7 +189,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 
 ## O.14 References
 
-- The §N.5/§N.6 sections of Ch. 1–102 of this book, from which every row is drawn; Appendix I for the probe invocations; Appendix M for the readiness checks that catch the operational rows before the open.
+- The §N.5/§N.6 sections of Ch. 1–103 of this book, from which every row is drawn; Appendix I for the probe invocations; Appendix M for the readiness checks that catch the operational rows before the open.
 - Gregg, B. *Systems Performance*, 2nd ed., Ch. 2 §"Methodologies" (the USE and RED methods — symptom-first diagnosis), and *BPF Performance Tools* — the uprobe/tracepoint one-liners.
 - Intel. *Optimization Reference Manual*, Appendix B (top-down analysis — the counter names in O.3/O.8).
 - Fog, A. *Optimizing software in C++* — the per-construct costs behind O.2/O.3/O.9.
@@ -203,7 +203,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 
 ---
 
-*This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 102) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
+*This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 103) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
 
 ---
 
