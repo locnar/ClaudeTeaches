@@ -289,7 +289,7 @@ Core Guidelines, Love and trading-blog lines, and Appendix H's `std::span` row (
 the book-wide "ROB → Ch. 11, 43", `F:43` µop and `F:153` RSS heuristic STALE rows are unchanged (pre-existing; not in the
 P1-5 rows). **Bibliographic hedges:** Herlihy & Shavit is given as "2nd ed., with Luchangco & Spear" without a year; Boehm's
 seqlock paper is given without venue/year; Harris without publisher/year — each omitted rather than guessed. Checks:
-`tools/review/sweep.py` output identical to `main`; `stale_crossrefs.py` 163 → 162 STALE rows (the `F:92` RAII row is gone,
+`tools/review/sweep.py` output identical to `main`; `stale_crossrefs.py` one STALE row fewer than `main` (the `F:92` RAII row is gone,
 none added — three new entries were worded so the keyword heuristic does not misfire).
 
 ---
