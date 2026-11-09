@@ -46,6 +46,7 @@ Codegen-shaping flags from Ch. 20–22:
 - **`-fno-semantic-interposition`** (Ch. 22) — tell the compiler that symbols in *this* shared object won't be interposed (LD_PRELOAD-overridden) at runtime, so it can inline and devirtualize across TU boundaries within the `.so` (a big missed-optimization otherwise for `-fPIC` shared libraries). **Worthwhile** for hot-path shared libraries; default for static/executable. (Clang defaults to this behavior; GCC needs the flag with `-fPIC`.)
 - **`-fno-omit-frame-pointer`** (Ch. 2, 22) — **keep** the frame pointer for **profiling** (Ch. 2 — `perf` call-graph/flame-graph stacks need it, or DWARF unwinding which is slower/less reliable). Costs one register (negligible on x86-64's register-rich AVX world; can cost a bit on register-starved code). **Recommended on for profilable production builds** (Ch. 2, 76) — the observability is worth more than the register. `-fomit-frame-pointer` (the `-O2` default) saves the register but blinds the profiler.
 - **`-fvisibility=hidden`** (Ch. 22) — hide symbols by default (export deliberately), shrinking the dynamic symbol table and enabling more inlining/devirt within a `.so`. Good hygiene for hot-path libraries.
+- **`-std=c++23` / `-std=c++26` and `-stdlib=libc++`** (Appendix H) — standard and library selection. GCC 11+ and Clang 17+ accept the final spelling `-std=c++23` (older releases: `-std=c++2b`); `-std=c++26` (`-std=c++2c` on slightly older releases) selects the draft on GCC 14+ / Clang 17+. `-stdlib=libc++` is Clang-only and swaps in LLVM's library (Clang's default on Linux is the system libstdc++). Neither flag guarantees a *library* feature exists — gate on the `<version>` macros as Appendix H.6 shows.
 
 ## D.5 Inlining/layout (`-finline-limit`, `-freorder-blocks-and-partition`, `-falign-*`)
 
@@ -111,7 +112,7 @@ The discipline (Ch. 22): start from `-O2 -march=<target> -flto`, add the safe co
 - The **GCC** and **Clang/LLVM** command-line option references — the authoritative per-flag documentation (all sections).
 - Ch. 22 (*Build Toolchain for Speed*) — the chapter this consolidates: `-march`, LTO, PGO, BOLT, inlining (D.2, D.5, D.6).
 - The **BOLT** paper/documentation (Facebook/Meta) and the GCC/LLVM PGO guides — D.6.
-- Ch. 27 (FP/`-ffast-math`/FTZ-DAZ — D.3), Ch. 20 (exceptions/RTTI — D.4), Ch. 12 (front-end/layout — D.5), Ch. 29 (vectorization reports — D.7), Ch. 40 & 60 (sanitizers/fuzzing — D.7), Ch. 2 (frame pointer/profiling — D.4).
+- Ch. 27 (FP/`-ffast-math`/FTZ-DAZ — D.3), Ch. 20 (exceptions/RTTI — D.4), Ch. 12 (front-end/layout — D.5), Ch. 29 (vectorization reports — D.7), Ch. 40 & 72 (sanitizers/fuzzing — D.7), Ch. 2 (frame pointer/profiling — D.4).
 - Agner Fog's optimization manuals (Appendix G) — the microarchitectural *why* behind `-march`/alignment/inlining choices.
 
 ## D.10 Additional Reading
