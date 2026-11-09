@@ -106,7 +106,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), producer/consumer pinned to two cores, turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), producer/consumer pinned to two cores, turbo off (illustrative):
 
 ```
    structure                       throughput        ns/msg     note

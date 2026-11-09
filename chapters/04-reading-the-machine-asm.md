@@ -70,6 +70,8 @@ The practical consequence: when you read optimized asm, don't look for your sour
 
 ## 4.3 Measure it: the Compiler Explorer (Godbolt) workflow
 
+*Toolchain and machine: Appendix L.3.*
+
 [Compiler Explorer](https://godbolt.org) (Godbolt) is the indispensable tool: paste C++, pick a compiler and flags, and see the asm side-by-side with **color-coded source↔asm mapping** (click a source line, the corresponding asm highlights). It is the fastest loop for the "which source form is better?" question, and it needs nothing installed. The local equivalents, for code that doesn't fit in a paste buffer:
 
 ```bash

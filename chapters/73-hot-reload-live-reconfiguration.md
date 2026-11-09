@@ -41,6 +41,8 @@ The mental shift from "edit the config" to "**publish a new immutable config and
 
 ## 73.3 Measure it: reload-induced tear/stall test
 
+*Toolchain and machine: Appendix L.3.*
+
 The two failure modes — **tear** and **stall** — are exactly what you must measure, under load, while reloading repeatedly. A reload that "works" in a quiet test can tear or stall under the real hot path.
 
 **Stall test** — does a reload add latency to the hot path? Run the hot path under representative load (Ch. 3, with HdrHistogram — Ch. 1) and fire reloads continuously from the control thread; compare the hot-path latency distribution *with* concurrent reloads vs *without*. Representative shape (Xeon Gold 6326; figures pending real runs):

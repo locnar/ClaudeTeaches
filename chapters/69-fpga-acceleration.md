@@ -51,7 +51,7 @@ The FPGA's metric is **wire-to-wire latency** — from a packet arriving on the 
    # The KEY metric is not just the median — it's the DISTRIBUTION (determinism / tail — Ch.1).
 ```
 
-Representative results — NIC-integrated FPGA inline path vs software (illustrative; the *tier* and the *determinism* are the point):
+Representative results (toolchain and machine: Appendix L.3) — NIC-integrated FPGA inline path vs software (illustrative; the *tier* and the *determinism* are the point):
 
 ```
    tick-to-trade path                  wire-to-wire latency (p50)     p99 / tail        determinism

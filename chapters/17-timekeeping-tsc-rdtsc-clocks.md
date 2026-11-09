@@ -125,7 +125,7 @@ constant_tsc                # invariant TSC present
 nonstop_tsc
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, base 2.9 GHz, max turbo 3.5 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, `tsc` clocksource + vDSO, pinned, turbo off (illustrative):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, base 2.9 GHz, max turbo 3.5 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, `tsc` clocksource + vDSO, pinned, turbo off (illustrative):
 
 ```
 TSC freq ~ 2.9000 GHz   (0.344828 ns / tsc tick)        <- the kernel's own tsc_khz (see below)

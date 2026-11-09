@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), producer/consumer in separate processes pinned to two cores, turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), producer/consumer in separate processes pinned to two cores, turbo off (illustrative):
 
 ```
    IPC mechanism                         throughput        ns/msg     note

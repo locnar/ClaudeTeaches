@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), R readers + occasional writer, pinned, turbo off (illustrative; use `liburcu`/`folly::hazptr` for real numbers):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), R readers + occasional writer, pinned, turbo off (illustrative; use `liburcu`/`folly::hazptr` for real numbers):
 
 ```
    R readers (read-mostly):     ns/read (R=8)     scales with readers?      reclamation

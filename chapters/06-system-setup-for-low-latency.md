@@ -61,6 +61,8 @@ These mitigations exist for a real reason: they defend against information leaka
 
 ## 6.3 Measure it: jitter before/after tuning
 
+*Toolchain and machine: Appendix L.3.*
+
 The right way to *see* system jitter — independent of any application — is **`cyclictest`** (from `rt-tests`), the standard tool for measuring scheduling/wake-up latency. It sleeps a thread for a fixed interval, then measures how late the wake-up actually was versus the intended time; the distribution of that lateness *is* the machine's jitter floor. (Note the kinship with Ch. 1: `cyclictest` reports min/avg/**max**, and the **max** is the number that matters — it's the worst stall a perfectly-timed thread would suffer from the OS and hardware alone.)
 
 ```bash
@@ -69,7 +71,7 @@ The right way to *see* system jitter — independent of any application — is *
 sudo cyclictest --smp -p99 -m -i 10 -h 200 -D 60s
 ```
 
-Run it twice — once on the box as shipped, once after applying the §6.4 tuning — and compare the **max** and the tail of the histogram. Representative results, reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.x (illustrative — your hardware and kernel decide the real numbers; the *shape* of the improvement is the point):
+Run it twice — once on the box as shipped, once after applying the §6.4 tuning — and compare the **max** and the tail of the histogram. Representative results, reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.18 (illustrative — your hardware and kernel decide the real numbers; the *shape* of the improvement is the point):
 
 ```
                                    min      avg      max

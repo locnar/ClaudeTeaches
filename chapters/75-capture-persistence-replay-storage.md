@@ -41,6 +41,8 @@ The mental shift mirrors Ch. 71: **capturing an event is "append a record to a j
 
 ## 75.3 Measure it: capture throughput and hot-path impact
 
+*Toolchain and machine: Appendix L.3.*
+
 Two things to measure, and they pull against each other: **hot-path impact** (capture must add ~nothing to tick-to-trade) and **sustained lossless throughput** (the writer must keep up with the worst burst without dropping). Measure both, under a market-open-style microburst (Ch. 53).
 
 **Hot-path impact** — the cost the trading thread pays to capture an event (identical in spirit to Ch. 71's §71.3):

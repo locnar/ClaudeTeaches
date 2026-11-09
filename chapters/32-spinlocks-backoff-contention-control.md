@@ -108,7 +108,7 @@ int main(int argc, char** argv){
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket), threads pinned to distinct cores, turbo off, *tiny* critical section (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket), threads pinned to distinct cores, turbo off, *tiny* critical section (illustrative):
 
 ```
    M=8 cores, tiny critical section:

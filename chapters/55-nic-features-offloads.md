@@ -50,7 +50,7 @@ Measure two things: the **latency** effect of the batching offloads (interrupt c
    #   app_recv_time - nic_hw_rx_timestamp  = the software-stack latency the NIC config affects
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP) + a low-latency NIC, small UDP multicast packets, pinned, turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP) + a low-latency NIC, small UDP multicast packets, pinned, turbo off (illustrative):
 
 ```
    RX config                                   wire-to-app latency (p50 / p99)   CPU      note

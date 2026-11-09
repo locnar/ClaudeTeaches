@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the point is *which match*):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the point is *which match*):
 
 ```
                     hand-written    CRTP        virtual      std::function
@@ -172,7 +172,7 @@ The synthesis of §19.4: encode the *varying design decision* in a type (CRTP fo
 
 ## 19.5 Verify the codegen: zero-overhead confirmation
 
-"Zero-cost" is a codegen claim; §19.5 is how you *settle* it. The test: does the abstracted version produce **the same instructions** as the hand-written one? Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
+"Zero-cost" is a codegen claim; §19.5 is how you *settle* it. The test: does the abstracted version produce **the same instructions** as the hand-written one? Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
 **Hand-written vs CRTP — identical.** Both the direct `hand_update` and the CRTP `Vwap::update` compile to the same body — the dispatch and the wrapper vanished:
 

@@ -45,6 +45,8 @@ The mental shift: **a log call is not "produce a log line," it's "enqueue an eve
 
 ## 71.3 Measure it: log-call cost on the hot path
 
+*Toolchain and machine: Appendix L.3.*
+
 Measure the *hot-path cost of the log call itself* — the time the trading thread spends — for three designs, with a microbenchmark (Ch. 3, careful about dead-code elimination and warm-up) timing just the `log(...)` call. Representative numbers (Xeon Gold 6326, GCC 13 `-O2`, single thread; figures pending real runs):
 
 | Logger design | What the hot path does | Hot-path cost per call | Tail behavior |

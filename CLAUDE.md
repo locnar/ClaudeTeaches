@@ -461,6 +461,9 @@ Code & content guidelines:
   Xeon Gold 6326 (Ice Lake-SP); the NUMA chapter (Ch. 16) uses a **dual-socket 2× Xeon Gold 6326**
   because NUMA effects need two sockets. Keep the per-chapter machine description consistent with
   these unless a chapter needs otherwise.
+  The full **reference toolchain and machine statement** (GCC 14.2 / Clang 18.1, Linux 6.18 LTS,
+  `performance` governor with turbo off, ns↔cycles at 2.9 GHz = 0.345 ns/cycle) lives in **Appendix L.3**
+  (one-paragraph version in the Preface); a §N.3 block either names those facts or cites "Appendix L.3".
 
 ### README.md is the reader's topic index (keep it current with every chapter)
 

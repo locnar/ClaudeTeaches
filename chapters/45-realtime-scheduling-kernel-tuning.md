@@ -61,7 +61,7 @@ The standard scheduling-jitter instrument is **`cyclictest`** (from `rt-tests`):
    $ cyclictest -m -p 80 -i 200 -h 400 -a 5 -t 1 -D 60
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative (`cyclictest` reports min/avg/max in µs):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative (`cyclictest` reports min/avg/max in µs):
 
 ```
    configuration                                    min    avg    max        what's in the max

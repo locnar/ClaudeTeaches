@@ -142,7 +142,7 @@ int main() {
 }
 ```
 
-Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base: 48 KiB L1d, 1.25 MiB L2 per core, 24 MiB L3 shared across the socket — 1.5 MiB slice per core), GCC 13 `-O2 -std=c++20`, Linux 6.x, 4 KiB pages, pinned, turbo off (illustrative; the *plateaus and cliffs* are the point, not the exact ns):
+Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base: 48 KiB L1d, 1.25 MiB L2 per core, 24 MiB L3 shared across the socket — 1.5 MiB slice per core), GCC 13 `-O2 -std=c++20`, Linux 6.18, 4 KiB pages, pinned, turbo off (illustrative; the *plateaus and cliffs* are the point, not the exact ns):
 
 ```
        4 KiB     1.72 ns/access     ┐

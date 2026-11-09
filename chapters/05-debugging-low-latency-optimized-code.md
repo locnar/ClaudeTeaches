@@ -30,6 +30,8 @@ The mental model: **you don't debug the live hot path — you capture enough to 
 
 ## 5.3 Measure it: reproducing and capturing the bug
 
+*Toolchain and machine: Appendix L.3.*
+
 Debugging's "measure it" is *reproduction* — turning a one-off into something you can study. The techniques for capturing enough to reproduce:
 
 - **Capture-driven reproduction (Ch. 75).** If the system captures its input stream (Ch. 75) and the core is deterministic (Ch. 74), a production bug is reproduced by replaying the captured session through the core offline — bit-for-bit (Ch. 74.2.2). This is the highest-value reproduction: it needs no special effort at bug time (the capture already exists for compliance/replay), and it reproduces the *exact* production conditions. Measure your ability to do this by regularly replaying captures and asserting output matches (Ch. 76's regression gate is the same machinery).

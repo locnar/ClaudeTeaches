@@ -172,7 +172,7 @@ $ perf stat -D -1 --control fifo:perf.ctl,perf.ack \
       -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses ./perf_demo rand
 ```
 
-Representative results for the **measured loop only** (4 × 32 Mi = 134 M dependent loads) on the reference machine — single-socket **Intel Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base, turbo off), Linux 6.x, GCC 13 `-O2` (illustrative; reproduce on your own box):
+Representative results for the **measured loop only** (4 × 32 Mi = 134 M dependent loads) on the reference machine — single-socket **Intel Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base, turbo off), Linux 6.18, GCC 13 `-O2` (illustrative; reproduce on your own box):
 
 ```
                          seq (sequential)      rand (pointer-chase)

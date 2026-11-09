@@ -138,7 +138,7 @@ BENCHMARK(BM_FlatBinarySearch);
 BENCHMARK_MAIN();
 ```
 
-Representative aggregated output — reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.x, GCC 13 `-O2 -march=native`, `taskset`-pinned, governor `performance` (illustrative numbers; reproduce on your box):
+Representative aggregated output — reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.18, GCC 13 `-O2 -march=native`, `taskset`-pinned, governor `performance` (illustrative numbers; reproduce on your box):
 
 ```
 Benchmark                          Time     CPU   Iterations

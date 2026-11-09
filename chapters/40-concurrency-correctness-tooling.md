@@ -79,7 +79,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative:
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative:
 
 ```
    ./race          (plain, x86):     "done" — PASSES. x86-TSO hides the missing acquire/release (Ch. 30).

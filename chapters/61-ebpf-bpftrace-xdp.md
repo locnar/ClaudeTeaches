@@ -58,7 +58,7 @@ The key question for production use: **how much does a probe cost?** Measure the
    # measure the probe's OWN overhead: time the function with and without the probe attached.
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative:
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), illustrative:
 
 ```
    probe type                        per-event overhead     note

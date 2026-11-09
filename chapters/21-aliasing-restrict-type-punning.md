@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz, AVX-512 available), GCC 13 `-O3 -std=c++20 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz, AVX-512 available), GCC 13 `-O3 -std=c++20 -march=native`, Linux 6.18, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                               plain (may alias)              restrict (no alias)
@@ -143,7 +143,7 @@ The discipline that closes the loop with §21.4.1: pun *into typed local values*
 
 ## 21.5 Verify the codegen: vectorization gated by aliasing
 
-This chapter is *about* codegen, so verification is the payoff, not an afterthought. Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -O3 -march=x86-64-v3`).
+This chapter is *about* codegen, so verification is the payoff, not an afterthought. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O3 -march=x86-64-v3`).
 
 **Without `restrict` — scalar, or vectorized-behind-a-guard.** The plain `axpy_plain` either stays scalar or emits a runtime overlap check that branches between a vector and a scalar version:
 

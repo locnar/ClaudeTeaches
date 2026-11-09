@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -std=c++20`, Linux 6.x, loopback (127.0.0.1), 16-byte request/response, blocking `read`s on both ends, turbo off (illustrative; the *magnitude* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -std=c++20`, Linux 6.18, loopback (127.0.0.1), 16-byte request/response, blocking `read`s on both ends, turbo off (illustrative; the *magnitude* is the point):
 
 ```
    configuration                                            RTT p50        p99.9        note

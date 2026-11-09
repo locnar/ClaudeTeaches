@@ -40,6 +40,8 @@ The mental model: **RSS scatters randomly (good for bulk, bad for the hot path);
 
 ## 57.3 Measure it: cross-core handoff cost and steering benefit
 
+*Toolchain and machine: Appendix L.3.*
+
 - **The cross-core handoff cost.** Measure receive-to-decode latency when the packet arrives on the *right* core (steered) vs the *wrong* core (RSS scattered it, requiring a cross-core handoff to the consuming thread). Representative (figures pending real runs):
 
 | Arrival | Receive-to-decode | Why |

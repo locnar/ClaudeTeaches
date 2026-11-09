@@ -39,6 +39,8 @@ The mental model: **a scheduled send is a packet with a departure timestamp that
 
 ## 59.3 Measure it: send-time accuracy and pacing precision
 
+*Toolchain and machine: Appendix L.3.*
+
 The measurements are about *accuracy* — how close the actual on-wire time is to the requested time — and require hardware timestamps (Ch. 55, 58) to observe the true wire time.
 
 - **Send-time accuracy.** Request a departure time T (via `SO_TXTIME`), capture the actual on-wire timestamp (NIC hardware TX timestamp, Ch. 55, 58), and measure the error (actual − requested). Compare software ETF vs hardware LAUNCHTIME:

@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-The program times only the 20 steady-state sweeps — allocation and first-touch faulting of the 256 MiB book (8× heavier for AoS, and 60-85% of a whole-process `time` on this listing) stay outside the clock (Appendix L). Profile each with `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses` (Ch. 2; whole-process counts — the setup is in them, so read the *ratios*). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, Linux 6.x, pinned, turbo off (illustrative; reproduce on your box):
+The program times only the 20 steady-state sweeps — allocation and first-touch faulting of the 256 MiB book (8× heavier for AoS, and 60-85% of a whole-process `time` on this listing) stay outside the clock (Appendix L). Profile each with `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses` (Ch. 2; whole-process counts — the setup is in them, so read the *ratios*). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, Linux 6.18, pinned, turbo off (illustrative; reproduce on your box):
 
 ```
                           AoS (stride 64)        SoA (dense 8B)

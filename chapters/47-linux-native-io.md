@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), loopback TCP, pinned, `TCP_NODELAY` on, turbo off (illustrative; **real NIC RTTs are higher** — Ch. 55 — loopback isolates the *software* cost):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), loopback TCP, pinned, `TCP_NODELAY` on, turbo off (illustrative; **real NIC RTTs are higher** — Ch. 55 — loopback isolates the *software* cost):
 
 ```
    model (loopback TCP echo round-trip)     p50        p99        notes

@@ -91,7 +91,7 @@ int main() {
 // smt_load: a sibling hog — tight loop hammering execution ports + cache (compile similarly).
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16C/32T with HT enabled — CPU 2's sibling is CPU 18), pinned, turbo off (illustrative; *interference varies hugely by workload*):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16C/32T with HT enabled — CPU 2's sibling is CPU 18), pinned, turbo off (illustrative; *interference varies hugely by workload*):
 
 ```
    hot thread on CPU 2:                p50 cycles   p99    p99.9    note

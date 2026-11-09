@@ -139,7 +139,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++23 -march=native`, Linux 6.x, pinned, turbo off (illustrative). The loop decodes a *different* message each iteration and consumes *every* decoded field — an earlier draft decoded one invariant message and used one field, and GCC hoisted the whole decode out of the loop (`imul rax, rax, 5000000`, 0.0 ns/msg):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++23 -march=native`, Linux 6.18, pinned, turbo off (illustrative). The loop decodes a *different* message each iteration and consumes *every* decoded field — an earlier draft decoded one invariant message and used one field, and GCC hoisted the whole decode out of the loop (`imul rax, rax, 5000000`, 0.0 ns/msg):
 
 ```
    encoding                         ns / message    note
@@ -196,7 +196,7 @@ Surviving the microburst (§53.2.4) — the operational tuning:
 
 ## 53.5 Verify the codegen: parse loop
 
-The zero-copy overlay's promise — "field access is just a load" — is verifiable, as is whether the parse loop stays branch-light. Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
+The zero-copy overlay's promise — "field access is just a load" — is verifiable, as is whether the parse loop stays branch-light. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
 **In-place field load + byte-swap → a load + `bswap`, or a single `movbe` (no copy).** The `memcpy`-into-local + `byteswap` (Ch. 21, 28) compiles to a load and a swap — *not* an actual memcpy call, *not* a payload copy — and since x86-64-v3 includes MOVBE, the swap is fused into the load or the store itself. `Parsed` is returned through a hidden pointer (sret), so in `decode_binary` `rdi` is the result and `rsi` is `p`:
 

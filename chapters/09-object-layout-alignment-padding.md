@@ -96,6 +96,8 @@ This shrinks the struct (good for footprint), but the trade-off is **codegen**: 
 
 ## 9.3 Measure it: inspecting layout with `pahole` and `-Wpadded`
 
+*Toolchain and machine: Appendix L.3.*
+
 You should never *guess* a struct's layout. Three tools make it visible:
 
 **`static_assert(sizeof(T) == ...)`** — the cheapest guard. Pin the size (and `alignof`, and `offsetof` for overlay types) so a future field reorder or addition that bloats the struct fails the build, not production:
@@ -156,7 +158,7 @@ So `pack` is the right tool for **wire/overlay structs you parse off the network
 
 ## 9.5 Verify the codegen: aligned vs packed access
 
-Read the asm (Ch. 4) and the trade-off becomes concrete. First, a single scalar load — the case people *worry* about, which turns out to be a non-event on x86. Aligned vs packed `long` member (verified, Clang `--target=x86_64-linux-gnu -O2`):
+Read the asm (Ch. 4) and the trade-off becomes concrete. First, a single scalar load — the case people *worry* about, which turns out to be a non-event on x86. Aligned vs packed `long` member (verified, Clang 18.1 — Appendix L.3 — `--target=x86_64-linux-gnu -O2`):
 
 ```cpp
 struct Aligned { char c; long v; };                              // v at offset 8

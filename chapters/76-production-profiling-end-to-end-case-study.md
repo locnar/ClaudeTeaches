@@ -40,6 +40,8 @@ The two halves and how they connect:
 
 ## 76.3 Measure it: a full tick-to-trade walkthrough
 
+*Toolchain and machine: Appendix L.3.*
+
 The capstone measurement: decompose the **end-to-end tick-to-trade latency distribution** into stage contributions, naming the chapter that governs each stage. Measured wire-to-wire with PTP hardware timestamps (Ch. 58) at the boundaries, as a distribution (HdrHistogram, Ch. 3), under a market-open microburst (Ch. 53). Representative budget for a *software* (kernel-bypass) path on a tuned box (Xeon Gold 6326, isolated/`nohz_full`, Solarflare ef_vi — explicit bypass, Ch. 62; toolchain and machine: Appendix L.3; figures pending real runs):
 
 | Stage | What happens | Governing chapters | ~p50 | ~p99.9 (the tail that matters) |

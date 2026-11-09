@@ -43,6 +43,8 @@ The mental model: **a transport is a set of choices about reliability, ordering,
 
 ## 65.3 Measure it: message rate, latency, and HOL blocking vs TCP
 
+*Toolchain and machine: Appendix L.3.*
+
 Compare a purpose-built transport to tuned TCP (Ch. 52) on the metrics that matter for messaging:
 
 - **Short-message latency and the tail.** Send small messages (order-sized, Ch. 53) request-response and one-way; measure the latency *distribution* (Ch. 3). Representative shape (figures pending real runs): a well-implemented transport over a bypass/RDMA substrate delivers **single-digit-microsecond** RPCs (eRPC's headline result) with a *tight tail*, versus tuned kernel TCP's ~tens of µs with a fatter tail (Ch. 52) — and *much* better than mistuned TCP's millisecond tail (the delayed-ACK stall, Ch. 52).

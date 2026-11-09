@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 with the flags above, Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
+Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 with the flags above, Linux 6.18, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                                  sorted (predictable)   shuffled (unpredictable)
@@ -186,7 +186,7 @@ The unifying idea: an unpredictable branch is a bet the predictor keeps losing. 
 
 ## 13.5 Verify the codegen: `cmov` vs branch emission
 
-Whether the compiler emits a *branch* or a *`cmov`* for `(a > b) ? a : b` is the central codegen question of this chapter, and it's verifiable. All snippets below are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
+Whether the compiler emits a *branch* or a *`cmov`* for `(a > b) ? a : b` is the central codegen question of this chapter, and it's verifiable. All snippets below are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
 **A select the compiler makes branchless.** `std::max` of two ints compiles to a compare and a `cmov` — no branch, nothing to mispredict:
 

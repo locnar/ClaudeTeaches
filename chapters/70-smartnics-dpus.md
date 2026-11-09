@@ -54,6 +54,8 @@ The whole game is keeping hot-path work at **boundary 1, terminal**, and using *
 
 ## 70.3 Measure it: DPU-offload latency vs host path
 
+*Toolchain and machine: Appendix L.3.*
+
 The measurement that matters is **does the DPU shorten or lengthen the path** for the work you're considering — and it must be **end-to-end wire-to-wire** (Ch. 58's PTP hardware timestamps), never "time on the DPU" in isolation, for the same reason GPU kernel-only timing lies (Ch. 67).
 
 Three scenarios, representative numbers (Bluen-class ARM DPU + 100 GbE, wire-to-wire via PTP-timestamped tap; FPGA-DPU row for contrast; reference figures pending real runs):

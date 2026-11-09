@@ -52,6 +52,8 @@ The unifying model: **`constexpr`/`consteval` move *values and computation* to c
 
 ## 18.3 Measure it: build-time vs run-time trade-off
 
+*Toolchain and machine: Appendix L.3.*
+
 The measurement has *two* axes, because compile-time programming trades one resource for another: **runtime** (should drop to nothing for genuinely compile-time work) and **build time
 + code size** (the price). Demonstrate both on a lookup table — a CRC/parity-style table — built three ways: (a) computed at **runtime** on startup, (b) built at **compile time** via `constexpr`, (c) hand-written literal array (the baseline the `constexpr` version should match).
 

@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *shape* is the point):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *shape* is the point):
 
 ```
                        p50        p99        p99.9      max        minor-faults (perf)

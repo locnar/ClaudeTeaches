@@ -26,6 +26,8 @@ A recurring cast of tools appears throughout: `perf` and the Linux PMU, Intel VT
 
 **About the benchmark numbers.** The measurements shown in the drafted chapters are **representative** — calibrated for the stated reference machines (a single-socket Xeon Gold 6326 / Ice Lake-SP for most microarchitecture chapters; a dual-socket box where NUMA effects require two sockets) — and the *code, compiler flags, and `perf` commands are reproducible*. They are there to teach the *ratios and the shape*, not to be quoted as gospel. The one number that should drive any decision you make is the one **you** measure on **your** hardware, with your build and your tuning. Treat the tables as intuition; treat your own box as the authority. **Appendix E** collects the order-of-magnitude latency numbers worth memorizing.
 
+**Reference toolchain and machine.** Unless a results block says otherwise, every representative number is stated for one box and one toolchain: a single-socket **Intel Xeon Gold 6326** (Ice Lake-SP, 16C/32T, 2.9 GHz base with turbo off, 48 KiB L1d and 1.25 MiB L2 per core, 24 MiB shared L3 — the dual-socket 2× 6326 appears only in the NUMA chapter, Ch. 16), **Linux 6.18 (LTS)** with `mitigations=auto`, **GCC 14.2** and **Clang 18.1** at `-O2 -march=native -std=c++20` (C++23 where a chapter says so), and **nanoseconds converted to cycles at 2.9 GHz (1 cycle = 0.345 ns)**. The full statement — cache latencies, SMT numbering, governor and C-state policy, kernel settings — is **Appendix L.3**, which every "Measure it" section cites.
+
 ## How the book is organized
 
 The seventy-six chapters are grouped into twelve Parts that build from the foundations upward, roughly following the path a packet takes and the stack it traverses:

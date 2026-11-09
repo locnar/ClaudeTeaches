@@ -42,6 +42,8 @@ The mental model: **a switch is a latency component with a *distribution*, and t
 
 ## 60.3 Measure it: per-hop and one-way latency with hardware timestamps
 
+*Toolchain and machine: Appendix L.3.*
+
 You cannot reason about the fabric from datasheets; you measure it, and measuring the *network* requires **hardware timestamps and synchronized clocks** (Ch. 58), because software timestamps are perturbed by the very host you're trying to exclude from the measurement.
 
 - **Per-hop switch latency** — with a NIC hardware timestamp (Ch. 55, 58) on both ingress and egress of a switch (or a passive tap on each side, Ch. 75), measure the time a frame spends *in* the switch. Compare a store-and-forward vs cut-through switch, and measure how each scales with **frame size** (store-and-forward grows with size; cut-through stays flat) — this single test reveals the switch's class regardless of its spec sheet. Representative (figures pending real runs):

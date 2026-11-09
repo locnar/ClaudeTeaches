@@ -50,6 +50,8 @@ The model: **most hardening is cheaper than people fear and should stay on; a fe
 
 ## 72.3 Measure it: hot-path cost of hardening options
 
+*Toolchain and machine: Appendix L.3.*
+
 Treat hardening like any other latency knob (Ch. 22): measure its hot-path cost, don't guess. Build the feed handler / order path at several hardening levels and measure tick-to-trade (Ch. 58 wire-to-wire) and a parse microbenchmark (Ch. 3). Representative deltas (Xeon Gold 6326, GCC 13; figures pending real runs):
 
 | Hardening option | What it adds on the hot path | Representative cost | Default stance |

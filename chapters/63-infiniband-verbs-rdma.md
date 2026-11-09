@@ -57,7 +57,7 @@ Measure the RDMA latency tiers — one-sided **WRITE** (lowest, no remote CPU), 
    # measure registration cost: time ibv_reg_mr for various buffer sizes (a SETUP cost — §63.5)
 ```
 
-Representative results — InfiniBand HDR / RoCEv2 on a tuned intra-DC fabric, polled CQ, dedicated core (illustrative; the *tiers* are the point):
+Representative results (toolchain and machine: Appendix L.3) — InfiniBand HDR / RoCEv2 on a tuned intra-DC fabric, polled CQ, dedicated core (illustrative; the *tiers* are the point):
 
 ```
    operation                          one-way / round-trip latency      note

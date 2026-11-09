@@ -103,7 +103,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; mitigations on/off changes the syscall number a lot — Ch. 6):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; mitigations on/off changes the syscall number a lot — Ch. 6):
 
 ```
    null syscall (getpid)              ~50-100 ns      kernel crossing, mitigations=off; ~150-400 ns with KPTI on (Ch. 6)

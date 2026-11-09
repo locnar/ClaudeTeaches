@@ -66,7 +66,7 @@ Two measurements: the **PTP synchronization quality** (how well-synced are the c
    #   tick-to-trade = T_out - T_in   — VALID because both are on PTP-synced grandmaster time
 ```
 
-Representative results — HFT-grade NIC (Solarflare/ExaNIC) + PTP-aware network + GPS grandmaster, `linuxptp` (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — HFT-grade NIC (Solarflare/ExaNIC) + PTP-aware network + GPS grandmaster, `linuxptp` (illustrative):
 
 ```
    PTP sync quality:

@@ -110,7 +110,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; 1.25 MiB L2, 24 MiB L3), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, 4 KiB pages (THP = `madvise`), isolated core, turbo off (illustrative; convert cycles→ns at 2.9 GHz). The working set is 2 MiB on ~500 pages — larger than L2, so "warm" means L3-resident with the TLB and predictors trained; an earlier draft's index formula repeated every 16 steps and touched 16 lines of *one* L1 set, so its "512 KB working set" was really 1 KiB:
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; 1.25 MiB L2, 24 MiB L3), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, 4 KiB pages (THP = `madvise`), isolated core, turbo off (illustrative; convert cycles→ns at 2.9 GHz). The working set is 2 MiB on ~500 pages — larger than L2, so "warm" means L3-resident with the TLB and predictors trained; an earlier draft's index formula repeated every 16 steps and touched 16 lines of *one* L1 set, so its "512 KB working set" was really 1 KiB:
 
 ```
    WARM (tight loop):          p50 ~3,000 cycles   (~1.0 µs)   256 L3 hits, overlapped; TLB warm — the number you benchmarked

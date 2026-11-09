@@ -52,7 +52,7 @@ Measure the RX latency floor across the tiers built through the networking chapt
    # Compare against the kernel stack (Ch.47) and AF_XDP (Ch.61) on the same NIC/traffic.
 ```
 
-Representative results — HFT-grade NIC (Solarflare/ExaNIC) + dedicated isolated core, hardware timestamps, turbo off (illustrative; the *tiers* are the point):
+Representative results (toolchain and machine: Appendix L.3) — HFT-grade NIC (Solarflare/ExaNIC) + dedicated isolated core, hardware timestamps, turbo off (illustrative; the *tiers* are the point):
 
 ```
    RX path                              wire-to-app latency (p50 / p99)    CPU       notes

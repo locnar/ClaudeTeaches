@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, each thread pinned to its own core by the listing, turbo off (illustrative). The counter is a relaxed atomic so that every iteration is a real load and store to *memory* — an earlier draft's plain `data[t].v++` was hoisted into a register and the whole loop folded to one `addq $200000000`, in both variants:
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, each thread pinned to its own core by the listing, turbo off (illustrative). The counter is a relaxed atomic so that every iteration is a real load and store to *memory* — an earlier draft's plain `data[t].v++` was hoisted into a register and the whole loop folded to one `addq $200000000`, in both variants:
 
 ```
    M=8 cores, each thread increments only its own counter (one plain load + one plain store per increment):

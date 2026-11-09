@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.x (THP = `madvise`, so `fresh` runs on 4 KiB pages), pinned, turbo off (illustrative; the *shape of the distribution* is the point; every sample includes two ~20 ns `clock_gettime` reads):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.18 (THP = `madvise`, so `fresh` runs on 4 KiB pages), pinned, turbo off (illustrative; the *shape of the distribution* is the point; every sample includes two ~20 ns `clock_gettime` reads):
 
 ```
                            p50        p99        p99.9       max          minor-faults (perf)

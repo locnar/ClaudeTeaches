@@ -145,6 +145,17 @@ A `response` max *above* the `service` max is not a bug either: it is a stall th
 
 A benchmark is only reproducible if the *machine state* is controlled — otherwise run-to-run variance (frequency scaling, migration, cold caches) swamps the effect you're measuring (Ch. 3, 6).
 
+**Reference toolchain and machine.** Every representative number in this book is stated for one box and one toolchain unless its results block says otherwise, and every "Measure it" section either names these facts or cites this paragraph ("Appendix L.3"):
+
+- **CPU:** Intel **Xeon Gold 6326** (Ice Lake-SP, Sunny Cove cores) — 16 cores / 32 threads, 2.90 GHz base, 3.50 GHz max turbo; 48 KiB L1d + 32 KiB L1i and 1.25 MiB L2 per core; 24 MiB L3 shared across the socket (16 × 1.5 MiB slices, 12-way); L1d load-to-use 5 cycles, L2 ~14 cycles, L3 ~45–70 cycles depending on slice distance, local DRAM ~80–100 ns; 8× DDR4-3200 per socket; PCIe 4.0. **Single socket** everywhere except the NUMA chapter (Ch. 16), which uses a **dual-socket 2× 6326** (32C/64T, two NUMA nodes).
+- **SMT numbering:** Linux enumerates the single-socket box as CPUs 0–31 with the sibling of CPU *n* at *n*+16 (`0,16`, `2,18`); the dual-socket box puts it at *n*+32 (`2,34`). Always read `thread_siblings_list` rather than assuming `+N` (Ch. 43).
+- **Frequency and idle policy:** `performance` governor, turbo **off** (`/sys/devices/system/cpu/intel_pstate/no_turbo = 1`), C-states capped at C1, so a pinned core runs at the 2.9 GHz base. The two experiments that need turbo say so in their block (Ch. 17's `cycles` vs `ref-cycles` run, Ch. 29's AVX-512 downclock table).
+- **ns ↔ cycles:** at 2.9 GHz, **1 cycle = 0.345 ns and cycles ≈ ns × 2.9** — the conversion basis for every table in the book, Appendix E included.
+- **Kernel:** **Linux 6.18 (LTS)**, `mitigations=auto` (KPTI on) unless a block says `mitigations=off`, THP `madvise`, `isolcpus`/`nohz_full`/`rcu_nocbs` per Appendix C wherever a chapter pins to an isolated core; `perf` is the kernel's own.
+- **Compilers and library:** **GCC 14.2** (libstdc++ 14, glibc 2.39) and **Clang 18.1** (libc++ 18); `-std=c++20` by default and `-std=c++23` where a chapter uses a C++23 library feature (Appendix H); `-O2 -march=native` (`-march=icelake-server` on this box) unless the listing's `// Build:` line says otherwise. Results blocks that name GCC 13 / 13.3 record the release their listing was last rebuilt and checked with during the 2026-11 revision pass; the Phase-4 measurement pass re-runs everything under the versions above. The `§N.5 Verify the codegen` snippets are Clang 18.1 output unless labelled GCC.
+
+The Preface carries the one-paragraph version of this statement; this is the one to cite.
+
 ```
    # 1. Pin to an isolated core (Appendix C) and raise priority, off the SMT sibling:
    taskset -c 3 chrt -f 80 ./bench ...          # one core, RT prio, sibling left idle (Ch. 42-43)

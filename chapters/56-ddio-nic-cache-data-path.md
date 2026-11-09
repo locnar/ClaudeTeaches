@@ -38,6 +38,8 @@ The mental model: **DDIO is a small, always-on cache region that inbound I/O str
 
 ## 56.3 Measure it: DDIO hit vs DRAM, and DDIO cache pollution
 
+*Toolchain and machine: Appendix L.3.*
+
 Two things to measure: the **RX latency benefit** (does the packet arrive hot?) and the **pollution cost** (does RX evict the hot working set, or vice versa?).
 
 **RX latency** — time from "packet DMA'd" to "decoder's first read completes," for DDIO-hit vs DRAM. Measure the decode's first-access latency (Ch. 3) and confirm with `perf` L3-vs-DRAM counters (Ch. 2). Representative (Xeon Gold 6326, NIC on the local socket, kernel bypass — Ch. 62; figures pending real runs):

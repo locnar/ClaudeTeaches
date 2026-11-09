@@ -136,7 +136,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), Clang 18.1 vs GCC 13.3 / glibc 2.39, `-O2 -std=c++20`, Linux 6.x, pinned (illustrative; *whether HALO fires* is compiler-dependent — only Clang implements it, GCC always allocates — and under Clang version/flag/inlining-dependent). The harness feeds the coroutine an opaque input and sinks its result: without those barriers Clang folds the elided version's entire loop into one constant and prints 0.00 ns.
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), Clang 18.1 vs GCC 13.3 / glibc 2.39, `-O2 -std=c++20`, Linux 6.18, pinned (illustrative; *whether HALO fires* is compiler-dependent — only Clang implements it, GCC always allocates — and under Clang version/flag/inlining-dependent). The harness feeds the coroutine an opaque input and sinks its result: without those barriers Clang folds the elided version's entire loop into one constant and prints 0.00 ns.
 
 ```
    scenario                                         ns/coro      allocs/call    note
