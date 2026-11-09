@@ -218,7 +218,7 @@ If instead you see *multiple* loops or temporary allocations, the expression tem
 
 - **For any "zero-cost" abstraction on the hot path, diff its asm against the hand-written equivalent.** Same instructions = the claim holds. A stray `call`, extra moves, or a missing inline = it leaked.
 - **Confirm the dispatch inlined** (no `call [rax]`, the §19.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 9).
-- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 84).
+- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 89).
 
 ### Build-time/size caveat
 
@@ -274,7 +274,7 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 
 - CppCon talks on "zero-cost abstractions," CRTP, and policy-based design — including before/after asm walkthroughs that mirror §19.5.
 - Ch. 14 (*Indirect Calls & Virtual Dispatch*) — the runtime-polymorphism cost CRTP avoids; Ch. 18 (*Compile-Time Mechanics*) — the `if constexpr`/template foundation; Ch. 20 (*The Cost of Abstractions*) — abstractions that *aren't* free; Ch. 25 (*Cache-Friendly Containers*) and Ch. 24 (*Custom Allocators*) — policy-based containers/allocators in practice; Ch. 29 (*SIMD*) — expression-template vectorization.
-- **Appendix B** (B.1) — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn`), for the cross-language reader.
+- **Ch. 74 §74.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
 
 ---
 

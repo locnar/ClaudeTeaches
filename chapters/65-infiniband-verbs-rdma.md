@@ -169,7 +169,7 @@ The low-latency RDMA discipline (ties Ch. 23, 41):
 - **Memory ordering across RDMA (Ch. 30).** RDMA writes complete in an order, and the remote reads them — the cross-host analog of the memory model (Ch. 30). Ensure the data is fully written before the flag/sequence that signals it (write ordering / RDMA completion semantics) — a torn/early read otherwise (Ch. 35's torn-read concern, across hosts). Understand the RDMA ordering/completion guarantees.
 - **Assuming RDMA helps latency *to the exchange*.** RDMA is **intra-datacenter** (between *your* hosts) — it doesn't reduce latency to the exchange (that's the wire + exchange — Appendix K, Ch. 62; measured with Ch. 60's timestamps). It's for your internal host-to-host messaging (risk cluster, distribution tier, gateway). Don't expect it to help the external leg.
 - **Verbs API complexity / correctness.** The verbs API (QPs, CQs, MRs, WRs, state transitions) is low-level and error-prone; QP setup/teardown, connection management (RDMA CM), and error handling are intricate. Use a higher-level library (`librdmacm`, UCX, or a messaging layer like the one MPI — Ch. 70 — uses) where it fits, and test thoroughly (Ch. 40). Hand-rolling raw verbs is for the ultra-hot path with the engineering to back it.
-- **IOMMU / security (Ch. 68, 76).** RDMA gives a remote NIC DMA access to registered memory — a security consideration (a compromised/buggy peer could read/write your registered memory within the rkey scope). Scope rkeys tightly, configure the IOMMU (Ch. 68), and treat RDMA peers with appropriate trust (Ch. 76).
+- **IOMMU / security (Ch. 68, 81).** RDMA gives a remote NIC DMA access to registered memory — a security consideration (a compromised/buggy peer could read/write your registered memory within the rkey scope). Scope rkeys tightly, configure the IOMMU (Ch. 68), and treat RDMA peers with appropriate trust (Ch. 81).
 
 ## 65.6 Exercises & checklist
 
@@ -190,7 +190,7 @@ The low-latency RDMA discipline (ties Ch. 23, 41):
 - [ ] The **fabric** is chosen and configured: native **IB** (lowest latency, dedicated) or **RoCEv2** with **lossless PFC/ECN** (not lossy Ethernet) (§65.4.2).
 - [ ] RDMA is used for **intra-datacenter** host-to-host messaging (risk cluster, distribution, gateways) — not expected to help the external **exchange** leg (Appendix K; the switching fabric — Ch. 62); zero-copy registered buffers throughout (§65.4.3).
 - [ ] **Inline** small messages, **batch doorbells / unsignaled completions** for high rate (§65.4.3); a higher-level library (`librdmacm`/UCX) is used where raw verbs complexity isn't justified.
-- [ ] **Security/IOMMU**: rkeys scoped tightly, IOMMU configured (Ch. 68), RDMA peers treated with appropriate trust (Ch. 76).
+- [ ] **Security/IOMMU**: rkeys scoped tightly, IOMMU configured (Ch. 68), RDMA peers treated with appropriate trust (Ch. 81).
 
 ## 65.7 References
 

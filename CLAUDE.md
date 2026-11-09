@@ -58,8 +58,8 @@ Code & content guidelines:
 ## Table of Contents
 
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
-> A–G), kept for history. The book was since reorganised into twelve Parts with 76 chapters and twelve
-> appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M) and then to **84 chapters and fourteen appendices (A–N)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
+> A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
+> appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), and then — with a new Part XII (Beyond C++) — to **89 chapters in thirteen Parts and fourteen appendices (A–N)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
 > *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–N)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
@@ -333,12 +333,10 @@ Code & content guidelines:
   heterogeneous cores and SMT differences (Ch. 43); `-mcpu`/`-mtune` tuning (Ch. 22),
   spec-exec mitigations on ARM (Ch. 6), and where Graviton in the cloud fits a latency-
   sensitive workload (and where bare-metal colocation still wins).
-- **Appendix B — Beyond C++: Alternative Languages for Low-Latency** — surveying Rust
-  (ownership, `unsafe`, no GC, fearless concurrency), C, Zig, and the case against managed
-  runtimes for the hot path (Java/C#/Go GC pauses and JIT warm-up — and the lengths HFT shops
-  go to tame them: allocation-free Java, off-heap memory, Azul/Zing pauseless GC, GraalVM
-  native-image); FFI/interop with a C++ core, what transfers from this book and what does not,
-  when a rewrite pays off, and matching language to the latency tier.
+- **Appendix B — Beyond C++: Alternative Languages for Low-Latency** — originally the whole
+  treatment of Rust, C, Zig, the managed runtimes and FFI; since the 2026-11-09 languages insertion
+  a **two-page summary and tier table pointing at Part XII** (Ch. 73–77), where the measured
+  chapters now live.
 - **Appendix C — System Tuning Checklist** — a copy-paste-ready, ordered checklist for
   building a quiet, deterministic box: BIOS/firmware (disable C-states deeper than C1, fix
   P-states/turbo, disable SMT where applicable, NUMA/snoop mode); kernel cmdline (`isolcpus`,
@@ -434,23 +432,24 @@ Code & content guidelines:
   (current numbering: Ch. 5, 46, 60, 73–75, 77, 79–83; Appendices C, D, I, K, M).
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 81
-  chapters and appendices A–N — see Phases 2–3 and the two 2026-11-09 insertions below).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 89
+  chapters and appendices A–N — see Phases 2–3 and the three 2026-11-09 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 84 chapters + 14 appendices (A–N);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 89 chapters + 14 appendices (A–N);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
   with the 2026-11-09 monitoring chapters and N with the 2026-11-09 debugging chapters.**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 84 chapters + 14 appendices (A–N). Appendix H's version numbers and
+  now: front matter + 89 chapters + 14 appendices (A–N). Appendix H's version numbers and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
-- Phase 3 (done): **the book was reorganized into twelve topical Parts** and every chapter
+- Phase 3 (done): **the book was reorganized into twelve topical Parts** (thirteen since the
+  2026-11-09 languages insertion below) and every chapter
   renumbered accordingly (the `## Table of Contents` prose above predates this reorg and reflects
   the original drafting order — **the authoritative current structure is `chapters/README.md`**).
-  The twelve Parts and their chapter ranges:
+  The thirteen Parts and their chapter ranges:
   - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup.
   - **II — CPU Microarchitecture** (7–17).
@@ -467,7 +466,10 @@ Code & content guidelines:
   - **X — Kernel Bypass, RDMA & Transport** (63–67): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Observability & Operations in Production** (73–84): logging, in-band latency tracing
+  - **XII — Beyond C++: Languages at the Latency Floor** (73–77, added 2026-11-09 P3-3): hand-written
+    & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
+    measured, choosing a language per latency tier (the Part's capstone).
+  - **XIII — Observability & Operations in Production** (78–89): logging, in-band latency tracing
     (Ch. 74, added 2026-11-09 P3-2), application telemetry (Ch. 75, added 2026-11-09 P3-1), security,
     hot reload, process topology, crash handling & post-mortem (Ch. 79, P3-2), capture/replay,
     latency-spike forensics (Ch. 81, P3-2), host health telemetry and network health & drop forensics
@@ -499,9 +501,25 @@ Code & content guidelines:
   core PMU), §5.4.4–§5.4.5 and the rr-limits block in §5.4.2, §20.4.4, §22.4.4, §41.4.3 (signals),
   §78.4.6 (divergence forensics; §78.4.5 reduced to sharding + a pointer to Ch. 79), §84.4.4 and a
   rewritten three-tier §84.2, Appendix I.10, Appendix D/H rows, the Appendix J.5 venue-timestamp table,
-  the Appendix E signal-delivery row, Ch. 60 §60.4.2's exchange-timestamp paragraph. Part XII order is
+  the Appendix E signal-delivery row, Ch. 60 §60.4.2's exchange-timestamp paragraph. Part XIII order is
   now: logging → tracing → telemetry → security → hot reload → topology → crash → capture → spike
   forensics → host health → network health → capstone.
+- **2026-11-09 languages insertion (work-queue item P3-3):** a new **Part XII — Beyond C++:
+  Languages at the Latency Floor** was opened after Part XI with `insert_chapter.py --new-part`
+  (which now also shifts every later Part's numeral, inserts the README/preface/CLAUDE.md Part
+  entries and bumps the Part counts), followed by four ordinary insertions, one commit each:
+  **73** Hand-Written & Inline Assembly, **74** Rust for the Hot Path, **75** Language Interop & ABI
+  Boundaries, **76** Managed Runtimes Near the Hot Path, Measured, **77** Choosing a Language per
+  Latency Tier. The former Part XII (Observability & Operations in Production) is now **Part XIII**.
+  Renumber map from the post-P3-2 numbering: 1–72 unchanged; old 73–84 → 78–89. Composite map from
+  the Phase-3 (pre-P3-1) numbering: 1–45 unchanged; 46–54 → 47–55; 55–70 → 57–72; 71 → 78;
+  72 → 81; 73 → 82; 74 → 83; 75 → 85; 76 → 89. Also added:
+  §85.4.6 (research-to-production: the C++ decoder/book bound into Python, buffer-protocol views,
+  parity tests, Arrow interchange) and §85.4.7 (columnar tick storage: journal → Arrow/Parquet,
+  kdb+/ClickHouse/QuestDB), a §85.3 measure-it row and a Ch. 89 §89.4.1 parity paragraph; Appendix B
+  reduced to a two-page summary + tier table pointing at Part XII; Appendix L.5 (cross-language
+  protocol pointer; L.5–L.6 → L.6–L.7); Appendix I.11 (other toolchains' asm and runtime-log
+  one-liners; I.11–I.12 → I.12–I.13); Appendix E's C-ABI-call row; Appendix F/G/H entries.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to

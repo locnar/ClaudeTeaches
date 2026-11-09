@@ -41,16 +41,16 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 11, 12).
    perf stat -a -I 1000 -e 'uncore_imc/cas_count_read/,uncore_imc/cas_count_write/'   # DRAM bandwidth: CAS × 64 B per channel (Ch. 7, 16)
    perf stat -a -I 1000 -e 'uncore_upi/txl_flits.all_data/'                         # cross-socket traffic (Ch. 16)
    perf stat -a -I 1000 -e 'uncore_iio/data_req_of_cpu.mem_write.part0/'           # PCIe inbound writes per IIO stack = NIC DMA (Ch. 58, 68)
-   perf stat -a -I 1000 -e power/energy-pkg/,power/energy-ram/                       # RAPL joules → watts: is the socket power-limited? (Ch. 6, 82)
+   perf stat -a -I 1000 -e power/energy-pkg/,power/energy-ram/                       # RAPL joules → watts: is the socket power-limited? (Ch. 6, 87)
    perf stat -C 5 -e core_power.lvl0_turbo_license,core_power.lvl1_turbo_license,core_power.lvl2_turbo_license -- sleep 10   # AVX licence time (Ch. 29) — ONE attach IPI; not -I
    perf stat -a -I 1000 -e msr/smi/                                                  # SMI count per second — must be 0 (Ch. 6 §6.4.4, 46, 82)
    perf record -e ibs_op//  -c 100000 ./app; perf report                            # AMD IBS: precise op sampling (what perf mem/c2c use on Zen)
    perf record -e ibs_fetch// ./app                                                  # AMD IBS: front-end sampling (Ch. 12)
    perf stat -M PipelineL1 ./app                                                     # Zen 4 pipeline-utilization top-down (names: perf list metricgroup)
-   # --- what it costs the hot core, and the syscall-free alternative (Ch. 84 §84.4.4) ---
+   # --- what it costs the hot core, and the syscall-free alternative (Ch. 89 §89.4.4) ---
    perf record -C 5 -e cycles:u -c 2000000 --call-graph fp --overwrite --switch-output=signal -o perf.data -- sleep 36000 &   # bounded, fp, frozen on SIGUSR2
    cat /sys/bus/event_source/devices/cpu/rdpmc                                      # 1 = rdpmc allowed for mmap'd events (default), 2 = always, 0 = never
-   ./rdpmc                                                                           # Ch. 84 §84.4.4's listing: cycles + LLC misses per stage from the thread itself
+   ./rdpmc                                                                           # Ch. 89 §89.4.4's listing: cycles + LLC misses per stage from the thread itself
 ```
 
 **Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 12); **bad speculation** → branch mispredicts (Ch. 13); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 7, 11); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).
@@ -130,10 +130,10 @@ Discovering the machine and placing threads on it (Ch. 16, 42, 43; Appendix C).
    echo x86-tsc > /sys/kernel/tracing/trace_clock        # TSC timestamps that line up with the app's rdtsc (Ch. 17)
    trace-cmd record -M 4 -C x86-tsc -e irq -e sched -e irq_vectors -e tlb -e timer:tick_stop   # to a file; `trace-cmd report` / KernelShark
    perf sched record -C 2 -- sleep 600 && perf sched timehist -C 2    # who ran on cpu2, when, for how long (thread intruders)
-   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 46 §46.4.1, Ch. 82)
+   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 46 §46.4.1, Ch. 87)
    grep -l -E '^Cpus_allowed_list:.*\b2\b' /proc/[0-9]*/task/*/status  # every thread ALLOWED on cpu2 (want: yours + the per-cpu kthreads)
    cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 42)
-   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 82 §82.2.4)
+   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 87 §87.2.4)
    turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
 ```
 
@@ -174,9 +174,9 @@ Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
    cat /proc/net/igmp                           # kernel's view: (device, group) joins, little-endian hex groups; Querier column = IGMP version in use
    ip maddr show dev eth0                       # the same, decoded
    timeout 260 tcpdump -i eth0 -nn -c 1 'igmp and igmp[0]==0x11'   # a General Query within one interval, or the feed goes dark ~260 s after the last join
-   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 56, 83)
+   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 56, 88)
    sysctl net.ipv4.igmp_max_memberships net.ipv4.conf.eth0.rp_filter   # 20 by default (the 21st join fails ENOBUFS); strict rp_filter drops the feed
-   # --- network health & drop forensics (Ch. 83): which LAYER dropped it
+   # --- network health & drop forensics (Ch. 88): which LAYER dropped it
    ethtool -S eth0 | grep -iE 'missed|out_of_buffer|nodesc'          # host ring full (poll too slow)        — layer 2b
    ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 67)
    ethtool -S eth0 | grep -iE 'crc|symbol|fec|pause'                 # link/PHY/FEC and pause frames         — layer 1 / fabric
@@ -189,11 +189,11 @@ Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
    cat /sys/class/net/eth0/carrier_changes                            # link flaps since boot
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 83 §83.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §83.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 88 §88.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §88.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 
-Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 76).
+Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 81).
 
 ```
    objdump -d -M intel --no-show-raw-insn ./app          # disassemble (Intel syntax; Ch. 4)
@@ -209,23 +209,23 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
    # sanitizers — TEST/CI builds only, never production (App D.7):
    g++ -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined x.cpp && ./a.out
    g++ -O1 -g -fsanitize=thread x.cpp && ./a.out          # data races (Ch. 30-33, 40)
-   clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 76)
+   clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 81)
 ```
 
-**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 76), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
+**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 81), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
 
 ## I.10 Crash, core-dump, live-introspection & incident one-liners
 
-The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 79, Ch. 81 and Appendix N.
+The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 84, Ch. 86 and Appendix N.
 
 ```
-   # --- cores and crash records (Ch. 79) ---
+   # --- cores and crash records (Ch. 84) ---
    readelf -n ./app | grep 'Build ID'                     # the key that matches a core/crash record to its archived .debug (Ch. 5 §5.4.1)
    readelf -p .GCC.command.line ./app                     # the flags it was built with (needs -frecord-gcc-switches; App D.7)
-   cat /proc/sys/kernel/core_pattern                      # "core", "|/usr/lib/systemd/systemd-coredump …" or your pipe handler (Ch. 79 §79.4.4)
+   cat /proc/sys/kernel/core_pattern                      # "core", "|/usr/lib/systemd/systemd-coredump …" or your pipe handler (Ch. 84 §84.4.4)
    cat /proc/$PID/coredump_filter; echo 0x11 > /proc/$PID/coredump_filter   # dump private anon + ELF headers only (no shared/huge segments)
-   grep -E 'VmRSS|VmHWM|HugetlbPages' /proc/$PID/status   # how big the core WOULD be before MADV_DONTDUMP (Ch. 79 §79.3)
-   coredumpctl list; coredumpctl info $PID; coredumpctl gdb $PID            # systemd-stored cores (Ch. 79 §79.4.4)
+   grep -E 'VmRSS|VmHWM|HugetlbPages' /proc/$PID/status   # how big the core WOULD be before MADV_DONTDUMP (Ch. 84 §84.3)
+   coredumpctl list; coredumpctl info $PID; coredumpctl gdb $PID            # systemd-stored cores (Ch. 84 §84.4.4)
    gdb -q ./app.debug -c core -batch -ex 'thread apply all bt' -ex 'info registers'   # every thread's stack, once
    eu-stack --core core -e ./app --debuginfo-path /var/debug   # the same without gdb's start-up (elfutils)
    addr2line -e ./app.debug -f -C -i -p 0x$(( FRAME - LOAD_BASE ))   # a raw crash-record frame → file:line (load base from maps)
@@ -235,29 +235,73 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 79, Ch. 81 and Appendix N.
    gdb -q -batch -ex 'set non-stop on' -ex 'set pagination off' -ex "attach $PID" -ex 'info threads' -ex detach
    gdb -q -batch -ex 'set non-stop on' -ex "attach $PID" -ex "thread $HK_TID" -ex 'interrupt' -ex 'bt' -ex detach   # one housekeeping thread only
    gdbserver --attach :2345 $PID                           # debug from another box; still a ptrace stop — housekeeping threads only
-   for t in /proc/$PID/task/*; do printf '%s ' $t; awk '/^(voluntary|nonvoluntary)_ctxt/ {printf "%s ", $0}' $t/status; echo; done   # who stopped (Ch. 82)
+   for t in /proc/$PID/task/*; do printf '%s ' $t; awk '/^(voluntary|nonvoluntary)_ctxt/ {printf "%s ", $0}' $t/status; echo; done   # who stopped (Ch. 87)
    perf record -e mem:0x$ADDR:w -p $PID -- sleep 60        # hardware data breakpoint on a LIVE pid: the next writer's IP (Ch. 5 §5.4.5)
    perf script -F tid,ip,sym,srcline                       # … and who it was
-   # --- latency-spike forensics (Ch. 81) ---
+   # --- latency-spike forensics (Ch. 86) ---
    echo x86-tsc > /sys/kernel/tracing/trace_clock          # make the kernel ring comparable to rdtsc stamps (BEFORE the incident)
    echo 0 > /sys/kernel/tracing/tracing_on; cat /sys/kernel/tracing/per_cpu/cpu5/trace | tail -200   # freeze and read the hot core's ring
    perf record -C 5 -e cycles:u -c 2000000 --call-graph fp -k CLOCK_MONOTONIC --overwrite --switch-output=signal -o perf.data -- sleep 36000 &
-   kill -USR2 %1                                           # dump the last few seconds of the hot core's samples to perf.data.<ts> (Ch. 81 §81.4.3)
+   kill -USR2 %1                                           # dump the last few seconds of the hot core's samples to perf.data.<ts> (Ch. 86 §86.4.3)
    perf record -e intel_pt/cyc/u -C 5 --snapshot=e -k CLOCK_MONOTONIC -o pt.data -- sleep 36000 &   # Intel PT snapshot mode
    kill -USR2 %2; perf script -i pt.data --itrace=i0ns -F time,ip,sym,srcline --time $M0,$M1   # decode the window ELSEWHERE (Ch. 2 §2.4.4)
    perf script -i perf.data --ns -F time,cpu,comm,ip,sym --time $M0,$M1   # the samples inside a CLOCK_MONOTONIC window
    journalctl -k -o short-precise --since=@$T --until=@$((T+1))   # the kernel log second that contains the window
    dmesg --time-format=iso | tail                           # µs-resolution BOOTTIME-based stamps (not -T, which rounds to the second)
-   rdmsr -p 5 0x34                                         # SMI_COUNT on CPU 5 — from a housekeeping core's shell only (Ch. 82 §82.4.2)
+   rdmsr -p 5 0x34                                         # SMI_COUNT on CPU 5 — from a housekeeping core's shell only (Ch. 87 §87.4.2)
    # --- the incident bundle (Appendix N) ---
    incident-collect.sh $CORR $T0 $T1 $PID perf.data.*     # bounded collector: provenance, clocks, rings, host/net windows, capture slice
    perf archive perf.data.2026…                            # the symbols a perf.data needs to be read on another box
    sha256sum -c sha256sums.txt                             # the bundle is intact
 ```
 
-**Interpreting:** the crash record (Ch. 79 §79.4.1) usually names the bug before the core is opened — `si_code`, `si_addr` and the fault error code against the registers; `addr2line` on `frame0` is the second step, the core the third. For a live process the rule is *never an all-stop attach to a process with a hot thread*: `set non-stop on` before `attach`, and interrupt only the housekeeping thread you need (Ch. 5 §5.4.4 measured the all-stop attach at a quarter of a second on the hot thread); `process_vm_readv`/`/proc/PID/mem` of a seqlock-versioned snapshot costs the target nothing. For a spike, the order is Ch. 81 §81.4.4's: the ftrace ring in the window first (did the thread leave the CPU? an IRQ? a shootdown? an empty gap?), the host and network samples second, `perf`/PT decode last and never on the trading host.
+**Interpreting:** the crash record (Ch. 84 §84.4.1) usually names the bug before the core is opened — `si_code`, `si_addr` and the fault error code against the registers; `addr2line` on `frame0` is the second step, the core the third. For a live process the rule is *never an all-stop attach to a process with a hot thread*: `set non-stop on` before `attach`, and interrupt only the housekeeping thread you need (Ch. 5 §5.4.4 measured the all-stop attach at a quarter of a second on the hot thread); `process_vm_readv`/`/proc/PID/mem` of a seqlock-versioned snapshot costs the target nothing. For a spike, the order is Ch. 86 §86.4.4's: the ftrace ring in the window first (did the thread leave the CPU? an IRQ? a shootdown? an empty gap?), the host and network samples second, `perf`/PT decode last and never on the trading host.
 
-## I.11 References
+## I.11 Other toolchains: asm, runtime logs and the C-ABI waist
+
+The "verify the codegen" step and the runtime's own diagnostics for the languages of Part XII (Ch. 73–77), plus the one-liners for a C ABI boundary (Ch. 75).
+
+```
+   # --- inline / hand-written asm (Ch. 73)
+   g++ -O2 -S -masm=intel x.cpp -o - | grep -n -A12 '#APP'    # GCC brackets every asm statement with #APP/#NO_APP: read what is live around it
+   nasm -f elf64 f.asm -o f.o && objdump -d -M intel f.o        # assemble + check a hand-written function; readelf -S f.o | grep -i gnu-stack (no exec stack)
+   timeout 5 ./prog; echo "exit=$?"                              # 124 = the loop never ended: an undeclared clobber (Ch. 73 §73.6)
+   # --- Rust (Ch. 74)
+   rustc --edition 2021 -C opt-level=3 -C target-cpu=native -C panic=abort --emit asm k.rs -o k.s   # whole-crate asm (AT&T); add --crate-type cdylib + #[no_mangle] for readable symbols
+   cargo asm --rust crate::module::function                      # cargo-show-asm: one function, source interleaved (cargo install cargo-show-asm)
+   grep -c 'panic_bounds_check\|call' k.s                       # bounds checks and calls left in a hot body (0 is the target — Ch. 74 §74.5)
+   cargo rustc --release -- -C target-cpu=native -C force-frame-pointers=yes   # frame pointers for perf/the Ch. 22 unwinders
+   readelf -SW target/release/app | grep -E 'eh_frame|gcc_except'   # unwind-table sizes: panic=abort alone barely moves them (Ch. 74 §74.3)
+   # --- Zig (Ch. 75, 77)
+   zig build-obj -O ReleaseFast -fomit-frame-pointer -femit-asm=k.s k.zig     # asm; zig translate-c api.h > api.zig (C header → Zig externs)
+   zig cc -target aarch64-linux-gnu -O2 -c api.c                 # the C side of the waist, cross-compiled (Appendix A)
+   # --- JVM (Ch. 76)
+   java -Xms2g -Xmx2g -XX:+AlwaysPreTouch -Xlog:gc*,safepoint:file=gc.log App         # pauses AND time-to-safepoint; -Xlog:gc+phases for ZGC
+   java -XX:+PrintCompilation App | grep -E 'Hot::method|made not entrant'                # tiers (3 = C1, 4 = C2), % = OSR, deoptimisations
+   java -XX:+UnlockDiagnosticVMOptions -XX:+PrintAssembly -XX:CompileCommand=print,Hot::method App   # needs the hsdis plugin; or feed -XX:+LogCompilation to JITWatch
+   java -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -Xms4g -Xmx4g -XX:+AlwaysPreTouch App    # prove a session is garbage-free: OOM = a failed test
+   # --- .NET (Ch. 76)
+   DOTNET_gcServer=1 DOTNET_GCgen0size=0x4000000 dotnet app.dll          # server GC, 64 MiB gen0; DOTNET_GCHeapAffinitizeMask to keep GC threads off the hot core
+   DOTNET_JitDisasm=Apply DOTNET_JitStdOutFile=jit.txt dotnet app.dll    # tier-0 and tier-1 asm of one method; DOTNET_TieredCompilation=0 for the final tier only
+   dotnet publish -c Release -p:PublishReadyToRun=true      # precompiled starting tier;  -p:PublishAot=true for NativeAOT (no JIT, no warm-up curve)
+   dotnet build-server shutdown                             # before benchmarking anything else on the box (Ch. 77 §77.2.3)
+   # --- Go (Ch. 76)
+   GODEBUG=gctrace=1 ./app                                  # one line per GC cycle: STW/concurrent phase times, heap before→after→live
+   GOGC=off GOMEMLIMIT=4GiB ./app                           # collect only at the limit (then runtime.GC() at a quiet moment)
+   go build -gcflags='-m -m' ./... 2>&1 | grep 'escapes'    # every heap escape in the hot loop;  -gcflags=-d=ssa/check_bce/debug=1 lists surviving bounds checks
+   go tool objdump -s 'main\.\(\*Book\)\.apply' ./app      # disassemble one method of the shipped binary
+   # --- OCaml (Ch. 76)
+   ocamlopt -O3 -unboxed-types -S k.ml && grep -c 'caml_alloc\|caml_call_gc' k.s   # allocation sites in the hot function (-O3 needs a flambda switch)
+   OCAMLRUNPARAM='s=4M,v=0x400' ./app                       # minor heap 4M words; v=0x400 prints GC statistics at exit
+   # --- the C-ABI waist (Ch. 75)
+   nm -D --defined-only libbook.so                          # exactly the exported waist, nothing else (-fvisibility=hidden + explicit default)
+   abidiff libbook-1.0.so libbook-1.1.so                    # libabigail: did the ABI change? (CI gate)
+   python3 -c 'import ctypes; L=ctypes.CDLL("./libbook.so"); print(L.book_new())'   # the cheapest smoke test of the waist from the research tier
+```
+
+**Interpreting:** every toolchain can show you its machine code; the questions are the same ones Ch. 4 asks of C++ — is the hot method one block of loads and arithmetic, with no call to an allocator, no barrier, no type check, no bounds-check branch to a panic — and for the managed runtimes, the runtime's own log is the second instrument beside the hot thread's clock (Ch. 76 §76.3): read time-to-safepoint and deoptimisations, not only pause time.
+
+## I.12 References
 
 - The **`perf`** documentation — `perf-stat`, `perf-record`, `perf-report`, `perf-annotate`, `perf-c2c`, `perf-mem` man pages, and the kernel `tools/perf` docs (I.1–I.3).
 - **Brendan Gregg's** `perf` examples and *BPF Performance Tools* / `bpftrace` reference (I.5), and the `bcc`/`bpftrace` repositories.
@@ -265,7 +309,7 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 79, Ch. 81 and Appendix N.
 - The `hwloc`/`lstopo`, `numactl`, `ethtool`, `pahole` (dwarves), `chrt`, `taskset`, `objdump`, and `llvm-bolt`/`perf2bolt` man pages and docs (I.6–I.9).
 - `core(5)`, `coredumpctl(1)`, `eu-stack(1)`, `eu-unstrip(1)`, `addr2line(1)`, the gdb manual's *Non-Stop Mode* and *Debugging Programs with Multiple Threads* chapters, `perf-record(1)` (`--overwrite`, `--switch-output`, `--snapshot`), `perf-intel-pt(1)`, and `Documentation/trace/ftrace.rst` (I.10).
 
-## I.12 Additional Reading
+## I.13 Additional Reading
 
 - **Appendix C** (System Tuning Checklist) — where many of these commands are applied as *configuration* (IRQ pinning, ring sizing, governor) rather than one-off *observation*.
 - **Appendix D** (Compiler Flag Reference) — the build flags behind I.9 (`-fno-omit-frame-pointer`, LTO/PGO/BOLT, sanitizers).

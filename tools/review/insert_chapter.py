@@ -37,6 +37,15 @@ What it does, in order:
      heuristic keeps mapping pre-Phase-3 numbers through this insertion.
   7. Prints a per-file change summary and the list of suspicious lines, then `git diff --stat`.
 
+  --new-part (with --part): the inserted chapter OPENS A NEW PART. The Part's roman numeral R is read
+  from --part; every existing Part numbered R or higher is shifted up by one everywhere the book names
+  Parts outside code fences — chapter first-line headers (`# Part S — …`), README `## Part S — …`
+  headers, the preface's `**Part S — …** (Ch. a–b)` bullets, CLAUDE.md's Phase-3 `- **S — …** (a–b)`
+  lines, Appendix G's `**Part S (…)**` map and prose mentions (`Part S`, `Parts I–S`, `Parts (II, S)`);
+  a README `## Part R — …` header (with a TODO intro), a preface bullet and a CLAUDE.md range line are
+  inserted for the new Part, and the `twelve Parts` counts in README/preface/CLAUDE.md are bumped.
+  Every shifted prose line is printed so the wording can be checked by hand.
+
 After running: write the chapter, fill the README outline, rewrite chapter N's teaser and the new
 chapter's Prerequisites, update CLAUDE.md's counts, then run tools/review/sweep.py and
 tools/review/stale_crossrefs.py.
@@ -56,6 +65,78 @@ NUMWORDS = {70: "seventy", 71: "seventy-one", 72: "seventy-two", 73: "seventy-th
             90: "ninety", 91: "ninety-one", 92: "ninety-two", 93: "ninety-three",
             94: "ninety-four", 95: "ninety-five", 96: "ninety-six", 97: "ninety-seven",
             98: "ninety-eight", 99: "ninety-nine"}
+
+PARTWORDS = {10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen",
+             16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen", 20: "twenty"}
+_ROMAN = [(50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+
+
+def roman_to_int(r):
+    vals = {"I": 1, "V": 5, "X": 10, "L": 50}
+    total, prev = 0, 0
+    for ch in reversed(r):
+        v = vals[ch]
+        total = total - v if v < prev else total + v
+        prev = max(prev, v)
+    return total
+
+
+def int_to_roman(n):
+    out = ""
+    for v, sym in _ROMAN:
+        while n >= v:
+            out += sym
+            n -= v
+    return out
+
+
+PART_LIST = re.compile(r"\b(Parts?)(\s+\(?)([IVXL]+(?:\s*(?:[,/–—-]|,?\s(?:and|or)\s|&)\s*[IVXL]+)*)")
+ROMAN_TOK = re.compile(r"[IVXL]+")
+
+
+class PartShifter:
+    """Shift every Part numeral >= first up by one, outside code fences; records the lines it touched."""
+
+    def __init__(self, first):
+        self.first = first
+        self.touched = []
+        self.changed = 0
+
+    def _shift_list(self, lst):
+        def rep(mo):
+            n = roman_to_int(mo.group(0))
+            return int_to_roman(n + 1) if n >= self.first and 1 <= n <= 30 else mo.group(0)
+        return ROMAN_TOK.sub(rep, lst)
+
+    def line(self, line, where):
+        new = PART_LIST.sub(lambda mo: mo.group(1) + mo.group(2) + self._shift_list(mo.group(3)), line)
+        # CLAUDE.md Phase-3 range lines name the Part by numeral alone: `- **XII — Title** (73–84)`
+        mo = re.match(r"^(\s*- \*\*)([IVXL]+)( — [^*]+\*\*\s*\(\d+–\d+\))", line if new == line else new)
+        if mo and roman_to_int(mo.group(2)) >= self.first:
+            new = f"{mo.group(1)}{int_to_roman(roman_to_int(mo.group(2)) + 1)}{mo.group(3)}{(line if new == line else new)[mo.end():]}"
+        if new != line:
+            self.changed += 1
+            self.touched.append((where, new.strip()[:160]))
+        return new
+
+    def text(self, text, where):
+        out, inf = [], False
+        for i, l in enumerate(text.split("\n"), 1):
+            if FENCE.match(l):
+                inf = not inf
+            elif not inf:
+                l = self.line(l, f"{where}:{i}")
+            out.append(l)
+        return "\n".join(out)
+
+    @staticmethod
+    def bump_counts(text, nparts):
+        old, new = nparts, nparts + 1
+        if old in PARTWORDS and new in PARTWORDS:
+            text = re.sub(rf"\b{PARTWORDS[old]} Parts\b", f"{PARTWORDS[new]} Parts", text)
+            text = re.sub(rf"\b{PARTWORDS[old].capitalize()} Parts\b", f"{PARTWORDS[new].capitalize()} Parts", text)
+        return re.sub(rf"\b{old} Parts\b", f"{new} Parts", text)
+
 
 # Tokens that mean "the number before me was a quantity, not a chapter".
 UNIT_GUARD = re.compile(
@@ -237,6 +318,8 @@ def main():
     ap.add_argument("--slug", required=True, help="file slug for the new chapter (no number, no .md)")
     ap.add_argument("--title", required=True, help="chapter title (without the number)")
     ap.add_argument("--part", help="Part header line text (default: copied from chapter N)")
+    ap.add_argument("--new-part", action="store_true",
+                    help="the new chapter opens a new Part named by --part; shift every later Part's numeral (see doc)")
     ap.add_argument("--root", default=".", help="repo root (default: cwd)")
     ap.add_argument("--dry-run", action="store_true", help="report what would change; write nothing")
     ap.add_argument("--allow-dirty", action="store_true")
@@ -273,6 +356,21 @@ def main():
         part_line = args.part if args.part.startswith("# ") else "# " + args.part
     if not part_line:
         sys.exit(f"could not find a Part header in {chap_files[N]}; pass --part")
+    shifter = None
+    if args.new_part:
+        if not args.part:
+            sys.exit("--new-part requires --part")
+        pm = re.match(r"^#\s+Part\s+([IVXL]+)\s*[—–-]\s*(.+)$", part_line)
+        if not pm:
+            sys.exit("--part must look like 'Part XII — Title' for --new-part")
+        new_part_num, new_part_title = roman_to_int(pm.group(1)), pm.group(2).strip()
+        # the Part chapter N belongs to must be exactly R-1, or the numbering would not be contiguous
+        with open(os.path.join(chdir, chap_files[N]), encoding="utf-8") as fh:
+            prev = next((roman_to_int(m.group(1)) for m in (re.match(r"^#\s+Part\s+([IVXL]+)", l) for l in fh) if m), None)
+        if prev != new_part_num - 1:
+            sys.exit(f"chapter {N} is in Part {int_to_roman(prev) if prev else '?'}; a new Part after it must be Part {int_to_roman((prev or 0) + 1)}")
+        shifter = PartShifter(new_part_num)
+        print(f"opening new Part {pm.group(1)} — {new_part_title}; Parts {pm.group(1)} and later shift up by one")
     old_next_title = None
     if N + 1 in chap_files:
         with open(os.path.join(chdir, chap_files[N + 1]), encoding="utf-8") as fh:
@@ -283,6 +381,10 @@ def main():
                     break
 
     print(f"inserting '{args.title}' as Ch. {N + 1} ({new_name}); chapters {N + 1}..{maxch} -> {N + 2}..{maxch + 1}")
+    nparts_before = 0
+    rp0 = os.path.join(chdir, "README.md")
+    if os.path.exists(rp0):
+        nparts_before = len(re.findall(r"^## Part [IVXL]+ ", open(rp0, encoding="utf-8").read(), re.M))
 
     # 1. renames, highest first
     renames = [(chap_files[m], f"{m + 1:02d}-{chap_files[m][3:]}") for m in sorted(chap_files) if m > N]
@@ -299,9 +401,17 @@ def main():
         text = open(path, encoding="utf-8").read()
         before = R.changed
         new = R.process_text(text, relpath, **kw)
+        if shifter:
+            sb = shifter.changed
+            new = shifter.text(new, relpath)
+            if kw.get("counts"):
+                new = shifter.bump_counts(new, nparts_before)
+            n_parts = shifter.changed - sb
+        else:
+            n_parts = 0
         n = R.changed - before
-        if n:
-            print(f"  {relpath}: {n} line(s)")
+        if n or n_parts:
+            print(f"  {relpath}: {n} line(s)" + (f", {n_parts} Part-numeral line(s)" if n_parts else ""))
         if not args.dry_run and new != text:
             open(path, "w", encoding="utf-8").write(new)
 
@@ -313,6 +423,18 @@ def main():
             rewrite(os.path.join("chapters", f), headings=False)
     rewrite("chapters/00-preface.md", headings=False, counts=True)
     rewrite("chapters/README.md", readme=True, headings=False, counts=True)
+    if shifter and not args.dry_run:
+        ppath = os.path.join(chdir, "00-preface.md")
+        if os.path.exists(ppath):
+            ptext = open(ppath, encoding="utf-8").read().split("\n")
+            prev_roman = int_to_roman(shifter.first - 1)
+            idx = next((i for i, l in enumerate(ptext) if re.match(rf"^- \*\*Part {prev_roman} — ", l)), None)
+            if idx is None:
+                print("  WARNING: preface has no Part bullet for the preceding Part; add the new Part's bullet by hand")
+            else:
+                ptext[idx + 1:idx + 1] = [f"- **Part {int_to_roman(shifter.first)} — {new_part_title}** (Ch. {N + 1}–{N + 1}): TODO."]
+                open(ppath, "w", encoding="utf-8").write("\n".join(ptext))
+                print("  00-preface.md: new Part bullet inserted (TODO: describe it)")
     rewrite("tools/book-pdf/README.md", headings=False, counts=True)
 
     cpath = os.path.join(root, "CLAUDE.md")
@@ -321,6 +443,21 @@ def main():
         before = R.changed
         new = R.process_claude_md(text)
         print(f"  CLAUDE.md: {R.changed - before} Part-range line(s)")
+        if shifter:
+            new = shifter.text(new, "CLAUDE.md")
+            new = shifter.bump_counts(new, nparts_before)
+            prev_roman = int_to_roman(shifter.first - 1)
+            clines = new.split("\n")
+            idx = next((i for i, l in enumerate(clines) if re.match(rf"^\s*- \*\*{prev_roman} — ", l)), None)
+            if idx is None:
+                print("  WARNING: CLAUDE.md has no Phase-3 range line for the preceding Part; add the new Part's line by hand")
+            else:
+                j = idx + 1
+                while j < len(clines) and clines[j].startswith("    "):
+                    j += 1
+                clines[j:j] = [f"  - **{int_to_roman(shifter.first)} — {new_part_title}** ({N + 1}–{N + 1}): TODO."]
+                new = "\n".join(clines)
+            print(f"  CLAUDE.md: Part numerals shifted; new Part {int_to_roman(shifter.first)} range line inserted (TODO: describe it)")
         if not args.dry_run and new != text:
             open(cpath, "w", encoding="utf-8").write(new)
 
@@ -412,7 +549,11 @@ TODO
             print(f"  WARNING: README has no block for chapter {N}; add the outline block by hand")
         else:
             end = next((i for i in range(start + 1, len(rlines)) if rlines[i].startswith("### ") or rlines[i].startswith("## ")), len(rlines))
-            rlines[end:end] = readme_block.rstrip("\n").split("\n") + [""]
+            block = readme_block.rstrip("\n").split("\n") + [""]
+            if shifter:
+                block = ["---", "", f"## {part_line.lstrip('# ').strip()}", "", "*TODO: one-line Part intro.*", ""] + block
+                print(f"  README.md: new '## {part_line.lstrip('# ').strip()}' header inserted before the chapter block (TODO: intro)")
+            rlines[end:end] = block
             open(rpath, "w", encoding="utf-8").write("\n".join(rlines))
 
     # 5. stale_crossrefs.py step chain
@@ -430,6 +571,10 @@ TODO
 
     # 6. summary
     print(f"\n{R.changed} line(s) rewritten in total.")
+    if shifter and shifter.touched:
+        print(f"\n{len(shifter.touched)} Part-numeral line(s) shifted (check the wording by hand):")
+        for where, ctx in shifter.touched:
+            print(f"  {where}: {ctx}")
     if R.suspicious:
         print(f"\n{len(R.suspicious)} suspicious list continuation(s) NOT remapped (review by hand):")
         for where, ctx in R.suspicious:

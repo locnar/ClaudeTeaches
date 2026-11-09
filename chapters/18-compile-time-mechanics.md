@@ -150,7 +150,7 @@ The general move: identify work whose inputs are **known at compile time** and c
 - **`constinit` for zero-cost initialization of globals.** A global that must be ready before `main` (a config snapshot, a singleton-ish table) marked `constinit` is initialized at compile time — no runtime static-init cost, no static-init-order fiasco, and it can live in `.rodata` if also `const`.
 - **`if constexpr` to specialize and discard dead code.** Select implementation branches at compile time so only the taken branch is instantiated and emitted — specializing a parser per protocol, a container per size, a path per platform, with *no* runtime branch and no dead code emitted (Ch. 12–13). This is the workhorse for compile-time dispatch (Ch. 19).
 - **Template/`constexpr` parameters instead of runtime arguments.** A loop count, a buffer size, a field offset passed as a template non-type parameter (or `constexpr`) lets the compiler unroll, size stack buffers, and fold address arithmetic — versus a runtime argument it must handle generically.
-- **Compile-time validation.** `static_assert` and `consteval` checks catch errors at build time (a missized struct vs a cache line, Ch. 9; an out-of-range constant) — zero runtime cost, and the bug never ships (ties Ch. 76's security-as-correctness).
+- **Compile-time validation.** `static_assert` and `consteval` checks catch errors at build time (a missized struct vs a cache line, Ch. 9; an out-of-range constant) — zero runtime cost, and the bug never ships (ties Ch. 81's security-as-correctness).
 
 The judgment call: move work to compile time when its inputs are genuinely known then **and** it either removes runtime work or catches a bug — not reflexively, because heavy compile-time work costs build time (§18.5) and can hurt the iterate loop (Ch. 3).
 
@@ -180,7 +180,7 @@ Where this pays in trading code:
 - **Dispatch tables (Ch. 13–14).** A compile-time table of handler parameters (or, carefully, function pointers) indexed by message type, turning an `if/else` ladder into a load.
 - **Perfect hashing / closed sets.** For a *fixed* set of keys (symbols, message types), a compile-time-computed perfect hash or sorted `constexpr` array with binary search (or `std::ranges` over a `constexpr` container) gives branch-light, allocation-free lookup.
 
-Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.rodata`/data, and a huge table thrashes the *data* cache at runtime, Ch. 7 — the table is only a win if it stays hot), and confirm the construction actually ran at compile time (Ch. 4 — see a fixed-address load, not a build loop). A compile-time table that's too big to stay cache-resident can be slower than recomputing; size it like any other hot data structure (Ch. 8).
+(The same table is built with Rust's `const fn` and Zig's `comptime` in Ch. 77 §77.4.3 — identical `.rodata` bytes from all three compilers, and a comparison of what each mechanism lets you write.) Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.rodata`/data, and a huge table thrashes the *data* cache at runtime, Ch. 7 — the table is only a win if it stays hot), and confirm the construction actually ran at compile time (Ch. 4 — see a fixed-address load, not a build loop). A compile-time table that's too big to stay cache-resident can be slower than recomputing; size it like any other hot data structure (Ch. 8).
 
 ---
 
@@ -216,7 +216,7 @@ Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.ro
 - [ ] I watched **build time and binary size** as first-class costs; heavy metaprograms use **iterative `constexpr`** over deep recursion and cap pack sizes (§18.5).
 - [ ] Templates vary **only what must vary**; shared non-dependent code is factored out to avoid **instantiation bloat** (Ch. 12).
 - [ ] Compile-time-only work that's really on the **cold setup path** wasn't over-engineered into a metaprogram when a simple runtime build would do (Ch. 1).
-- [ ] Compile-time **validation** (`static_assert`/`consteval` checks) guards invariants (sizes, ranges) at build time (ties Ch. 9, 76).
+- [ ] Compile-time **validation** (`static_assert`/`consteval` checks) guards invariants (sizes, ranges) at build time (ties Ch. 9, 81).
 
 ---
 
@@ -233,7 +233,7 @@ Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.ro
 - B. Saks / CppCon talks on `constexpr` everything, and "constexpr all the things" — the reach and limits of compile-time evaluation in modern C++.
 - D. Vandevoorde, N. Josuttis, D. Gregor, *C++ Templates: The Complete Guide* — the definitive treatment of the template instantiation/cost model underlying §18.2 and Ch. 19.
 - Ch. 19 (*Template Metaprogramming & Zero-Cost Abstractions*) — CRTP, policy-based design and expression templates built on this foundation; Ch. 13–14 (*Branches / Dispatch*) — the lookup and dispatch this chapter generates; Ch. 27–28 (*Numerics / Bit Tricks*) — compile-time numeric and bit tables; Ch. 22 (*Build Toolchain*) — managing build time, LTO and instantiation.
-- **Appendix B** (B.1–B.2) — how compile-time programming differs in Rust/Zig (`const fn`/const generics, `comptime`), for the cross-language reader.
+- **Ch. 77 §77.4.3** — this section's tick-size table rebuilt with Rust `const fn` and Zig `comptime`, with identical `.rodata` shown; **Appendix B** (B.3) — the one-line map of compile-time constructs across languages.
 
 ---
 
