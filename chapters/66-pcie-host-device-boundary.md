@@ -2,7 +2,7 @@
 
 # Chapter 66 — PCIe & the Host–Device Boundary
 
-> **Prerequisites:** Ch. 7 (memory hierarchy — PCIe is another, slower level), Ch. 26 (mmap — MMIO/BAR mapping is mmap of device memory), Ch. 41 (interrupts vs polling — MSI-X vs poll), Ch. 55/62/63 (the NIC/bypass/RDMA devices that sit behind PCIe), Ch. 1 (latency — the round-trip floor).
+> **Prerequisites:** Ch. 7 (memory hierarchy — PCIe is another, slower level), Ch. 26 (mmap — MMIO/BAR mapping is mmap of device memory), Ch. 41 (interrupts vs polling — MSI-X vs poll), Ch. 55/62/63 (the NIC/bypass/RDMA devices that sit behind PCIe), Ch. 56 (DDIO — where a DMA write lands), Ch. 1 (latency — the round-trip floor).
 >
 > **Leads into:** Ch. 67 (GPU — PCIe round-trip is why GPUs are off the order path), Ch. 68 (MPI), Ch. 69 (FPGA — on the NIC, behind/beside PCIe), Ch. 70 (SmartNICs/DPUs). Opens **Part XI** — and the PCIe round-trip is the **floor under every offload decision** in the rest of the book.
 
@@ -12,7 +12,7 @@
 
 Part XI is about pushing work off the CPU and onto *other* hardware — GPUs (Ch. 67), FPGAs (Ch. 69), SmartNICs (Ch. 70) — and *every one of them sits behind **PCIe***, the bus connecting the CPU to peripheral devices. The NIC you bypass (Ch. 62), the RDMA HCA (Ch. 63), the GPU, the FPGA — all are PCIe devices, and *all* communication between the CPU and these devices crosses the PCIe boundary. So before any offload chapter, you must understand the **cost of crossing that boundary**, because it's the **irreducible floor under every offload decision**: a PCIe round-trip — the CPU reading a value from a device and getting the answer back — costs **hundreds of nanoseconds to a microsecond**, and *no amount of accelerator speed can hide it*. If offloading a computation to a GPU saves 500 ns of compute but costs a 1 µs PCIe round-trip to send the data and get the result, you *lost*. The PCIe round-trip is why GPUs are off the tick-to-trade path (Ch. 67), why FPGAs are placed *inline on the NIC* rather than behind PCIe (Ch. 69), and why every "should I offload this?" question is really "is the work big enough to amortize the PCIe crossing?".
 
-The asymmetry that makes PCIe subtle — and the single most important fact in this chapter — is that **a device-register *read* is catastrophically more expensive than a *write*.** A PCIe **write** is **posted**: the CPU fires it and moves on, not waiting for it to arrive (~tens of ns to *issue*) — fire-and-forget. A PCIe **read** is **non-posted**: it requires a full round-trip — the request goes to the device, the device responds, and the CPU *stalls* the whole time (~hundreds of ns to a microsecond). So a **device-register read on the hot path is a latency disaster** (§66.5), and the entire design of low-latency device interaction is built around *avoiding reads*: the CPU **writes** to the device (posts commands to descriptor rings, rings doorbells) and learns of completions by the device **writing** to *host memory* (which the CPU reads cheaply from cache — Ch. 7) rather than the CPU reading device registers. This "device writes to host memory, host polls host memory" pattern (descriptor rings, Ch. 34/53/62) is how every fast device driver works, and *why*.
+The asymmetry that makes PCIe subtle — and the single most important fact in this chapter — is that **a device-register *read* is catastrophically more expensive than a *write*.** A PCIe *memory* **write** is **posted** (configuration and legacy I/O writes, like all reads, are non-posted and cost a completion round-trip): the CPU fires it and moves on, not waiting for it to arrive (~tens of ns to *issue*) — fire-and-forget. A PCIe **read** is **non-posted**: it requires a full round-trip — the request goes to the device, the device responds, and the CPU *stalls* the whole time (~hundreds of ns to a microsecond). So a **device-register read on the hot path is a latency disaster** (§66.5), and the entire design of low-latency device interaction is built around *avoiding reads*: the CPU **writes** to the device (posts commands to descriptor rings, rings doorbells) and learns of completions by the device **writing** to *host memory* (which the CPU reads cheaply from cache — Ch. 7) rather than the CPU reading device registers. This "device writes to host memory, host polls host memory" pattern (descriptor rings, Ch. 34/53/62) is how every fast device driver works, and *why*.
 
 For HFT this understanding is foundational to Part XI: it tells you *what* can be offloaded (big, parallel, latency-insensitive work — risk, backtesting, ML — Ch. 67–68) and what *can't* (the latency-critical tick-to-trade path, which can't afford a PCIe round-trip — so its acceleration goes *inline on the NIC's FPGA*, Ch. 69, not behind PCIe). It explains the descriptor-ring/doorbell pattern you've already seen in the NIC (Ch. 55, 62) and RDMA (Ch. 63). And it covers the mechanisms — MMIO/BAR-mapped registers, DMA, the IOMMU, posted/non-posted transactions, write-combining, MSI-X vs polling, peer-to-peer DMA (GPUDirect) — that determine device-interaction latency. This chapter explains the PCIe topology/MMIO/DMA mental model (§66.2), measures the device-register round-trip and streaming bandwidth (§66.3), details write-combining, interrupts-vs-polling, and P2P DMA (§66.4), and warns about the device-read-on-the-hot-path and IOMMU costs (§66.5). It's the floor the rest of Part XI builds on.
 
@@ -40,7 +40,7 @@ For HFT this understanding is foundational to Part XI: it tells you *what* can b
 **How the CPU and device communicate — two directions:**
 
 - **MMIO (Memory-Mapped I/O) — the CPU accesses the device.** The device exposes registers and memory through **BARs (Base Address Registers)** that map device memory into the CPU's physical address space; the OS `mmap`s them (Ch. 26) so the driver accesses device registers as if they were memory (`*reg = value` writes a device register; `value = *reg` reads one). **A write is posted (cheap); a read is non-posted (a round-trip — §66.2.3).** This is how the CPU rings doorbells and (rarely!) reads device state.
-- **DMA (Direct Memory Access) — the device accesses host memory.** The device's DMA engine reads/writes **host memory** directly (without the CPU) — this is how bulk data moves (the NIC DMA's packets into host buffers — Ch. 55, 62; the GPU DMA's data; RDMA — Ch. 63). DMA is the *device writing to host memory*, which the CPU then reads cheaply from cache (Ch. 7) — the key to avoiding device-register reads (§66.1). Host buffers for DMA must be **pinned** (Ch. 23 — the device DMAs to physical addresses; pages can't move) — the registration of RDMA (Ch. 63) and the pre-faulted/`mlock`'d buffers (Ch. 23, 26) throughout.
+- **DMA (Direct Memory Access) — the device accesses host memory.** The device's DMA engine reads/writes **host memory** directly (without the CPU) — this is how bulk data moves (the NIC DMA's packets into host buffers — Ch. 55, 62; the GPU DMA's data; RDMA — Ch. 63). DMA is the *device writing to host memory*, which the CPU then reads cheaply — from L3 when DDIO allocates the inbound write there (Intel — Ch. 56), otherwise a DRAM read, still far cheaper than a device-register read (§66.1). Host buffers for DMA must be **pinned by the driver at registration** (`ibv_reg_mr` — Ch. 63; `cudaHostAlloc`/`cudaHostRegister` — Ch. 67; the VFIO DMA map — Ch. 62), which locks the *physical* pages; `mlock`/pre-faulting (Ch. 23, 26) only keeps pages resident and is not by itself a DMA guarantee (the kernel may still migrate an mlocked page).
 - **The IOMMU (I/O Memory Management Unit).** A "TLB for devices" — it translates the addresses a device uses (I/O virtual addresses) to physical addresses, providing **isolation** (a device can only DMA to memory it's been granted — security, Ch. 72) and allowing devices to use virtual addresses. The IOMMU adds a translation step to DMA (a small latency, and IOTLB misses — like the CPU TLB, Ch. 15) — usually negligible, but it can matter (§66.5), and it's the security boundary for DMA-capable devices (a compromised device could otherwise DMA anywhere — Ch. 72). On Linux, `intel_iommu`/`amd_iommu`; VFIO (used by DPDK — Ch. 62, and device passthrough) uses it.
 
 ### 66.2.3 Descriptor rings and doorbells; posted vs non-posted transactions
@@ -64,16 +64,52 @@ The model: **everything (GPU/NIC/FPGA/RDMA) is behind PCIe; the CPU accesses dev
 
 ## 66.3 Measure it: device-register round-trip and streaming bandwidth
 
-Measure the two PCIe costs that govern offload: the **device-register round-trip** (an MMIO read — the latency floor, and the posted/non-posted asymmetry) and the **streaming bandwidth** (bulk DMA — the transfer ceiling). The asymmetry between a register read and write is the headline.
+Measure the two PCIe costs that govern offload: the **device-register round-trip** (an MMIO read — the latency floor, and the posted/non-posted asymmetry) and the **streaming bandwidth** (bulk DMA — the transfer ceiling). The asymmetry between a register read and write is the headline. The round-trip needs nothing but a BAR mapped from sysfs:
+
+```cpp
+// mmio_lat.cpp — the posted/non-posted asymmetry, measured: time MMIO writes vs reads of one device register.
+// Build: g++ -O2 -std=c++20 mmio_lat.cpp -o mmio_lat
+// Run (root, device idle and unbound or a scratch register — a NIC's or FPGA's BAR0 scratchpad; NEVER a live doorbell):
+//   ./mmio_lat /sys/bus/pci/devices/0000:17:00.0/resource0 0x80     # resource0 = UC mapping; resource0_wc = WC mapping
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <algorithm>
+#include <vector>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <x86intrin.h>
+
+static inline std::uint64_t t() { unsigned aux; _mm_lfence(); std::uint64_t c = __rdtscp(&aux); _mm_lfence(); return c; }
+
+int main(int argc, char** argv) {
+    if (argc < 3) { std::fprintf(stderr, "usage: %s <sysfs resourceN> <reg offset>\n", argv[0]); return 1; }
+    int fd = open(argv[1], O_RDWR | O_SYNC);
+    if (fd < 0) { perror("open"); return 1; }
+    void* bar = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);   // one page of BAR0, uncacheable
+    if (bar == MAP_FAILED) { perror("mmap"); return 1; }
+    volatile std::uint32_t* reg = reinterpret_cast<volatile std::uint32_t*>(static_cast<char*>(bar) + std::strtoul(argv[2], nullptr, 0));
+
+    constexpr int N = 100'000; std::vector<std::uint64_t> rd(N), wr(N);
+    for (int i = 0; i < N; ++i) { auto a = t(); (void)*reg;               auto b = t(); rd[i] = b - a; }   // non-posted: round-trip
+    for (int i = 0; i < N; ++i) { auto a = t(); *reg = std::uint32_t(i);  auto b = t(); wr[i] = b - a; }   // posted: issue cost only
+    auto pct = [](std::vector<std::uint64_t>& v, double p) { std::sort(v.begin(), v.end()); return v[std::size_t(p * (v.size() - 1))]; };
+    const double ns = 1.0 / 2.9;                                            // cycles -> ns at the 2.9 GHz TSC (Appendix L.3)
+    std::printf("MMIO READ  p50 %6.0f ns  p99 %6.0f ns\n", pct(rd, .50) * ns, pct(rd, .99) * ns);
+    std::printf("MMIO WRITE p50 %6.0f ns  p99 %6.0f ns   (posted: the CPU does not wait for the device)\n", pct(wr, .50) * ns, pct(wr, .99) * ns);
+    // A burst of N writes followed by ONE read measures the write-queue drain: (read latency - single read) / N.
+    return 0;
+}
+```
 
 ```
-   # MMIO read vs write latency (requires a mapped device BAR — e.g. via a driver or DPDK/VFIO):
-   #   time a posted WRITE to a device register   vs   a non-posted READ of a device register
+   # MMIO read vs write latency: the program above (resource0 = UC; resource0_wc for a write-combining mapping, §66.4.1)
    # DMA streaming bandwidth: time a large host↔device DMA transfer (e.g. cudaMemcpy — Ch.67,
    #   or a NIC/DPDK bulk transfer), compute GB/s; compare to the link's theoretical (lanes × gen).
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — Gen4 x16 device, illustrative (the *asymmetry* and the *round-trip floor* are the point):
+Representative results (toolchain and machine: Appendix L.3) — a Gen4 x16 device on the CPU's own root port (a 25 GbE NIC under VFIO, BAR0 scratch register; ASPM disabled), illustrative (the *asymmetry* and the *round-trip floor* are the point):
 
 ```
    operation                              latency / bandwidth      note
@@ -86,7 +122,7 @@ Representative results (toolchain and machine: Appendix L.3) — Gen4 x16 device
    the asymmetry: a device-register READ is ~10-50x a WRITE → NEVER read device registers on the hot path.
 ```
 
-Read it: the **MMIO read/write asymmetry is the chapter** — a posted **write** is fire-and-forget (~tens of ns to issue, the CPU moves on), while a non-posted **read** **stalls the CPU for a full PCIe round-trip** (~hundreds of ns to a microsecond) — *10-50× more*. So a device-register read on the hot path is a latency catastrophe (§66.5), and the descriptor-ring pattern (§66.2.3) exists precisely to avoid it: the device DMA's completions into *host* memory, which the CPU polls as a cheap cache/memory read (Ch. 7) — not a device read. The **streaming bandwidth** (~25-28 GB/s on x16 Gen4, ~88% of theoretical) is the *bulk transfer* ceiling — relevant for sending big data to a GPU (Ch. 67): a 100 MB array takes ~4 ms to transfer, which dwarfs a microsecond compute, illustrating why transfer cost dominates small offloads. The headline number for *offload decisions* is the **round-trip floor** (~hundreds of ns to µs): any offload's control path crosses PCIe at least once, so the work must be big enough to amortize it — the test applied throughout Part XI. The measurement discipline: **measure the round-trip (it's the floor — Ch. 67 measures *end-to-end including transfer*, not just kernel time), and never put a device-register read on the hot path** (§66.5).
+Read it: the **MMIO read/write asymmetry is the chapter** — a posted **write** is fire-and-forget (~tens of ns to issue, the CPU moves on), while a non-posted **read** **stalls the CPU for a full PCIe round-trip** (~hundreds of ns to a microsecond) — *10-50× more*. So a device-register read on the hot path is a latency catastrophe (§66.5), and the descriptor-ring pattern (§66.2.3) exists precisely to avoid it: the device DMA's completions into *host* memory, which the CPU polls as a cheap cache/memory read (Ch. 7) — not a device read. The **streaming bandwidth** (~25-28 GB/s on x16 Gen4, ~78-88% of theoretical) is the *bulk transfer* ceiling — relevant for sending big data to a GPU (Ch. 67): a 100 MB array takes ~4 ms to transfer, which dwarfs a microsecond compute, illustrating why transfer cost dominates small offloads. The headline number for *offload decisions* is the **round-trip floor** (~hundreds of ns to µs): any offload's control path crosses PCIe at least once, so the work must be big enough to amortize it — the test applied throughout Part XI. The measurement discipline: **measure the round-trip (it's the floor — Ch. 67 measures *end-to-end including transfer*, not just kernel time), and never put a device-register read on the hot path** (§66.5).
 
 ## 66.4 Techniques
 
@@ -127,6 +163,7 @@ Devices talking *directly* — bypassing the host CPU/memory:
 - **Write-combining ordering bugs (§66.4.1).** WC writes are weakly ordered/coalesced — forgetting a fence (`sfence`) between the descriptor write and the doorbell (or before a dependent read) lets the device see a doorbell before the descriptor is flushed → it reads stale/incomplete descriptor (a race — Ch. 30, at the device level). Fence appropriately.
 - **Interrupt-driven completions on the hot path.** MSI-X interrupts add latency + a context switch (Ch. 41) per completion. On the hot device path, **poll** (§66.4.2). Interrupts are for background/idle-efficient device work.
 - **Ignoring the bandwidth ceiling for bulk transfers.** A large host↔device transfer is bounded by the link bandwidth (lanes × gen — §66.2.1); a too-small link (x4 where you need x16, or an older generation) throttles the offload's data feed. Check the link width/speed (`lspci -vv`); a device negotiated to a lower width/gen than expected is a real, silent bottleneck.
+- **ASPM — the link that went to sleep.** PCIe Active State Power Management (L0s/L1 and the L1 substates) lets an idle link drop into a low-power state; the *first* MMIO or DMA after an idle gap then pays microseconds of exit latency — the single most common PCIe-latency trap on a trading box, and invisible under continuous polling. Check `LnkCtl: ASPM Disabled` in `lspci -vv` for every device on the hot path, boot with `pcie_aspm=off` (or `/sys/module/pcie_aspm/parameters/policy = performance`), disable it in BIOS, and measure first-access latency after an idle gap vs continuous polling.
 - **Assuming P2P works without topology/driver support.** P2P DMA (§66.4.3) needs the right topology (P2P-capable path) and driver support (GPUDirect); assuming it works when the devices are under different root complexes (no P2P) silently falls back to a host bounce. Verify P2P is actually happening.
 
 ## 66.6 Exercises & checklist
@@ -162,7 +199,7 @@ Devices talking *directly* — bypassing the host CPU/memory:
 
 - The "PCIe latency" and host-device round-trip analyses (vendor whitepapers, academic measurements) — the numbers behind §66.3.
 - Ch. 67 (*GPU/CUDA*) — measuring offload end-to-end including the PCIe transfer; Ch. 69 (*FPGA*) — inline-on-NIC to avoid the PCIe round-trip; Ch. 70 (*SmartNICs/DPUs*) — devices on the host boundary; Ch. 63 (*RDMA*) — registered/pinned DMA memory; Ch. 55/62 (*NIC/Bypass*) — the descriptor-ring/doorbell NIC path; Ch. 16 (*NUMA*) — device-NUMA placement; Ch. 15 (*TLB*) — the IOTLB analog.
-- **Appendix E** — the PCIe round-trip and streaming-bandwidth numbers (the floor under offload); **Appendix F** — PCIe/MMIO/DMA/IOMMU glossary.
+- **Appendix E** — the PCIe round-trip number (the floor under offload); **Appendix F** — PCIe/MMIO/DMA/IOMMU glossary.
 
 ---
 
