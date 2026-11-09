@@ -193,9 +193,9 @@ The receive-side transport for market-data feeds (ties Ch. 53, 55):
 - The classic "TCP_NODELAY and the 40ms delay" writeups (and the John Nagle / Stack Overflow discussions) — the endemic bug of §51.3/§51.5, explained.
 - CME/Nasdaq market-data handler tuning guides and "Mechanical Sympathy" networking posts — multicast receive tuning and microburst survival.
 - Ch. 47 (*Linux Native I/O*) — the socket layer; Ch. 53 (*Wire Decoding*) — decoding the bytes, A/B arbitration, gap recovery, microbursts; Ch. 55 (*NIC Features*) — RX ring/RSS/timestamping/busy-poll; Ch. 62 (*Kernel Bypass*) — the ultra-hot path beyond tuned sockets; Ch. 46 (*Warming*) — connection/cwnd warming; Ch. 6 (*System Setup*) — sysctls.
-- Ch. 52 (*Advanced TCP Internals & Tuning*) — the deep dive on the Nagle/delayed-ACK stall, congestion control, GRO/GSO/TSO, and userspace TCP; Ch. 60 (*Network Fabric & Switching*) — the switches between you and the exchange.
+- Ch. 52 (*Advanced TCP Internals & Tuning*) — what sits under these knobs: autocorking, the delayed-ACK timer internals (why `TCP_QUICKACK` is not sticky), the cold congestion window, loss-recovery timers, pacing, GRO/GSO/TSO, `TCP_INFO`, and userspace TCP; Ch. 60 (*Network Fabric & Switching*) — the switches between you and the exchange.
 - **Appendix C** (System Tuning Checklist) — the consolidated socket/sysctl/multicast tuning; **Appendix E** — RTT numbers with/without the knobs.
 
 ---
 
-*Next: Ch. 52 — Advanced TCP Internals & Tuning, the deep dive on the transport under order entry: the Nagle/delayed-ACK 40 ms stall, congestion control on a clean colo link, the GRO/GSO/TSO offloads and their latency cost, and when to move TCP into userspace.*
+*Next: Ch. 52 — Advanced TCP Internals & Tuning, the stack underneath this chapter's knobs: the send path and its second coalescer (autocorking), the delayed-ACK timer that produced the 40 ms, the cold congestion window after an idle gap (CUBIC vs BBR), the 200 ms recovery floor, pacing, the GRO/GSO/TSO offloads — all read back through `TCP_INFO` — and when to move TCP into userspace.*
