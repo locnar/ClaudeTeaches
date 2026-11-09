@@ -4,7 +4,7 @@
 
 The main chapters target modern x86-64 (Intel/AMD). AArch64 is increasingly relevant to latency-sensitive work — AWS Graviton and Ampere Altra offer many cores, good perf-per-watt, and competitive cloud economics — and most of this book *transfers*: caches, branches, NUMA, lock-free design, kernel bypass, and the measurement discipline are architecture-independent in *principle*. But the **details that matter for the last nanoseconds** differ, and a few of them — chiefly the **weaker memory model** — change how you *reason about correctness*, not just performance. This appendix walks the differences chapter by chapter.
 
-The one-line summary: **ARM is a weakly-ordered, load/store, fixed-width-instruction architecture with a different cache-line size on server parts.** Each of those clauses has consequences below.
+The one-line summary: **ARM is a weakly-ordered, load/store, fixed-width-instruction architecture whose cache-line size is *not* guaranteed to be 64 bytes** (64 on Neoverse/Graviton, 128 on Apple cores, 256 on A64FX — verify per target, A.3). Each of those clauses has consequences below.
 
 ## A.1 The ARM memory model (`LDAR`/`STLR`, `DMB`) vs x86-TSO
 
@@ -15,7 +15,7 @@ x86 is **TSO (Total Store Order)**: a strong model where the only reordering the
 ARM (AArch64) is **weakly ordered**: the hardware may reorder loads and stores far more aggressively (load→load, load→store, store→store, store→load — almost anything to different addresses, subject to dependencies). The C++ memory model (Ch. 30) is the *same* portable abstraction, but on ARM the orderings you request are *not* free — they emit real instructions:
 
 - **`memory_order_acquire`/`release`** → `LDAR` (load-acquire) / `STLR` (store-release) — dedicated instructions that enforce the one-way barrier. They're cheaper than a full fence but not free (an x86 plain `mov` becomes an `LDAR`/`STLR` on ARM).
-- **`memory_order_seq_cst`** → `LDAR`/`STLR` (which on ARMv8 are sequentially-consistent w.r.t. each other) or an explicit `DMB ISH` (data memory barrier) for the stronger cases. Full `seq_cst` fences (`DMB`) are notably more expensive than on x86 — another reason to use the *weakest sufficient* ordering (Ch. 30).
+- **`memory_order_seq_cst`** → `LDAR`/`STLR` (which on ARMv8 are sequentially-consistent w.r.t. each other) or an explicit `DMB ISH` (data memory barrier) for the stronger cases. Be precise about *where* the asymmetry is: acquire/seq_cst *loads* and release/seq_cst *stores* that are plain `mov` on x86 become `LDAR`/`STLR` on ARM, and a standalone `atomic_thread_fence(seq_cst)` is a `DMB ISH`; x86's seq_cst *store*/fence (`xchg`/`mfence`, ~20–40 cycles plus a store-buffer drain — §30.5) is also expensive, and an ARM `STLR` is typically cheaper than it. On both architectures the lesson is the same — use the *weakest sufficient* ordering (Ch. 30); ARM just charges for the loads too.
 - **`memory_order_relaxed`** → plain `LDR`/`STR`, truly free — and on ARM the gap between relaxed and acquire/release is *visible*, so the discipline of using `relaxed` where correct (counters, statistics — Ch. 30) pays more than on x86.
 
 **Consequences for the concurrency chapters (Ch. 30–37):**
@@ -23,7 +23,28 @@ ARM (AArch64) is **weakly ordered**: the hardware may reorder loads and stores f
 - **Bugs hidden on x86 surface on ARM.** A seqlock (Ch. 35), lock-free queue (Ch. 34), or RCU/hazard-pointer scheme (Ch. 36) with a *missing or too-weak* `memory_order` may pass every test on x86 (TSO papers over it) and **fail on ARM** (the reordering actually happens). Porting to Graviton is an excellent way to *find* latent ordering bugs — and a reason to test on ARM even if you deploy on x86. Run the data-structure stress tests (Ch. 40) on ARM.
 - **Get the orderings *right*, not "it works on x86."** The portable rule was always "use the correct `memory_order`"; ARM *enforces* it. Tools like TSan (Ch. 40) and model checkers (CDSChecker, Ch. 40) catch what x86 hides.
 - **Fences cost more — minimize them.** `DMB`/seq_cst is pricier on ARM; the Ch. 30–32 advice to prefer acquire/release over seq_cst, and relaxed where sound, is more impactful here. A spinlock or queue tuned with full fences on x86 may want re-tuning to acquire/release on ARM.
-- **ARMv8.1-LSE atomics.** Older ARM did atomics with `LDXR`/`STXR` (load-exclusive/store-exclusive) retry loops; ARMv8.1 adds **LSE** (Large System Extensions) — single-instruction atomics (`LDADD`, `CAS`, `SWP`) that scale far better under contention. Build with `-march=armv8.2-a+lse` (or `-mcpu=neoverse-n1`/`-mcpu=neoverse-v1`) so your atomics (Ch. 30–34) use LSE — a real contended-throughput win on Graviton2/3.
+- **ARMv8.1-LSE atomics.** Older ARM did atomics with `LDXR`/`STXR` (load-exclusive/store-exclusive) retry loops; ARMv8.1 adds **LSE** (Large System Extensions) — single-instruction atomics (`LDADD`, `CAS`, `SWP`) that scale far better under contention. Build with `-march=armv8.2-a+lse` (or `-mcpu=neoverse-n1`/`-mcpu=neoverse-v1`) so your atomics (Ch. 30–34) use LSE *inline* — a real contended-throughput win on Graviton2/3.
+
+**Verify the codegen** (the §30.5 acquire/release listings are the x86 side; this is the AArch64 side). `int fetch_add(int* p) { return __atomic_fetch_add(p, 1, __ATOMIC_ACQ_REL); }`, `clang++ 18.1 --target=aarch64-linux-gnu -O2`:
+
+```asm
+; -march=armv8-a                     ; -march=armv8-a -moutline-atomics      ; -mcpu=neoverse-v1 (or -march=armv8.1-a)
+.L1: ldaxr  w8, [x0]                 ;   mov  x1, x0                          ;   mov     w8, #1
+     add    w9, w8, #1               ;   mov  w0, #1                          ;   ldaddal w8, w0, [x0]
+     stlxr  w10, w9, [x0]            ;   bl   __aarch64_ldadd4_acq_rel        ;   ret
+     cbnz   w10, .L1                 ;   ret            ; helper tests a CPU-feature flag,
+     mov    w0, w8 ; ret             ;                  ; then runs ldaddal or the LL/SC loop
+```
+
+The LL/SC loop can *fail and retry* under contention (`cbnz`), the out-of-line helper (GCC ≥ 10.1 emits it by default on AArch64; Clang needs `-moutline-atomics`) adds a call plus a feature-check branch per atomic, and only the `-mcpu` build gets the single `ldaddal`. Representative contended `fetch_add` on one shared counter, Graviton3 (c7g, Neoverse V1), GCC 13 `-O2`, ns/op per thread — **representative; measure your own** (Ch. 3):
+
+| threads | `-march=armv8-a` (LL/SC) | `-moutline-atomics` | `-mcpu=neoverse-v1` (inline LSE) |
+|---|---|---|---|
+| 1 | ~6 | ~8 | ~5 |
+| 4 | ~120 | ~70 | ~55 |
+| 16 | ~900 | ~260 | ~210 |
+
+The ordering of the columns — LL/SC worst at scale, out-of-line LSE close to inline — is the robust finding; the absolute numbers move with the part and the cache-line owner's distance.
 
 ## A.2 NEON/SVE/SVE2 vs AVX
 
@@ -31,17 +52,17 @@ The SIMD chapter (Ch. 29) ports in *concept* — data-parallel, layout-for-vecto
 
 - **NEON** is ARM's fixed-128-bit SIMD (the analog of SSE/AVX-128) — always present on AArch64, 128-bit lanes, intrinsics in `<arm_neon.h>`. The Ch. 29 layout/auto-vectorization advice applies; the intrinsics are different (`vaddq_f32` vs `_mm256_add_ps`), and the width is 128-bit (no direct 256/512-bit NEON).
 - **SVE / SVE2 (Scalable Vector Extension)** is ARM's answer to wide SIMD, with a twist: **vector-length-agnostic** code. You don't write to a fixed width; you write loops with *predicate*-driven, length-agnostic intrinsics and the *hardware* picks the vector length (128-2048 bits, implementation-defined). Graviton3 has SVE (256-bit); the *same binary* runs on a different SVE width without recompiling. This is a genuinely different model from AVX's fixed 128/256/512 — closer to "describe the data-parallel work, let the hardware size the vector."
-- **Practical guidance:** auto-vectorization (Ch. 29) via `-O3 -mcpu=native` (or `-march=armv8.2-a+sve` for SVE) gets you much of the way; hand-intrinsics need rewriting per-ISA (NEON ≠ AVX ≠ SVE), so prefer portable wrappers (`std::experimental::simd`, xsimd, Highway) where you must support both. The **downclocking** caveat (Ch. 29 — AVX-512 dropping frequency on some Intel parts) is *less* of an issue on ARM, but verify per-part. Measure (Ch. 3) — SVE's length-agnostic loops can beat or lag a hand-tuned NEON kernel depending on the workload.
+- **Practical guidance:** auto-vectorization (Ch. 29) via `-O3 -mcpu=native` (or `-march=armv8.2-a+sve` for SVE) gets you much of the way; hand-intrinsics need rewriting per-ISA (NEON ≠ AVX ≠ SVE), so prefer portable wrappers where you must support both: `std::experimental::simd` (Parallelism TS v2 `<experimental/simd>`, libstdc++ ≥ 11, standardized as `std::simd` in C++26 — Appendix H), xsimd, or Google Highway. The **downclocking** caveat (Ch. 29 — AVX-512 dropping frequency on some Intel parts) is *less* of an issue on ARM, but verify per-part. Measure (Ch. 3) — SVE's length-agnostic loops can beat or lag a hand-tuned NEON kernel depending on the workload.
 
 ## A.3 Cache-line size (64 vs 128 bytes) and false sharing
 
 A subtle, high-impact difference that directly hits Ch. 33 (false sharing) and Ch. 9 (layout):
 
-- **x86 server: 64-byte cache lines.** Everything in Ch. 7–9, 33 assumed 64. `hardware_destructive_interference_size` is 64.
+- **x86 server: 64-byte cache lines.** Everything in Ch. 7–9, 33 assumed 64. `hardware_destructive_interference_size` is 64 on GCC/Clang x86-64 (libstdc++ with `-std=c++17` or later; Clang/libc++ as of 18 does not define it).
 - **Some ARM server parts use 128-byte cache lines** (or a 128-byte cache-coherency/prefetch granule even where the L1 line is 64) — notably some Apple and certain server cores; Graviton/Neoverse are commonly 64 but **verify per-part** (`getconf LEVEL1_DCACHE_LINESIZE`, `/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size`). Where it's 128:
-  - **False-sharing padding must be 128 bytes** (Ch. 33), not 64 — a struct padded to a 64-byte line on x86 can *still* false-share on a 128-byte-line ARM part. Hard-coding `alignas(64)` is an x86 assumption; use `std::hardware_destructive_interference_size` (which reflects the target) or a per-arch constant.
+  - **False-sharing padding must be 128 bytes** (Ch. 33), not 64 — a struct padded to a 64-byte line on x86 can *still* false-share on a 128-byte-line ARM part. Hard-coding `alignas(64)` is an x86 assumption — but `std::hardware_destructive_interference_size` is **not** a reliable fix either: GCC 12/13 on AArch64 defines `__GCC_DESTRUCTIVE_SIZE` = **256** and `__GCC_CONSTRUCTIVE_SIZE` = 64 for generic *and* Neoverse tunings (chosen for A64FX's 256-byte lines), so `alignas(std::hardware_destructive_interference_size)` *quadruples* padding on a 64-byte-line Graviton part without buying anything. Use a per-arch constant you have measured on the target (A.3's `getconf`/sysfs query), and treat the standard constant as a compile-time hint whose value you print and check at build time, not as the truth.
   - **Struct sizing to "a cache line" (Ch. 9) changes** — a 64-byte hot struct is half a line on a 128-byte part; you may fit two hot structs per line and *want* to, or may need to re-pad.
-  - **`hardware_destructive_interference_size` differs** — and this is exactly why the standard provides it instead of a literal 64. Code that hard-codes 64 is not portable to 128-byte-line targets (Ch. 33).
+  - **`hardware_destructive_interference_size` differs** — the standard provides it so that code need not hard-code 64, but its value is a *compiler tuning default* (GCC: 64 on x86-64, 256 on AArch64; GCC also warns under `-Winterference-size` when an ABI-visible type depends on it), not a query of the running part. Code that hard-codes 64 is not portable to 128-byte-line targets (Ch. 33); code that trusts the constant blindly over-pads on Graviton.
 - **Action:** never hard-code the line size; query it or use the standard constants, and **re-run the false-sharing benchmarks (Ch. 33) on the actual ARM target** — padding tuned for 64 may not isolate on 128.
 
 ## A.4 Timers (`CNTVCT_EL0` vs `rdtsc`); `WFE`/`YIELD` vs `pause`
@@ -50,7 +71,7 @@ The timekeeping (Ch. 17) and spin (Ch. 32) chapters use x86-specific instruction
 
 - **Timestamp counter:** x86 `rdtsc`/`rdtscp` → ARM **`CNTVCT_EL0`** (the virtual count register), read via the `cntvct_el0` system register, with its frequency in **`CNTFRQ_EL0`**. Key differences (Ch. 17): ARM's counter is a *fixed-frequency* architectural counter (often ~25 MHz-1 GHz, *not* the core clock — so it's lower-resolution than `rdtsc`'s core-cycle granularity, but invariant by design and not tied to frequency scaling). You don't calibrate against frequency-scaling the way you might worry about on older x86 (Ch. 17's invariant-TSC discussion) — but the *resolution* is coarser, so very short intervals are less precise. Use `CNTFRQ_EL0` to convert ticks→ns. The Ch. 17 measurement discipline (serialize, beware reordering) applies; `CNTVCT_EL0` reads may need an `ISB` for ordering in tight measurement loops.
 - **Spin-wait hint:** x86 `pause` (Ch. 32, the spinlock backoff hint) → ARM **`YIELD`** (a weak hint) or, better, **`WFE`/`SEV`** (Wait For Event / Send Event). `WFE` is more powerful than `pause`: a core can `WFE` to sleep until another core `SEV`s or a monitored memory location changes (via the exclusive monitor) — enabling a *lower-power, lower-contention* spin than busy-polling with `YIELD`. For spinlocks and queue backoff (Ch. 32), `WFE`/`WFET` (timed, ARMv8.7) can beat a `pause` loop on power and on releasing SMT/pipeline resources. Tune the backoff (Ch. 32) with `WFE` on ARM rather than a direct `pause`→`YIELD` substitution.
-- **`std::this_thread::yield` / portable spin hints** map to these; for hand-tuned spins, use the ARM intrinsics (`__yield()`, `__wfe()`) under arch guards.
+- **`std::this_thread::yield` / portable spin hints** map to these; for hand-tuned spins, use Clang's `<arm_acle.h>` hint intrinsics (`__yield()`, `__wfe()`, `__sev()`) or — portably across GCC and Clang, since GCC's AArch64 `arm_acle.h` does not define the hint intrinsics — `asm volatile("yield" ::: "memory")` / `asm volatile("wfe" ::: "memory")` under `#if defined(__aarch64__)`.
 
 ## A.5 big.LITTLE / heterogeneous cores and SMT differences
 
@@ -64,9 +85,9 @@ The pinning/SMT chapters (Ch. 42–43) assume *homogeneous* cores; ARM often isn
 
 The build (Ch. 22) and security-mitigation (Ch. 6) chapters need ARM-specific flags:
 
-- **`-mcpu=` is the key ARM flag** (Ch. 22, Appendix D): it sets *both* the architecture and the tuning for a specific core — e.g. `-mcpu=neoverse-n1` (Graviton2), `-mcpu=neoverse-v1` (Graviton3), `-mcpu=ampere1` (Altra), or `-mcpu=native` on the target. This is more important on ARM than `-march`/`-mtune` are on x86 because it pulls in the right extensions (LSE atomics — A.1, SVE — A.2, the right pipeline model). **Always set `-mcpu` for the deployment target** — a generic `-march=armv8-a` build leaves LSE atomics and SVE on the table and tunes for no particular core.
+- **`-mcpu=` is the key ARM flag** (Ch. 22, Appendix D): it sets *both* the architecture and the tuning for a specific core — e.g. `-mcpu=neoverse-n1` (Graviton2 **and** Ampere Altra/Altra Max — all Neoverse N1 cores), `-mcpu=neoverse-v1` (Graviton3), `-mcpu=neoverse-v2` (Graviton4), `-mcpu=ampere1` (**AmpereOne only** — its Armv8.6 features trap with an illegal instruction on Altra), or `-mcpu=native` on the target. This is more important on ARM than `-march`/`-mtune` are on x86 because it pulls in the right extensions (LSE atomics — A.1, SVE — A.2, the right pipeline model). **Always set `-mcpu` for the deployment target** — a generic `-march=armv8-a` build leaves *inline* LSE atomics and SVE on the table and tunes for no particular core. (With GCC ≥ 10.1's default `-moutline-atomics` — Clang needs the flag spelled out — a generic build still *reaches* LSE through runtime-dispatched out-of-line helpers such as `__aarch64_ldadd4_acq_rel`: a call plus a feature-check branch per atomic, instead of either the LL/SC loop or the single `ldaddal`; see the listing in A.1.)
 - **`-march=armv8.2-a+lse+...`** when you must support a *range* of ARM parts but still want specific extensions — name them explicitly (`+lse`, `+sve`, `+crypto`).
-- **Spec-exec mitigations (Ch. 6):** ARM has its own Spectre-class variants and mitigations (`CSDB`, `SB` speculation barriers, the `__builtin_load_no_speculate` pattern, and kernel `mitigations=`). The *cost/benefit* on an isolated, single-tenant box (Ch. 6, 42, 43, 45) is the same *decision* — you may tune mitigations down on a controlled box — but the specific instructions/knobs differ, and the microarchitectural exposure differs per core. The Ch. 6 reasoning ("measure the cost, decide per box given the threat model") transfers; the specifics are ARM's.
+- **Spec-exec mitigations (Ch. 6):** ARM has its own Spectre-class variants and mitigations (`CSDB`, `SB` speculation barriers, GCC's `__builtin_speculation_safe_value(val, failval)` builtin — GCC 9+, emits a `CSDB`-based sequence on AArch64 and `lfence` on x86, pairs with `-mtrack-speculation`; the accepted replacement for Arm's never-merged `__builtin_load_no_speculate` proposal; Clang has no equivalent builtin — and kernel `mitigations=`). The *cost/benefit* on an isolated, single-tenant box (Ch. 6, 42, 43, 45) is the same *decision* — you may tune mitigations down on a controlled box — but the specific instructions/knobs differ, and the microarchitectural exposure differs per core. The Ch. 6 reasoning ("measure the cost, decide per box given the threat model") transfers; the specifics are ARM's.
 - **Frequency/turbo (Ch. 6):** server ARM (Graviton/Altra) often runs at a *fixed* frequency with *no turbo* — which is actually **good for determinism** (Ch. 6: no frequency-scaling jitter, no turbo-then-throttle), one of the quiet-box goals achieved by default. Fewer C-states/P-states to tame than x86.
 
 ## A.7 Where Graviton in the cloud fits (and where bare-metal still wins)

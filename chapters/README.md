@@ -1002,7 +1002,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - D.5 Inlining/layout (`-finline-limit`, `-freorder-blocks-and-partition`, `-falign-*`)
 - D.6 LTO/PGO/BOLT
 - D.7 Diagnostics (`-Wpadded`, `-Wfloat-equal`, `-fopt-info`) and sanitizers
-- D.8 A representative hot-path build line
+- D.8 Hardening and speculative-execution mitigation flags (CET, stack protector, `_FORTIFY_SOURCE`, PIE, retpolines)
+- D.9 A representative hot-path build line
 
 ### [Appendix E — Latency Numbers Every Trading Developer Should Know](appendix-E-latency-numbers.md)
 - E.1 The table
