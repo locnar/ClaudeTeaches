@@ -78,6 +78,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 5.4.1 Debugging optimized and LTO builds
   - 5.4.2 Record/replay, reverse debugging, and core-dump analysis
   - 5.4.3 Production tracing without perturbing the hot path
+  - 5.4.4 Looking inside a live process without stopping the hot thread
+  - 5.4.5 Finding the corrupting write in a zero-allocation design
 - 5.5 Pitfalls & anti-patterns: the observer effect and optimized-out state
 - 5.6 Exercises & checklist
 
@@ -1011,6 +1013,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 78.4.3 Supervisor/watchdog, heartbeats and liveness
   - 78.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
   - 78.4.5 Symbol/venue sharding (core dumps → Ch. 79)
+  - 78.4.6 Divergence forensics and determinism auditing
 - 78.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 - 78.6 Exercises & checklist
 
