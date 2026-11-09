@@ -44,22 +44,35 @@ Two things to measure: the **latency/throughput of the intrinsics** (so you know
 #include <random>
 #include <chrono>
 
+// The mode is a template parameter, resolved BEFORE the timed loop (a strcmp per element would
+// cost more than the ~1-cycle instruction being measured).
+enum class Op { Tzcnt, Popcnt, Scan };
+template <Op O>
+[[gnu::noinline]] std::uint64_t run(const std::vector<std::uint64_t>& w, int reps) {
+    std::uint64_t acc = 0;
+    for (int r = 0; r < reps; ++r)
+        for (std::uint64_t x : w) {
+            if constexpr (O == Op::Tzcnt)       acc += std::countr_zero(x);         // one instruction
+            else if constexpr (O == Op::Popcnt) acc += std::popcount(x);            // one instruction
+            else { int p = 0; while (!(x & 1)) { ++p; x >>= 1; } acc += p; }        // NAIVE loop
+            asm volatile("" : "+r"(acc));   // keep each result live; no vectorizing across elements
+        }
+    return acc;
+}
+
 int main(int argc, char** argv) {
     const char* mode = argc > 1 ? argv[1] : "tzcnt";
     constexpr int N = 1 << 20, REPS = 64;
     std::vector<std::uint64_t> w(N);
     std::mt19937_64 rng(1);
-    for (auto& x : w) x = rng() | 1;                      // ensure non-zero (a free slot exists)
+    // Non-zero words whose FIRST set bit sits at a uniformly random position 0..63 — a realistic
+    // "first free slot" query. (rng() | 1 would put it at bit 0 every time: the scan would never loop.)
+    for (auto& x : w) x = (rng() | 1) << (rng() & 63);
 
     auto t0 = std::chrono::steady_clock::now();
-    std::uint64_t acc = 0;
-    for (int r = 0; r < REPS; ++r)
-        for (int i = 0; i < N; ++i) {
-            std::uint64_t x = w[i];
-            if (!std::strcmp(mode, "tzcnt"))      acc += std::countr_zero(x);     // one instruction
-            else if (!std::strcmp(mode, "popcnt")) acc += std::popcount(x);       // one instruction
-            else { int p = 0; while (!(x & 1)) { ++p; x >>= 1; } acc += p; }      // NAIVE loop
-        }
+    std::uint64_t acc = !std::strcmp(mode, "tzcnt")  ? run<Op::Tzcnt>(w, REPS)
+                      : !std::strcmp(mode, "popcnt") ? run<Op::Popcnt>(w, REPS)
+                                                     : run<Op::Scan>(w, REPS);
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
     std::printf("%-7s acc=%llu  %.3f ns/op\n", mode, (unsigned long long)acc, ns/((double)REPS*N));
@@ -67,13 +80,13 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, pinned, turbo off (illustrative). Two harness points (Appendix L): the mode is a template parameter chosen *before* the clock starts (an earlier draft had `strcmp(mode, …)` inside the loop — two PLT calls per element against a 1-cycle instruction), and the test words have their first set bit at a *random* position (an earlier draft's `rng() | 1` put it at bit 0 every time, so the "scan" never looped and all three modes measured the same add):
 
 ```
                     ns / op       notes
-tzcnt (countr_zero) ~0.4 ns       one ~3-cyc instruction, pipelined
-popcnt (popcount)   ~0.4 ns       one ~3-cyc instruction
-scan (naive loop)   ~2-8 ns       data-dependent loop + branch mispredicts (Ch. 13)
+tzcnt (countr_zero) ~0.35 ns      one 3-cycle-latency, 1/cycle instruction; the loop runs at ~1 cycle/element
+popcnt (popcount)   ~0.35 ns      same
+scan (naive loop)   ~17 ns        ~32 iterations on average (3 instructions each) + one mispredict at exit — ~50x
 
 intrinsic latency/throughput (Agner Fog / llvm-mca):
    popcnt/lzcnt/tzcnt   ~3 cyc latency, 1/cyc throughput          (cheap everywhere)
@@ -81,7 +94,7 @@ intrinsic latency/throughput (Agner Fog / llvm-mca):
    pdep/pext  Intel:    ~3 cyc      |   AMD pre-Zen3: ~tens-hundreds cyc (microcoded!)  <- §28.6
 ```
 
-Read it the Ch. 11/13 way: the intrinsic is a flat ~3-cycle op; the naive scan is a *variable-length loop with a data-dependent branch* (Ch. 13) whose cost depends on where the first set bit is and mispredicts along the way — several × slower and with a tail. The single instruction is both faster and *deterministic*. The op-latency block is the cost model to keep: `popcnt`/`lzcnt`/`tzcnt`/`blsr` are cheap and pipelined (use freely), while **`pdep`/`pext` carry the vendor warning** (§28.6) — verify the target before relying on them. As always, confirm the compiler emitted the instruction (§28.5): `std::countr_zero` *should* be a single `tzcnt`, but check.
+Read it the Ch. 11/13 way: the intrinsic is a flat ~3-cycle op; the naive scan is a *variable-length loop with a data-dependent branch* (Ch. 13) whose cost depends on where the first set bit is (0 to 63 iterations) and mispredicts at its exit — ~50× slower on average and with a tail that the single instruction simply does not have. The single instruction is both faster and *deterministic*. The op-latency block is the cost model to keep: `popcnt`/`lzcnt`/`tzcnt`/`blsr` are cheap and pipelined (use freely), while **`pdep`/`pext` carry the vendor warning** (§28.6) — verify the target before relying on them. As always, confirm the compiler emitted the instruction (§28.5): `std::countr_zero` *should* be a single `tzcnt`, but check.
 
 ## 28.4 Techniques
 

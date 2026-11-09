@@ -48,17 +48,21 @@ Two measurements: the **vectorization throughput win** on batch work, and the **
 
 ```cpp
 // simd.cpp — scalar vs auto-vectorized vs AVX-512 dot product; observe throughput.
-// Build:  g++ -O3 -std=c++20 -march=native simd.cpp -o simd          (auto-vec)
-//         g++ -O3 -std=c++20 -mavx2 simd.cpp -o simd_avx2            (cap at AVX2)
-//         g++ -O3 -std=c++20 -mno-avx simd.cpp -o simd_sse           (SSE only)
-// Run pinned, turbo policy fixed:  taskset -c 2 ./simd
+// Build:  g++ -O3 -std=c++20 -march=native -ffast-math -mprefer-vector-width=512 simd.cpp -o simd_avx512
+//         g++ -O3 -std=c++20 -march=native -ffast-math simd.cpp -o simd_avx2      (GCC/Clang default to 256-bit on AVX-512 parts)
+//         g++ -O3 -std=c++20 -mno-avx -ffast-math simd.cpp -o simd_sse            (SSE only)
+//         g++ -O3 -std=c++20 -march=native simd.cpp -o simd_strict                (NO fast-math: the reduction stays in order)
+// Run pinned, turbo off:  taskset -c 2 ./simd_avx512   (etc.)
 #include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <chrono>
 
 // restrict (Ch. 21) so the compiler may vectorize; SoA float arrays (Ch. 8).
-float dot(const float* __restrict a, const float* __restrict b, int n) {
+// noinline: an inlined pure kernel with loop-invariant inputs is exactly what the optimizer hoists
+// or outer-loop-vectorizes across REPS (GCC 13 did: 8 reps at a time, so the strict build measured
+// the same as the vectorized ones). The call boundary + the barrier below make every rep a real dot.
+[[gnu::noinline]] float dot(const float* __restrict a, const float* __restrict b, int n) {
     float s = 0.f;
     for (int i = 0; i < n; ++i) s += a[i] * b[i];   // needs -ffast-math OR multiple accumulators to vectorize the reduction
     return s;
@@ -69,7 +73,10 @@ int main() {
     std::vector<float> a(N, 1.0001f), b(N, 0.9999f);
     auto t0 = std::chrono::steady_clock::now();
     float s = 0;
-    for (long r = 0; r < REPS; ++r) s += dot(a.data(), b.data(), N);
+    for (long r = 0; r < REPS; ++r) {
+        s += dot(a.data(), b.data(), N);
+        asm volatile("" : "+x"(s) :: "memory");        // Appendix L: s is live, memory may have changed
+    }
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
     std::printf("dot s=%g  %.4f ns/elem\n", (double)s, ns/((double)REPS*N));
@@ -77,25 +84,27 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, AVX-512), pinned, turbo off (illustrative; build with `-ffast-math` or split accumulators so the reduction vectorizes — Ch. 27):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz, AVX-512), GCC 13 with the per-row flags above, Linux 6.x, pinned, turbo off (illustrative; the strict row is the same source without `-ffast-math`, so the reduction must stay in order — Ch. 27). The kernel is `noinline` and each rep passes an asm barrier: an earlier draft let GCC 13 outer-loop-vectorize the *REPS* loop of an inlined, loop-invariant `dot`, so the strict build timed the same as the vector ones:
 
 ```
-   build / width            ns / elem     speedup    note
-   SSE (4-wide)              ~0.50 ns       1.0x      baseline 128-bit
-   AVX2 (8-wide)             ~0.26 ns       ~1.9x     256-bit; mild downclock
-   AVX-512 (16-wide)         ~0.16 ns       ~3.1x     512-bit; more downclock (Ice Lake: mild)
-   scalar (no vec)           ~1.6 ns        0.3x      reduction didn't vectorize (no -ffast-math)
+   build / width                                   ns / elem     speedup    note
+   SSE (4-wide, -mno-avx -ffast-math)               ~0.34 ns       1.0x      mulps + addps, one vector accumulator: 4 cycles per 4 elements
+   AVX2 (8-wide, -march=native -ffast-math)         ~0.17 ns       ~2x       vfmadd ymm — GCC/Clang's DEFAULT width on AVX-512 parts
+   AVX-512 (16-wide, + -mprefer-vector-width=512)   ~0.09 ns       ~4x       vfmadd zmm; opt-in only
+   strict (no -ffast-math)                          ~1.4 ns        0.25x     the in-order reduction: one vaddss per element, 4-cycle chain
 ```
 
-And the **downclocking** measurement — the one that matters for a latency box. Run a heavy AVX-512 kernel in a loop on one core while timing a *scalar* latency-sensitive task; compare the scalar task's latency with the SIMD load present vs absent, and watch the core frequency (`perf stat -e cycles,ref-cycles`, or `turbostat`):
+(All three vector rows are latency-bound on GCC's single vector accumulator — one FMA per 4 cycles — not throughput-bound; `-funroll-loops`, or Clang's 4-way interleaving, roughly doubles them again. The AVX-512 row needs `-mprefer-vector-width=512`: both compilers default to 256-bit vectors on Intel AVX-512 targets precisely because of the frequency effect below. And GCC's strict build *reports* "loop vectorized" — it is an in-order reduction, `vmulps` feeding a serial `vaddss` chain; Clang leaves it scalar and says so. Look for packed `vaddps`/`vfmadd` in the asm, §29.5, not at the optimizer's remark.)
+
+And the **downclocking** measurement — the one that matters for a latency box. Turbo is **on** for this experiment (the AVX-512 license drop is invisible at a fixed 2.9 GHz). Interleave, in *one* pinned thread, bursts of heavy `_mm512_fmadd_ps` work with a timed scalar section — two processes cannot share one core without time-slicing noise that swamps a 100 ns measurement — and watch the core frequency (`perf stat -e cycles,ref-cycles`, or `turbostat`):
 
 ```
-   scalar task, core idle otherwise           ~100 ns   @ ~3.5 GHz (full turbo)
-   scalar task, while heavy AVX-512 on core    ~118 ns   @ ~3.0 GHz  <- downclock taxed the scalar path
-   (effect lingers ~ms after the SIMD stops; can affect the SMT sibling — Ch. 43)
+   scalar task, no SIMD in the preceding ms        ~100 ns   @ ~3.5 GHz (full turbo)
+   scalar task, right after a heavy AVX-512 burst   ~118 ns   @ ~3.0 GHz  <- downclock taxed the scalar path
+   (the lower license lingers ~ms after the SIMD stops; it is per core, so it also hits the SMT sibling — Ch. 43)
 ```
 
-Read it two ways. (1) **The kernel win is real**: vectorization gives ~2-3× on the dot product (and the scalar row shows the reduction *didn't* vectorize without FP-reassociation permission — Ch. 27 — a common silent miss). (2) **The downclock is also real**: the *scalar* task got ~18% slower while AVX-512 ran on the core, because the core dropped frequency — so on a latency core, the AVX-512 kernel's local speedup can be *outweighed* by slowing the critical path around it. The decision rule: **SIMD wins where the core is SIMD-dominated (a batch/risk core); it can lose where a little SIMD shares a core with latency-critical scalar work.** Measure *both* the kernel speedup *and* the frequency effect on the surrounding work (`turbostat`, the scalar-task latency with/without SIMD) before putting wide SIMD on a tick-to-trade core. (Modern cores downclock far less; check yours.)
+Read it two ways. (1) **The kernel win is real**: vectorization gives ~2-4× on the dot product over SSE and ~4-16× over the strict scalar chain (and the strict row shows the reduction *didn't* really vectorize without FP-reassociation permission — Ch. 27 — a common silent miss). (2) **The downclock is also real**: the *scalar* task got ~18% slower while AVX-512 ran on the core, because the core dropped frequency — so on a latency core, the AVX-512 kernel's local speedup can be *outweighed* by slowing the critical path around it. The decision rule: **SIMD wins where the core is SIMD-dominated (a batch/risk core); it can lose where a little SIMD shares a core with latency-critical scalar work.** Measure *both* the kernel speedup *and* the frequency effect on the surrounding work (`turbostat`, the scalar-task latency with/without SIMD) before putting wide SIMD on a tick-to-trade core. (Modern cores downclock far less; check yours.)
 
 ## 29.4 Techniques
 
@@ -179,7 +188,7 @@ The verification habits: **for a kernel you expect to vectorize, disassemble and
 
 **Exercises**
 
-1. **Width sweep.** Build `simd.cpp` at SSE / AVX2 / AVX-512 (`-mno-avx` / `-mavx2` / `-march=native`), with `-ffast-math` so the reduction vectorizes. Measure ns/elem; confirm ~2× per width doubling (minus downclock). Disassemble (§29.5) — `xmm`/`ymm`/`zmm`?
+1. **Width sweep.** Build `simd.cpp` at SSE / AVX2 / AVX-512 (`-mno-avx` / `-march=native` / `-march=native -mprefer-vector-width=512`), with `-ffast-math` so the reduction vectorizes. Measure ns/elem; confirm ~2× per width doubling (minus downclock). Disassemble (§29.5) — `xmm`/`ymm`/`zmm`?
 2. **Why it didn't vectorize.** Build *without* `-ffast-math` and *without* `restrict`; use `-fopt-info-vec-missed`/`-Rpass-missed=loop-vectorize` to see the reasons. Add `restrict` (Ch. 21), then FP-reassoc (Ch. 27), and watch each unblock vectorization (§29.4.1).
 3. **Measure downclocking.** Run a heavy AVX-512 loop on a core while timing a scalar latency task on the *same* core; record the scalar task's latency and the core frequency (`turbostat`) with/without the SIMD load. Quantify the downclock tax (§29.3). Repeat capped at AVX2 — is the *overall* result better?
 4. **SoA vs AoS.** Vectorize a computation over `Order{price,qty}[]` (AoS) vs `prices[]`,`qtys[]` (SoA). Confirm (asm + `-fopt-info`) the AoS version gathers/doesn't vectorize and SoA does; measure (§29.4.1, Ch. 8).

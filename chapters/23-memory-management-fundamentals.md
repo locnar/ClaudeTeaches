@@ -47,13 +47,13 @@ The unifying model: **stack allocation is one instruction with no tail; heap all
 
 ## 23.3 Measure it: allocation-cost and page-fault distribution
 
-Allocation cost is a **distribution** (Ch. 1, 3), so measuring the mean is exactly the wrong thing — the story is in the tail and in the page faults. Two measurements: (1) the per-call cost distribution of `new`/`delete` vs a stack/reused buffer, and (2) the page-fault count, which reveals the hidden kernel cost. Use `perf stat`'s fault counters and an HdrHistogram-style tail capture (Ch. 3).
+Allocation cost is a **distribution** (Ch. 1, 3), so measuring the mean is exactly the wrong thing — the story is in the tail and in the page faults. Three modes separate the two costs that "allocation" hides: `reuse` (a pre-faulted buffer: the zero-allocation baseline), `heap` (`new` + touch + `delete` of the same 4 KiB every iteration: the *allocator's* bookkeeping — glibc hands the just-freed, still-resident chunk straight back, so this does **not** page-fault), and `fresh` (`new` + touch, never freed: every iteration first-touches a page the kernel has never mapped — the *page-fault* cost). Use `perf stat`'s fault counters and an HdrHistogram-style tail capture (Ch. 3).
 
 ```cpp
-// alloccost.cpp — distribution of new/delete vs reused buffer; watch page faults.
+// alloccost.cpp — distribution of new/delete vs reused buffer vs never-touched memory; watch page faults.
 // Build: g++ -O2 -std=c++20 -march=native alloccost.cpp -o alloccost
-// Run pinned:  taskset -c 2 ./alloccost heap   |   ./alloccost reuse
-//   page faults:  perf stat -e minor-faults,major-faults,page-faults ./alloccost heap
+// Run pinned:  taskset -c 2 ./alloccost reuse  |  ./alloccost heap  |  ./alloccost fresh
+//   page faults:  perf stat -e minor-faults,major-faults ./alloccost fresh
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -68,45 +68,51 @@ static inline std::uint64_t ns_now() {
 }
 
 int main(int argc, char** argv) {
-    bool heap = (argc < 2) || std::strcmp(argv[1], "heap") == 0;
-    constexpr int N = 1'000'000;
-    constexpr std::size_t SZ = 4096;                 // one page worth
-    std::vector<std::uint32_t> samples; samples.reserve(N);
+    const char* mode = argc > 1 ? argv[1] : "heap";
+    const bool heap  = !std::strcmp(mode, "heap");    // new + touch + delete, same size every time
+    const bool fresh = !std::strcmp(mode, "fresh");   // new + touch, NEVER freed: every page is new
+    constexpr int N = 250'000;                        // fresh mode retains N * 4 KiB = ~1 GiB
+    constexpr std::size_t SZ = 4096;                  // one page worth
+    std::vector<std::uint32_t> samples(N);            // sized (and so faulted in) BEFORE the loop
 
     alignas(64) static unsigned char reuse_buf[SZ];   // pre-allocated, reused every iter
+    std::vector<unsigned char*> keep; if (fresh) keep.reserve(N);
     std::uint64_t sink = 0;
 
     for (int i = 0; i < N; ++i) {
         std::uint64_t t0 = ns_now();
-        if (heap) {
+        if (heap || fresh) {
             auto* p = new unsigned char[SZ];          // ALLOCATE on the "hot path"
-            std::memset(p, i & 0xFF, SZ);             // first-touch → may PAGE FAULT
+            std::memset(p, i & 0xFF, SZ);             // touch it: in `fresh` this is a FIRST touch → page fault
             sink += p[i % SZ];
-            delete[] p;                               // ... and free
+            asm volatile("" :: "r"(p) : "memory");    // the block escapes: no allocation elision (Appendix L)
+            if (heap) delete[] p; else keep.push_back(p);   // heap: free (glibc keeps the chunk resident)
         } else {
             std::memset(reuse_buf, i & 0xFF, SZ);     // reuse: no alloc, already faulted
             sink += reuse_buf[i % SZ];
+            asm volatile("" :: "r"(reuse_buf) : "memory");
         }
-        samples.push_back(std::uint32_t(ns_now() - t0));
+        samples[i] = std::uint32_t(ns_now() - t0);
     }
+    for (auto* p : keep) delete[] p;
     std::sort(samples.begin(), samples.end());
     auto pct = [&](double p){ return samples[std::size_t(p * (N - 1))]; };
     std::printf("%-6s sink=%llu  p50=%u  p99=%u  p99.9=%u  max=%u ns\n",
-                heap ? "heap" : "reuse", (unsigned long long)sink,
-                pct(0.50), pct(0.99), pct(0.999), samples.back());
+                mode, (unsigned long long)sink, pct(0.50), pct(0.99), pct(0.999), samples.back());
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2`, pinned, turbo off (illustrative; the *shape of the distribution* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.x (THP = `madvise`, so `fresh` runs on 4 KiB pages), pinned, turbo off (illustrative; the *shape of the distribution* is the point; every sample includes two ~20 ns `clock_gettime` reads):
 
 ```
-                  p50        p99        p99.9       max        page-faults (perf)
-heap (new+touch)  ~120 ns    ~480 ns    ~2,800 ns   ~9,000 ns  ~1 per iter (minor)  <- the TAIL + faults
-reuse (buffer)    ~80 ns     ~95 ns     ~110 ns     ~250 ns    ~0 (warmed once)     <- flat, no tail
+                           p50        p99        p99.9       max          minor-faults (perf)
+reuse  (buffer)            ~80 ns     ~95 ns     ~110 ns     ~3,000 ns    ~0 (faulted once)      <- flat: the baseline
+heap   (new+touch+delete)  ~110 ns    ~130 ns    ~250 ns     ~5,000 ns    ~0 (chunk recycled)    <- bookkeeping, NO faults
+fresh  (new+touch, kept)   ~500 ns    ~900 ns    ~4,000 ns   ~60,000 ns   ~1 per iteration       <- the kernel on the hot path
 ```
 
-Read it the Ch. 1 way: **the means are not far apart, but the tails are a different universe.** The reuse path is *flat* — same work every iteration, no allocation, the buffer faulted in once and stays resident — so p99.9 ≈ p50. The heap path has a p99.9 ~25× its median and a max in the *microseconds*, because some iterations hit the allocator's slow path and, critically, the `memset` first-touches fresh pages that **page-fault** (the `~1 minor-fault per iter` in `perf` is the smoking gun: the cost isn't in `new`'s bookkeeping, it's in the *kernel* wiring up memory). This is the entire argument for steady-state-zero-allocation in one chart: allocation doesn't slow your average much, it *destroys your tail* and drags the kernel onto the hot path. The fingerprint to recognize: **a hot path with non-zero `minor-faults`/`page-faults` in `perf stat`, and a p99.9 far above p50** — that's hidden allocation (or un-warmed memory), and §23.4 is the cure.
+Read it the Ch. 1 way: **the medians are a factor apart, but the tails are a different universe.** The reuse path is *flat* — same work every iteration, no allocation, the buffer faulted in once and stays resident — so p99.9 ≈ p50 (the rare max is an interrupt, not the code). The `heap` row shows what `new`/`delete` themselves cost when the allocator is warm: ~30 ns of bookkeeping and a modest tail from its slow paths — *no page faults*, because glibc coalesces the freed 4 KiB into the top chunk and re-carves the same resident memory next time (trimming only triggers above `M_TRIM_THRESHOLD`, 128 KiB). The `fresh` row is the other cost, isolated: when the touched memory is *new to the kernel*, every iteration takes a minor fault — trap, page allocation, 4 KiB zeroing, PTE install — ~0.4 µs at best, tens of µs when reclaim or compaction gets involved (the `~1 minor-fault per iteration` in `perf` is the smoking gun). A growing container, a fresh arena, a first-time-touched pool: all `fresh`. This is the entire argument for steady-state-zero-allocation in one chart: allocation bookkeeping is a tax on the median, but *un-faulted memory* destroys the tail and drags the kernel onto the hot path. The fingerprint to recognize: **a hot path with non-zero `minor-faults` in `perf stat`, and a p99.9 far above p50** — that's hidden allocation or un-warmed memory, and §23.4 (pre-fault, then reuse) is the cure.
 
 ## 23.4 Techniques
 
@@ -146,7 +152,7 @@ Allocating memory isn't enough — until each page is *touched*, the first hot-p
 
 **Exercises**
 
-1. **Measure the tail and the faults.** Build `alloccost.cpp`; run `heap` vs `reuse` pinned, and `perf stat -e minor-faults,major-faults,page-faults` on each. Confirm: similar p50, wildly different p99.9, and ~1 minor-fault/iter on `heap`, ~0 on `reuse`. Where does the heap tail come from — `new`'s bookkeeping or the page fault?
+1. **Measure the tail and the faults.** Build `alloccost.cpp`; run `reuse`, `heap` and `fresh` pinned, and `perf stat -e minor-faults,major-faults` on each. Confirm: `heap` costs ~30 ns over `reuse` at the median with a modest tail and **no** extra faults (glibc recycles the chunk), while `fresh` shows ~1 minor-fault per iteration and a p99.9 in the microseconds. Where does the heap tail come from — `new`'s bookkeeping or the page fault?
 2. **Catch hidden allocations.** Override global `operator new`/`delete` to count calls (or `abort()`); run a "hot loop" using `std::string`, `vector::push_back` without `reserve`, and a capturing `std::function`. How many allocations does the "allocation-free" loop actually do? Now fix each (SBO/`reserve`/concrete callable) to reach zero.
 3. **Pre-faulting.** Allocate a large buffer, then time the first write to each page *without* pre-faulting vs *with* a warm-up pass that touches every page first. Show the un-warmed first-touch faults (the §23.4.2 effect); confirm with `perf` minor-faults.
 4. **`mlockall` and majors.** Under artificial memory pressure (allocate most of RAM), measure hot-path tails with and without `mlockall`/swap. Reproduce a major fault and its millisecond cost; show `mlockall` prevents it.

@@ -58,35 +58,40 @@ The unifying model: **pick the allocator whose freeing discipline matches your l
 
 ## 24.3 Measure it: pool vs `new`/`delete` latency
 
-The claim is determinism (no tail) and speed, so measure the **distribution** (Ch. 1, 3), not the mean — the same lesson as Ch. 23. Allocate-and-free a fixed-size object in a hot loop two ways: general `new`/`delete` vs a simple free-list **pool**.
+The claim is determinism (no tail) and speed, so measure the **distribution** (Ch. 1, 3), not the mean — the same lesson as Ch. 23. Allocate-and-free a fixed-size object in a hot loop two ways: general `new`/`delete` vs a simple free-list **pool**. Two harness details matter (Appendix L): each object *escapes* through an `asm volatile` barrier, because otherwise GCC and Clang elide the `new`/`delete` pair outright (`-fallocation-dce`, on at `-O2`) and dead-store-eliminate the pool's pop/push — an earlier draft timed a single `add`; and each sample covers a burst of 64 alloc/free pairs, because a `clock_gettime` read costs ~20 ns and no single-operation sample can resolve a 4 ns pool.
 
 ```cpp
 // pool.cpp — fixed-size object alloc/free: global new/delete vs a free-list pool.
 // Build: g++ -O2 -std=c++20 -march=native pool.cpp -o pool
 // Run pinned:  taskset -c 2 ./pool heap   |   ./pool pool
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <vector>
 #include <algorithm>
 #include <chrono>
+#include <new>
 
 struct Order { std::int64_t id, px; std::int32_t qty; char side; char pad[3]; }; // ~24B
 
-// A minimal fixed-size pool: pre-carved slots on a free-list.
+// A minimal fixed-size pool: pre-carved slots on a free-list. The link is read/written with memcpy —
+// same codegen as a pointer store, and no type-punning UB (Ch. 21): a slot holds no void* object.
 class Pool {
     std::vector<std::byte> slab_;
     void* free_head_ = nullptr;
+    static void  set_next(void* slot, void* next) { std::memcpy(slot, &next, sizeof next); }
+    static void* get_next(void* slot) { void* n; std::memcpy(&n, slot, sizeof n); return n; }
 public:
     Pool(std::size_t n) : slab_(n * sizeof(Order)) {       // ONE allocation, at startup
         for (std::size_t i = 0; i < n; ++i) {              // thread the free-list
             void* p = slab_.data() + i * sizeof(Order);
-            *reinterpret_cast<void**>(p) = free_head_;
+            set_next(p, free_head_);
             free_head_ = p;
         }
     }
-    void* allocate() { void* p = free_head_; free_head_ = *reinterpret_cast<void**>(p); return p; }
-    void  deallocate(void* p) { *reinterpret_cast<void**>(p) = free_head_; free_head_ = p; }
+    void* allocate() { void* p = free_head_; free_head_ = get_next(p); return p; }
+    void  deallocate(void* p) { set_next(p, free_head_); free_head_ = p; }
 };
 
 static inline std::uint64_t ns_now() {
@@ -96,40 +101,48 @@ static inline std::uint64_t ns_now() {
 
 int main(int argc, char** argv) {
     bool use_pool = (argc > 1) && std::strcmp(argv[1], "pool") == 0;
-    constexpr int N = 2'000'000;
+    constexpr int N = 200'000;                 // samples
+    constexpr int K = 64;                      // alloc/free PAIRS per sample: amortises the ~20 ns clock read
     Pool pool(1024);
-    std::vector<std::uint32_t> samples; samples.reserve(N);
+    std::vector<std::uint32_t> samples(N);     // sized, hence faulted in, before the loop
+    Order* live[K];
     std::uint64_t sink = 0;
 
     for (int i = 0; i < N; ++i) {
         std::uint64_t t0 = ns_now();
         if (use_pool) {
-            Order* o = new (pool.allocate()) Order{i, 100 + i, 1, 'B', {}};   // placement-new
-            sink += o->px; o->~Order(); pool.deallocate(o);                   // destroy + return
+            for (int k = 0; k < K; ++k) {                                      // a burst of K orders
+                live[k] = new (pool.allocate()) Order{i, 100 + i + k, 1, 'B', {}};   // placement-new
+                asm volatile("" :: "r"(live[k]) : "memory");                   // the object escapes: no DSE
+            }
+            for (int k = K - 1; k >= 0; --k) { sink += live[k]->px; live[k]->~Order(); pool.deallocate(live[k]); }
         } else {
-            Order* o = new Order{i, 100 + i, 1, 'B', {}};                     // global new
-            sink += o->px; delete o;                                          // global delete
+            for (int k = 0; k < K; ++k) {
+                live[k] = new Order{i, 100 + i + k, 1, 'B', {}};               // global new
+                asm volatile("" :: "r"(live[k]) : "memory");                   // no allocation elision
+            }
+            for (int k = K - 1; k >= 0; --k) { sink += live[k]->px; delete live[k]; }   // global delete
         }
-        samples.push_back(std::uint32_t(ns_now() - t0));
+        samples[i] = std::uint32_t((ns_now() - t0) / K);                       // ns per alloc/free pair
     }
     std::sort(samples.begin(), samples.end());
     auto pct = [&](double p){ return samples[std::size_t(p * (N - 1))]; };
-    std::printf("%-5s sink=%llu  p50=%u p99=%u p99.9=%u max=%u ns\n",
+    std::printf("%-5s sink=%llu  per alloc+free pair: p50=%u p99=%u p99.9=%u max=%u ns\n",
                 use_pool ? "pool" : "heap", (unsigned long long)sink,
                 pct(0.50), pct(0.99), pct(0.999), samples.back());
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2`, pinned, turbo off (illustrative; the *distribution shape* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *distribution shape* is the point; ns per alloc+free pair, each sample a burst of 64):
 
 ```
               p50        p99        p99.9       max          notes
-heap (new)    ~28 ns     ~95 ns     ~600 ns     ~5,000 ns    general malloc: variable, long tail
-pool          ~4 ns      ~5 ns      ~6 ns       ~40 ns       free-list pop/push: flat, no tail
+heap (new)    ~22 ns     ~30 ns     ~120 ns     ~1,500 ns    glibc tcache fast path, then its slow paths + scheduling noise
+pool          ~4 ns      ~5 ns      ~8 ns       ~300 ns      free-list pop/push: flat; the max is an interrupt, amortised /64
 ```
 
-Read it the Ch. 1 / Ch. 23 way: the pool is not just ~7× faster at the median — it's **deterministic**, with a p99.9 essentially equal to its p50, while the heap's p99.9 is ~20× its median and its max reaches into the *microseconds* (the allocator's slow path / page-fault tail of Ch. 23). For the hot path the *flatness* matters more than the median: the pool removes the tail entirely. That's the whole value proposition — `malloc`'s flexibility (allocate/free individual objects with interleaved lifetimes) at a cost that's both lower *and* predictable. The fingerprint that justifies a custom allocator is exactly the heap row: a hot path doing per-object alloc/free with a p99.9 far above p50 and occasional microsecond maxes. Swap in the matching allocator (pool here) and the tail collapses — verified by the distribution, not the average.
+Read it the Ch. 1 / Ch. 23 way: the pool is not just ~5× faster at the median — it's **deterministic**, with a p99.9 essentially equal to its p50, while the heap's p99.9 is ~5× its median and its max reaches toward the *microseconds*. Note what the heap tail is *not*: a 24-byte `new`/`delete` pair recycles one tcache chunk, so neither row page-faults in steady state (both runs show the same handful of minor faults, all from setup — the Ch. 23 `fresh` cost needs memory that is new to the kernel). The heap's tail is the allocator's own slow paths (tcache refill, bin consolidation, the arena lock) plus whatever the OS does to the core; the pool's is only the latter. For the hot path the *flatness* matters more than the median: the pool removes the tail entirely. That's the whole value proposition — `malloc`'s flexibility (allocate/free individual objects with interleaved lifetimes) at a cost that's both lower *and* predictable. The fingerprint that justifies a custom allocator is exactly the heap row: a hot path doing per-object alloc/free with a p99.9 far above p50 and occasional microsecond maxes. Swap in the matching allocator (pool here) and the tail collapses — verified by the distribution, not the average.
 
 ## 24.4 Techniques
 
@@ -179,7 +192,7 @@ The pool is the tool for **many same-sized objects with individual, interleaved 
 
 **Exercises**
 
-1. **Measure the tail collapse.** Build `pool.cpp`; run `heap` vs `pool` pinned, capturing p50/p99/p99.9/max. Confirm the pool is flat (p99.9 ≈ p50) while heap's tail is ~20× its median. Add `perf stat -e page-faults` — which version faults?
+1. **Measure the tail collapse.** Build `pool.cpp`; run `heap` vs `pool` pinned, capturing p50/p99/p99.9/max. Confirm the pool is flat (p99.9 ≈ p50) while heap's p99.9 is ~5× its median. Add `perf stat -e minor-faults` — neither version faults in steady state (both show the same setup faults); so where does the heap tail come from?
 2. **Arena per message.** Write a `monotonic_buffer_resource`-backed (or hand-rolled) arena; decode a message into arena-allocated temporaries, process, `reset()`. Measure ns/message and confirm (instrument `operator new`) zero `malloc` after warm-up. Size the arena for the worst-case message.
 3. **Prove zero allocation.** Wrap a hot section's containers in `std::pmr` backed by `null_memory_resource`. Run the hot path — does it throw (i.e. did something allocate)? Fix until it doesn't. Compare to the `operator new` override approach (Ch. 23).
 4. **Pool exhaustion policy.** Make the §24.3 pool reject on exhaustion vs cold-path grow vs (deliberately) fall back to `malloc`. Drive it past capacity and compare the latency distributions. Why is the `malloc` fallback the worst for the tail (§24.5)?

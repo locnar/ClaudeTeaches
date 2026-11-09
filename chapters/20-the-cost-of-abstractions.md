@@ -80,6 +80,25 @@ Err val_code(const Msg& m, std::int64_t& out) {
 std::expected<std::int64_t, Err> val_exp(const Msg& m) {
     if (is_bad(m)) return std::unexpected(Err::BadPrice); return m.px * m.qty; }
 
+// The timed loop, instantiated once per mechanism: the mode is decided BEFORE t0, never inside the
+// per-message loop (a strcmp per message would cost more than the ~0.3 ns being measured). The asm
+// barrier (Appendix L) keeps acc live per message and stops the compiler vectorizing (b)/(c) but not (a).
+enum class Mode { Throw, Code, Expected };
+template <Mode M>
+[[gnu::noinline]] void run(const std::vector<Msg>& in, int reps, std::int64_t& acc, std::int64_t& errs) {
+    for (int r = 0; r < reps; ++r)
+        for (const Msg& m : in) {
+            if constexpr (M == Mode::Throw) {
+                try { acc += val_throw(m); } catch (Err) { ++errs; }
+            } else if constexpr (M == Mode::Code) {
+                std::int64_t o; if (val_code(m, o) == Err::Ok) acc += o; else ++errs;
+            } else {
+                auto e = val_exp(m); if (e) acc += *e; else ++errs;
+            }
+            asm volatile("" : "+r"(acc));
+        }
+}
+
 int main(int argc, char** argv) {
     const char* mode = argc > 1 ? argv[1] : "expected";
     int bad_per_1000 = argc > 2 ? std::atoi(argv[2]) : 0;       // 0 = pure happy path
@@ -90,18 +109,11 @@ int main(int argc, char** argv) {
         in[i] = { bad ? -1 : std::int64_t(100 + i), std::int32_t(1 + (i & 7)) };
     }
 
-    auto t0 = std::chrono::steady_clock::now();
     std::int64_t acc = 0, errs = 0;
-    for (int r = 0; r < REPS; ++r)
-        for (const Msg& m : in) {
-            if (!std::strcmp(mode, "throw")) {
-                try { acc += val_throw(m); } catch (Err) { ++errs; }
-            } else if (!std::strcmp(mode, "code")) {
-                std::int64_t o; if (val_code(m, o) == Err::Ok) acc += o; else ++errs;
-            } else {
-                auto e = val_exp(m); if (e) acc += *e; else ++errs;
-            }
-        }
+    auto t0 = std::chrono::steady_clock::now();
+    if      (!std::strcmp(mode, "throw")) run<Mode::Throw>(in, REPS, acc, errs);
+    else if (!std::strcmp(mode, "code"))  run<Mode::Code>(in, REPS, acc, errs);
+    else                                  run<Mode::Expected>(in, REPS, acc, errs);
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
     std::printf("%-8s bad/1000=%d  acc=%lld errs=%lld  %.3f ns/msg\n",
@@ -110,20 +122,20 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *shape* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++23 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *shape* is the point). The mode is resolved to a template parameter *before* the clock starts: an earlier draft had `strcmp(mode, …)` inside the per-message loop, and its two PLT calls per message (~1-2 ns, biased by match order) swamped the ~0.3 ns being compared — the harness measured itself (Ch. 3, Appendix L).
 
 ```
                           bad/1000 = 0       bad/1000 = 1        bad/1000 = 50
   (mechanism)            (pure happy path)   (0.1% errors)       (5% errors)
-throw                       ~0.30 ns           ~2.5 ns            ~85 ns      <- throw cost dominates
-error code                  ~0.32 ns           ~0.32 ns           ~0.34 ns    <- flat: errors are cheap
-std::expected               ~0.32 ns           ~0.32 ns           ~0.34 ns    <- flat, and type-safe
+throw                       ~0.35 ns           ~2.3 ns            ~95 ns      <- throw cost dominates (~1.9 µs each)
+error code                  ~0.35 ns           ~0.35 ns           ~0.37 ns    <- flat: errors are cheap
+std::expected               ~0.35 ns           ~0.35 ns           ~0.37 ns    <- flat, and type-safe
 ```
 
 The shape is the entire lesson:
 
 - **On the pure happy path (0 errors) all three are ~equal** — the zero-cost exception model (§20.2) means `try` adds nothing when nothing throws; `std::expected` is a cheap value return. *If errors never happen, exceptions cost nothing at runtime.*
-- **Exceptions fall off a cliff as the error rate rises.** Even **0.1%** bad messages makes `throw` ~8× slower than the value-returning mechanisms; at 5% it's *hundreds* of times slower — each throw is microseconds (§20.2). The cost is entirely on the *error* path, and it's non-deterministic (Ch. 1's tail).
+- **Exceptions fall off a cliff as the error rate rises.** Even **0.1%** bad messages makes `throw` ~6-7× slower than the value-returning mechanisms; at 5% it's *hundreds* of times slower — each throw is microseconds (§20.2). The cost is entirely on the *error* path, and it's non-deterministic (Ch. 1's tail).
 - **Error codes and `std::expected` are flat** — signaling a failure is just returning a value, so cost is independent of error rate. `std::expected` gives you the **monadic, type-safe** ergonomics (you can't ignore the error; `and_then`/`or_else` compose) at error-code cost — which is why it's the modern hot-path default for *expected* failures.
 
 The rule the data dictates: **match the mechanism to the error *frequency*.** Genuinely rare, fatal conditions → exceptions (free happy path, and you *want* to unwind-and-die). Anything that happens with any regularity on the hot path (malformed packets, gaps, full queues, rejects) → `std::expected`/error codes (flat cost). The disaster is throwing on a frequent condition (§20.6); the waste is hand-rolling error codes where exceptions' free happy path would do for a rare-and-fatal case.
