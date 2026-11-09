@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 11 (out-of-order execution and dependency chains — aliasing is what forces the compiler to *assume* a dependency it can't disprove), Ch. 29-preview/Ch. 8 (vectorization and data layout — the optimization aliasing most often blocks), Ch. 4 (reading asm — §21.5 is the whole proof), Ch. 9 (object model — type punning is reinterpreting object representation).
 >
-> **Leads into:** Ch. 29 (SIMD & vectorization — `restrict` is frequently the difference between a vectorized and a scalar loop), Ch. 53 (zero-copy wire decoding — overlaying structs on a byte buffer is type punning, done safely with `bit_cast`/`memcpy`), Ch. 72 (secure programming — strict-aliasing UB as a vulnerability class). Closes **Part III**.
+> **Leads into:** Ch. 29 (SIMD & vectorization — `restrict` is frequently the difference between a vectorized and a scalar loop), Ch. 53 (zero-copy wire decoding — overlaying structs on a byte buffer is type punning, done safely with `bit_cast`/`memcpy`), Ch. 72 (secure programming — strict-aliasing UB as a vulnerability class). Ch. 22 (build toolchain — the flags that gate these optimizations) closes **Part III**.
 
 ---
 
@@ -229,7 +229,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — vectorization blockers (aliasing, alignment) and how to read the compiler's vectorization diagnostics.
 - Chris Lattner / LLVM blog posts on undefined behavior ("What Every C Programmer Should Know About Undefined Behavior") — why strict-aliasing UB miscompiles and how to avoid it (ties Ch. 72).
 - Ch. 29 (*SIMD & Vectorization*) — where `restrict` most often pays; Ch. 9 (*Object Layout/Alignment*) — the alignment half of clean SIMD; Ch. 53 (*Zero-Copy Wire Decoding*) — safe struct/byte-buffer punning in feed handlers; Ch. 72 (*Secure Programming*) — UB as a vulnerability class; Ch. 11 (*Pipelines*) — dependencies the compiler must assume when it can't disprove aliasing.
-- **Appendix D** (Compiler Flag Reference) — `-fstrict-aliasing`/`-fno-strict-aliasing` and vectorization flags; **Appendix B** — aliasing and `unsafe` punning in Rust (`transmute`, `from_ne_bytes`) for the cross-language reader.
+- **Appendix D** (Compiler Flag Reference) — `-fstrict-aliasing`/`-fno-strict-aliasing` and vectorization flags; **Appendix B** (B.1) — aliasing (`&mut` as checked `noalias`) and `unsafe` punning in Rust (`transmute` vs `from_ne_bytes`) for the cross-language reader.
 
 ---
 

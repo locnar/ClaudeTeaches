@@ -4,7 +4,7 @@
 
 > **Reference machine note:** back to the single-socket **Xeon Gold 6326** (Ice Lake-SP) of Ch. 7–15, with **invariant TSC** (constant-rate, not affected by P-states/turbo). All conventions (flags, pinning, turbo off for measurement) carry over.
 >
-> **Prerequisites:** Ch. 3 (micro-benchmarking — this chapter is the *instrument* every benchmark in the book relies on; coordinated omission and the measurement overhead caveats live here too), Ch. 11 (out-of-order execution — why an *unserialized* `rdtsc` measures the wrong thing), Ch. 6 (system setup — turbo/C-states/`tsc` clocksource the OS exposes).
+> **Prerequisites:** Ch. 3 (micro-benchmarking — this chapter is the *instrument* every benchmark in the book relies on; coordinated omission and the measurement overhead caveats live here too), Ch. 11 (out-of-order execution — why an *unserialized* `rdtsc` measures the wrong thing), Ch. 6 (system setup — turbo/C-states, and §6.4.4 for the `tsc` clocksource and SMIs this chapter's timestamps depend on).
 >
 > **Leads into:** Ch. 58 (PTP & hardware timestamping — distributing time *across hosts* and measuring true wire-to-wire, the multi-machine sequel to this single-host chapter), Ch. 55 (NIC hardware timestamps), Ch. 71 (logging — every timestamped log line uses this clock), Ch. 76 (end-to-end latency measurement). Closes **Part II**.
 
