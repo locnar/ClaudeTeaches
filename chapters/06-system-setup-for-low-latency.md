@@ -158,7 +158,7 @@ sudo rdmsr -a 0x34                                    # MSR_SMI_COUNT (Intel): c
 echo hwlat > /sys/kernel/tracing/current_tracer; sleep 60; tail /sys/kernel/tracing/trace
 ```
 
-A non-zero SMI rate on an isolated core — or `hwlat` reporting multi-µs gaps on a box whose `cyclictest` max (§6.3) looks fine — means firmware owns part of your tail. Run the SMI count alongside `cyclictest` during every tuning pass: a `cyclictest` spike that coincides with an SMI-count increment is *attributed*, and the fix is in the BIOS. Ch. 45 chases the remaining kernel-side noise sources; Ch. 17 is the timekeeping chapter this clocksource check serves.
+A non-zero SMI rate on an isolated core — or `hwlat` reporting multi-µs gaps on a box whose `cyclictest` max (§6.3) looks fine — means firmware owns part of your tail. Run the SMI count alongside `cyclictest` during every tuning pass: a `cyclictest` spike that coincides with an SMI-count increment is *attributed*, and the fix is in the BIOS. Ch. 45 configures the kernel-side quiet and Ch. 46 chases the remaining kernel-side noise sources (its `rtla osnoise` `HW` column is the SMI residue seen from inside the kernel); Ch. 17 is the timekeeping chapter this clocksource check serves.
 
 ---
 

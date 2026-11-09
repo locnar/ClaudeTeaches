@@ -2,7 +2,7 @@
 
 # Chapter 47 — Keeping the Hot Path Warm
 
-> **Prerequisites:** Ch. 7/12/15 (caches / I-cache / TLB — the state that goes cold), Ch. 13–14 (branch predictors — also cold), Ch. 41 (context switching — the cold-restart cost this chapter generalizes), Ch. 23/26 (pre-faulting / `mlock`), Ch. 1 (warm vs cold *tail*), Ch. 42–45 (a quiet core — pinned, sibling handled, cache-partitioned, tickless — that *can* stay warm).
+> **Prerequisites:** Ch. 7/12/15 (caches / I-cache / TLB — the state that goes cold), Ch. 13–14 (branch predictors — also cold), Ch. 41 (context switching — the cold-restart cost this chapter generalizes), Ch. 23/26 (pre-faulting / `mlock`), Ch. 1 (warm vs cold *tail*), Ch. 42–46 (a quiet core — pinned, sibling handled, cache-partitioned, tickless, with the residual noise attributed — that *can* stay warm).
 >
 > **Leads into:** Ch. 57–59, 63, 64 (NIC / DDIO / flow steering / bypass — pre-establishing connections, warming the RX path), Ch. 76–77 (hot reload / fast restart — warm-up after a reload/restart), Ch. 81 (the end-to-end case study). Closes **Part VII** — the last enemy after the core is quiet.
 

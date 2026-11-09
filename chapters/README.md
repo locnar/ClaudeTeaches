@@ -584,12 +584,14 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 45.6 Exercises & checklist
 
 ### [46. Hunting Residual Noise on Isolated Cores](46-hunting-residual-noise-isolated-cores.md)
-- 46.1 Why it matters: TODO
-- 46.2 Mental model: TODO
-- 46.3 Measure it: TODO
+- 46.1 Why it matters: the last 40 µs has a name
+- 46.2 Mental model: the kernel noise catalog (per-CPU kthreads, workqueues, RCU, reschedule/function-call/TLB-shootdown IPIs, managed vectors, NMI/PMI, memory daemons, clocksource watchdog, SMIs — fingerprint and knob for each)
+- 46.3 Measure it: `rtla osnoise` and `timerlat` beside `cyclictest`; a user-space TSC gap detector
 - 46.4 Techniques
-  - 46.4.1 TODO
-- 46.5 Pitfalls & anti-patterns: TODO
+  - 46.4.1 Catalog audit: what is allowed on the core right now
+  - 46.4.2 Stop-on-threshold tracing: catching the spike in the act (ftrace, `trace-cmd`/KernelShark, `perf sched`)
+  - 46.4.3 Turning the knobs: one fix per catalog row
+- 46.5 Pitfalls & anti-patterns: perturbing the hunt, chasing ghosts
 - 46.6 Exercises & checklist
 
 ### [47. Keeping the Hot Path Warm](47-keeping-the-hot-path-warm.md)

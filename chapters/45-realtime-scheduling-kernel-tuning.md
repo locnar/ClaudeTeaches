@@ -80,7 +80,7 @@ Ch. 6 §6.3 already showed the two endpoints of this experiment on the same box 
    + mitigations=off, C-states limited (Ch.6)       1 µs   1.0 µs   ~2 µs     firmware/spec-exec noise removed too
 ```
 
-Read it the Ch. 1 way: **the min/avg barely move; the MAX — the tail — drops from ~3 ms to ~2 µs**, three orders of magnitude, as you add each isolation layer. Pinning alone (Ch. 42) removes migration but leaves the **timer tick, IRQs, and RCU** (max ~250 µs). Adding `isolcpus` + RT priority stops **preemption** (~40 µs) but the **tick still fires** every ms. Only **`nohz_full` + `rcu_nocbs`** (tickless) + **IRQs routed away** (Ch. 42) get the core genuinely quiet (~5 µs), and the last bit comes from the **firmware/spec-exec layer** (Ch. 6 — C-states waking the core, mitigations). This is the canonical low-latency-tuning result and the verification loop: **`cyclictest` max is your jitter; each isolation knob removes one source; tune-measure-repeat until the max is flat.** The remaining spikes after full tuning point at the *last* noise sources (a stray IPI, a SMI from firmware — Ch. 6, an un-offloaded kernel thread) — chase them with `cyclictest -b` (break-trace) / `ftrace` and `/proc/interrupts`. A production latency box is signed off when `cyclictest` (and the real app's tail) shows a flat distribution under realistic load.
+Read it the Ch. 1 way: **the min/avg barely move; the MAX — the tail — drops from ~3 ms to ~2 µs**, three orders of magnitude, as you add each isolation layer. Pinning alone (Ch. 42) removes migration but leaves the **timer tick, IRQs, and RCU** (max ~250 µs). Adding `isolcpus` + RT priority stops **preemption** (~40 µs) but the **tick still fires** every ms. Only **`nohz_full` + `rcu_nocbs`** (tickless) + **IRQs routed away** (Ch. 42) get the core genuinely quiet (~5 µs), and the last bit comes from the **firmware/spec-exec layer** (Ch. 6 — C-states waking the core, mitigations). This is the canonical low-latency-tuning result and the verification loop: **`cyclictest` max is your jitter; each isolation knob removes one source; tune-measure-repeat until the max is flat.** The remaining spikes after full tuning point at the *last* noise sources (a stray IPI, a SMI from firmware — Ch. 6, an un-offloaded kernel thread) — chase them with `cyclictest -b` (break-trace) / `ftrace` and `/proc/interrupts`, or, properly, with the `rtla osnoise`/`timerlat` attribution workflow and the noise catalog of Ch. 46. A production latency box is signed off when `cyclictest` (and the real app's tail) shows a flat distribution under realistic load.
 
 ## 45.4 Techniques
 
@@ -115,7 +115,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 - **Forgetting `mlockall` on RT threads (Ch. 23, 26).** RT priority guarantees scheduling, not memory residency — a page fault (Ch. 23) still spikes. `mlockall` + pre-fault (Ch. 26) is mandatory RT setup.
 - **Over-tuning / breaking the system.** Isolating *too many* cores (leaving too few for housekeeping), disabling RT throttling without understanding it, setting a 100%-busy RT thread above the per-CPU kthreads it can starve (`ksoftirqd/N`, `kworker/N:*`, `watchdog/N`, threaded `irq/*` on PREEMPT_RT → softlockups and stalled I/O), or applying a `tuned` profile blindly — all can make the box *unstable* or *slower*. Tune deliberately, measure each change (`cyclictest`), and keep enough housekeeping capacity.
 - **`isolcpus` deprecation / wrong interface.** `isolcpus` works but is semi-deprecated in favor of cgroup v2 `cpuset` isolated partitions on newer kernels; using the wrong/old interface (or both inconsistently) can give surprising behavior. Know your kernel's preferred isolation mechanism.
-- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail continuously (Ch. 81).
+- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail — and the isolation itself — continuously (Ch. 79, 81).
 - **RT priority on a shared/general core without isolation.** Giving a thread `SCHED_FIFO` on a *non*-isolated core can *starve* the rest of the system (it preempts everything, including things the box needs) — RT priority belongs with isolation. Don't RT-prioritize on a general-purpose core casually.
 
 ## 45.6 Exercises & checklist
@@ -126,7 +126,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 2. **Catch RT throttling.** On a pre-6.12 kernel, run a `SCHED_FIFO` busy-polling thread (100% CPU) on an isolated core with RT throttling at default; measure its latency and look for the ~50 ms stall once per second (the throttle). On 6.12+, instead park a `SCHED_OTHER` spinner on the same core and watch the fair deadline server carve its slice out of your RT thread. Disable throttling (`sysctl kernel.sched_rt_runtime_us=-1`); confirm the spikes vanish. Understand what safety you gave up (§45.5).
 3. **Tickless verification.** With `nohz_full=<core>`, run one task on the core and watch `/proc/interrupts` LOC (local timer) for that core — confirm it stops incrementing. Then add a *second* runnable task to the core and watch the tick come back (§45.5). 
 4. **Priority inversion.** Construct an RT thread blocking on a mutex held by a low-priority thread that can't run (RT thread busy on the same core). Observe the stall. Switch to a `PTHREAD_PRIO_INHERIT` mutex and confirm the holder is boosted and the stall resolves (§45.4.2).
-5. **Find the last spike.** After full tuning, if `cyclictest` still shows occasional spikes, use `cyclictest -b <us>` (break-trace) + ftrace, and `/proc/interrupts`, to identify the source (an IPI, an SMI — Ch. 6, an un-offloaded kthread). Eliminate it; re-measure.
+5. **Find the last spike.** After full tuning, if `cyclictest` still shows occasional spikes, use `cyclictest -b <us>` (break-trace) + ftrace, and `/proc/interrupts`, to identify the source (an IPI, an SMI — Ch. 6, an un-offloaded kthread). Eliminate it; re-measure. Then do it again the Ch. 46 way — `rtla osnoise -s <us> -t` — and compare how much faster the stopped trace names the culprit.
 
 **Checklist — RT scheduling & kernel tuning**
 
@@ -137,7 +137,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 - [ ] The **BIOS/firmware layer** (Ch. 6) is tuned *under* the kernel: deep **C-states off**, **P-states/turbo** fixed, **SMIs** minimized, **HT** handled (Ch. 43).
 - [ ] I **measured jitter with `cyclictest`** before/after each change (max latency = the tail — Ch. 1), drove the max down to single-digit µs under realistic load, and chased remaining spikes to their source.
 - [ ] Everything-not-hot is **confined to housekeeping cores** (cgroups/`cpuset`), with **enough housekeeping capacity**; I didn't over-isolate or over-tune into instability.
-- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail is **monitored continuously** (Ch. 81).
+- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail — and the core's quietness — is **monitored continuously** (Ch. 79, 81); residual spikes are attributed with Ch. 46's catalog and tools, not tolerated.
 
 ## 45.7 References
 
@@ -157,4 +157,4 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 
 ---
 
-*Next: Ch. 46 — Hunting Residual Noise on Isolated Cores.*
+*Next: Ch. 46 — Hunting Residual Noise on Isolated Cores, the continuation of this chapter's `cyclictest` loop for when the max is *still* not flat: the catalog of what can still run on an `isolcpus`/`nohz_full` core (per-CPU kthreads, workqueues, RCU, IPIs, managed vectors, SMIs) with the fingerprint and knob for each, and the attribution toolkit — `rtla osnoise`/`timerlat`, `hwlat`, stop-on-threshold ftrace, `trace-cmd`, `perf sched` — that names the source of the last spike instead of guessing at it.*
