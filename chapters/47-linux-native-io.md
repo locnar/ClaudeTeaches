@@ -101,7 +101,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), l
    epoll (blocking epoll_wait)              ~5 µs      ~20 µs     epoll_wait sleeps → switch + cold (Ch.41,46)
    epoll + busy-poll (net.core.busy_poll)   ~3 µs      ~7 µs      busy-poll avoids the block/wake switch
    (preview) io_uring polled (Ch.48)        ~2.5 µs    ~5 µs      fewer syscalls
-   (preview) kernel bypass (Ch.62)          ~1 µs      ~2 µs      no kernel stack — the real HFT path
+   (preview) kernel bypass (Ch.62)          ~0.5-1 µs  ~1-2 µs    no kernel stack — the real HFT path
 
    even busy-polled, the kernel stack is MICROSECONDS — the floor is bypass (Ch.62).
 ```

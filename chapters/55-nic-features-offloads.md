@@ -57,7 +57,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP) + 
    default (GRO on, interrupt coalescing on)   ~8 µs / ~30 µs                    low      coalescing ADDS latency
    GRO/LRO off, coalescing off (IRQ/packet)    ~5 µs / ~12 µs                    higher   no batching delay, more IRQs
    + busy-poll (SO_BUSY_POLL / NAPI)           ~3 µs / ~6 µs                     high     no interrupt latency/jitter (Ch.41)
-   + kernel bypass (ef_vi/Onload — Ch.62)      ~1 µs / ~2 µs                     100%     no kernel stack at all
+   + kernel bypass (ef_vi/Onload — Ch.62)      ~0.5-1 µs / ~1-2 µs               100%     no kernel stack at all
 
    software timestamp vs HARDWARE timestamp:   sw includes all the above latency; hw = true wire arrival (Ch.17,58)
 ```

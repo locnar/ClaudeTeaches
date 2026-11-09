@@ -41,7 +41,7 @@ But `mmap` inherits — and concentrates — the page-fault hazard of Ch. 15/23,
 
 Either way, the shared region holds the IPC data structures — a lock-free ring buffer (Ch. 34, 37), a seqlock-published snapshot (Ch. 35) — with the **single-writer-per-segment** discipline (Ch. 74) for correctness. Note: pointers stored in shared memory must be **offsets/indices**, not absolute addresses (the segment may map at different addresses in each process — Ch. 25's index-handle idiom is mandatory here).
 
-**Page faulting — the cost, restated for `mmap` (Ch. 15, 23).** A new mapping is *lazy*: no physical page exists until first touch, which **faults** into the kernel to wire one up. Minor fault (anonymous zero page, or file page already in the page cache) ~hundreds of ns to ~1 µs; **major fault** (file page must be read from disk) ~*milliseconds*. So:
+**Page faulting — the cost, restated for `mmap` (Ch. 15, 23).** A new mapping is *lazy*: no physical page exists until first touch, which **faults** into the kernel to wire one up. Minor fault (anonymous zero page, or file page already in the page cache) ~0.3–1 µs for 4 KiB, several µs for a zeroed 2 MiB THP page; **major fault** (file page must be read from disk) ~*milliseconds*. So:
 
 - A fresh `mmap` region faults *per page* across your first writes — on the hot path, a stream of stalls (§26.3).
 - A file-backed mapping can **major-fault to disk** mid-hot-path — unacceptable; pre-fault and `mlock`, or don't map cold files on the hot path.
@@ -105,11 +105,11 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), p
 
 ```
                        p50        p99        p99.9      max        minor-faults (perf)
-lazy (first touch)     ~250 ns    ~800 ns    ~1,500 ns  ~6,000 ns  ~NPAGES (one per page)  <- faults on the path
+lazy (first touch)     ~400 ns    ~900 ns    ~1,500 ns  ~6,000 ns  ~NPAGES (one per page)  <- faults on the path
 prefault (POPULATE)    ~3 ns      ~4 ns      ~6 ns      ~40 ns     ~0 during the loop      <- already resident
 ```
 
-Read it the Ch. 23 way: the lazy mapping's first-touch loop is a **page fault per page** — each write traps into the kernel (~hundreds of ns to wire up a frame), so the "first message to touch fresh memory" pays a fault, and `perf` shows ~one minor-fault per page. The pre-faulted version did all that faulting at `mmap`/`memset` time (setup, the cold path), so the same writes are now plain ~3 ns stores into resident memory — flat, no tail, no faults. This is the entire argument for §26.4.2 in one chart: **the fault cost is unavoidable, but pre-faulting moves it off the hot path.** The fingerprint to watch for in production: non-zero `minor-faults` (or, worse, `major-faults`) on the hot path means un-warmed mapped memory — pre-fault and `mlock` it. (Major faults — file-backed to disk — would show millisecond maxes here; never let those touch the hot path.)
+Read it the Ch. 23 way: the lazy mapping's first-touch loop is a **page fault per page** — each write traps into the kernel (~0.3–1 µs to wire up and zero a frame), so the "first message to touch fresh memory" pays a fault, and `perf` shows ~one minor-fault per page. The pre-faulted version did all that faulting at `mmap`/`memset` time (setup, the cold path), so the same writes are now plain ~3 ns stores into resident memory — flat, no tail, no faults. This is the entire argument for §26.4.2 in one chart: **the fault cost is unavoidable, but pre-faulting moves it off the hot path.** The fingerprint to watch for in production: non-zero `minor-faults` (or, worse, `major-faults`) on the hot path means un-warmed mapped memory — pre-fault and `mlock` it. (Major faults — file-backed to disk — would show millisecond maxes here; never let those touch the hot path.)
 
 ## 26.4 Techniques
 

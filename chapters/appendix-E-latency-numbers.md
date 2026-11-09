@@ -2,33 +2,33 @@
 
 > **Ties:** Ch. 3 (how to measure these), Ch. 7 (cache hierarchy), Ch. 13 (branch mispredict), Ch. 16 (NUMA-remote DRAM), Ch. 17 (the timer you measure with), Ch. 32–33 (mutex / cross-core HITM), Ch. 41 (context switch / syscall), Ch. 47 (kernel-stack NIC RX), Ch. 55 & 62 (bypass NIC RX), Ch. 66 (PCIe round-trip). This is the trading-annotated refresh of the Norvig / Jeff-Dean "latency numbers every programmer should know" — the costs that set the *floor* under every decision in this book.
 
-The single most useful thing in a low-latency engineer's head is a **calibrated sense of what things cost** — so that when you look at a tick-to-trade budget (Ch. 76) you *know*, without measuring, that an L3 miss to DRAM is ~20× an L1 hit, that a cross-core cache-line transfer (false sharing — Ch. 33) costs more than a branch mispredict, that a syscall dwarfs both, and that anything touching the kernel network stack (Ch. 47) is in a different universe from kernel bypass (Ch. 62). These ratios are *why* the book is structured as it is: every Part attacks a row in this table.
+The single most useful thing in a low-latency engineer's head is a **calibrated sense of what things cost** — so that when you look at a tick-to-trade budget (Ch. 76) you *know*, without measuring, that an L3 miss to DRAM is ~50× an L1 hit, that a cross-core cache-line transfer (false sharing — Ch. 33) costs more than a branch mispredict, that a syscall costs at least as much as a DRAM miss and a context switch dwarfs all of them, and that anything touching the kernel network stack (Ch. 47) is in a different universe from kernel bypass (Ch. 62). These ratios are *why* the book is structured as it is: every Part attacks a row in this table.
 
-**Two caveats, loudly** (Ch. 3): (1) these are **representative** numbers for modern x86-64 server hardware (~Ice Lake / Sapphire Rapids class, ~3 GHz, DDR4/5); *your* hardware differs, and the only number that counts for a decision is the one *you measured on your box* (Ch. 3). Treat these as orders of magnitude and *ratios*, not constants. (2) The **distribution matters more than the point value** (Ch. 1): "DRAM ≈ 100 ns" is the *typical* cost; the *tail* (a TLB miss on top — Ch. 15, a NUMA-remote access — Ch. 16, contention) is what actually bites. Memorize the table for intuition; measure for decisions.
+**Two caveats, loudly** (Ch. 3): (1) these are **representative** numbers for the book's reference machine — a Xeon Gold 6326, Ice Lake-SP, turbo off at 2.9 GHz, DDR4-3200 (Appendix L.3) — and its contemporaries; *your* hardware differs, and the only number that counts for a decision is the one *you measured on your box* (Ch. 3). Treat these as orders of magnitude and *ratios*, not constants. (2) The **distribution matters more than the point value** (Ch. 1): "DRAM ≈ 100 ns" is the *typical* cost; the *tail* (a TLB miss on top — Ch. 15, a NUMA-remote access — Ch. 16, contention) is what actually bites. Memorize the table for intuition; measure for decisions.
 
 ## E.1 The table
 
-Modern x86-64 server, ~3 GHz (so **~0.33 ns/cycle**; cycles ≈ ns × 3). Representative; **measure your own** (Ch. 3).
+The reference machine of Appendix L.3 — Xeon Gold 6326 (Ice Lake-SP), turbo off at the 2.9 GHz base, so **0.345 ns/cycle; cycles ≈ ns × 2.9** — the ns↔cycles basis used book-wide. Representative; **measure your own** (Ch. 3).
 
 | Operation | ~Latency | ~Cycles | Trading relevance / notes |
 |---|---:|---:|---|
-| **1 CPU cycle** | 0.33 ns | 1 | the unit; ~3 cycles/ns at 3 GHz |
-| **L1 cache hit** | ~1 ns | ~4 | the hot-path ideal — keep the working set here (Ch. 7–8) |
-| **L2 cache hit** | ~4 ns | ~12-14 | still cheap; book/strategy hot data should fit L2 (Ch. 7, 25) |
-| **L3 cache hit** | ~15-20 ns | ~45-60 | shared across cores; HITM-prone (Ch. 7, 33) |
-| **Branch mispredict** | ~3-5 ns | ~10-20 | pipeline flush (Ch. 13) — the cost of an unpredictable branch on the hot path |
-| **L3 miss → local DRAM** | ~80-100 ns | ~250-300 | the cache-miss cliff — ~20-100× an L1 hit (Ch. 7, 15); a cold book entry |
-| **DRAM, NUMA-remote** | ~130-180 ns | ~400-550 | cross-socket penalty — ~1.5-2× local (Ch. 16); why NIC-NUMA locality matters |
+| **1 CPU cycle** | 0.345 ns | 1 | the unit; 2.9 cycles/ns at the 2.9 GHz base (0.29 ns/cycle at the 3.5 GHz turbo) |
+| **L1 cache hit** | ~1.7 ns | 5 | the hot-path ideal — keep the working set here (Ch. 7–8); 5-cycle load-to-use on Ice Lake (4 cycles, ~1 ns, on Skylake-class cores) |
+| **L2 cache hit** | ~5 ns | ~14 | still cheap; book/strategy hot data should fit L2 (Ch. 7, 25) |
+| **L3 cache hit** | ~15-25 ns | ~45-70 | shared across cores — slice distance sets the spread; HITM-prone (Ch. 7, 33) |
+| **Branch mispredict** | ~5-7 ns | ~15-20 | pipeline flush (Ch. 13) — the cost of an unpredictable branch on the hot path |
+| **L3 miss → local DRAM** | ~80-100 ns | ~230-290 | the cache-miss cliff — ~50-60× an L1 hit here, ~50-100× across current cores: two orders of magnitude (Ch. 7, 15); a cold book entry |
+| **DRAM, NUMA-remote** | ~130-180 ns | ~380-520 | cross-socket penalty — ~1.5-2× local (Ch. 16); why NIC-NUMA locality matters |
 | **TLB miss (page walk)** | ~10-100+ ns | ~30-300+ | on top of the access; huge pages cut it (Ch. 15) |
-| **Cross-core cache-line transfer (HITM)** | ~40-100 ns | ~120-300 | **false sharing** (Ch. 33) / contended atomic (Ch. 30) — a line bouncing between cores; the hidden killer of "lock-free" code |
-| **Uncontended mutex lock+unlock** | ~15-25 ns | ~45-75 | the fast path (futex, no syscall — Ch. 32); *contended* is far worse (syscall + sleep) |
+| **Cross-core cache-line transfer (HITM)** | ~40-100 ns | ~120-290 | **false sharing** (Ch. 33) / contended atomic (Ch. 30) — a line bouncing between cores; the hidden killer of "lock-free" code |
+| **Uncontended mutex lock+unlock** | ~15-25 ns | ~45-70 | the fast path (futex, no syscall — Ch. 32); *contended* is far worse (syscall + sleep) |
 | **`std::atomic` RMW (uncontended)** | ~5-10 ns | ~15-30 | a `CAS`/`fetch_add` with no contention (Ch. 30); contended → HITM row |
 | **`rdtsc`/`rdtscp`** | ~5-10 ns | ~15-30 | the measurement instrument itself (Ch. 17) — cheap enough to timestamp every event |
-| **Null syscall** (e.g. `getuid`) | ~50-100 ns | ~150-300 | the user/kernel transition alone (Ch. 41) — *higher* with spec-exec mitigations (Ch. 6); why the hot path makes none (Ch. 23) |
+| **Null syscall** (e.g. `getuid`) | ~50-100 ns with `mitigations=off`; ~150-400 ns with KPTI/retpoline on | ~150-300 / ~450-1,150 | the user/kernel transition alone (Ch. 41) — the mitigation setting (Ch. 6) picks the band; why the hot path makes none (Ch. 23) |
 | **Context switch** | ~1-5 µs | ~3,000-15,000 | direct + indirect (cache/TLB pollution — Ch. 41); a single one blows the budget — pin & don't block (Ch. 42, 45) |
-| **Page fault (minor)** | ~1-5 µs | — | first touch of a page (Ch. 23) — why `mlockall` + pre-fault (Ch. 26, 46) |
+| **Page fault (minor)** | ~0.3-1 µs for a 4 KiB page; several µs for a zeroed 2 MiB THP page | ~1,000-3,000 | first touch of a page, zeroing included (Ch. 23) — why `mlockall` + pre-fault (Ch. 26, 46) |
 | **Kernel-stack NIC RX (wire→app)** | ~5-15 µs | — | the full kernel network path (Ch. 47) — interrupts, copies, stack |
-| **Kernel-bypass NIC RX (wire→app)** | ~1-2 µs | — | poll-mode, zero-copy userspace (Ch. 62, 55) — ~5-10× better than kernel stack |
+| **Kernel-bypass NIC RX (wire→app)** | ~0.5-1 µs p50, ~1-2 µs p99 | — | poll-mode, zero-copy userspace (Ch. 62, 55): ef_vi/ExaNIC-class ~0.5-0.8 µs, DPDK ~1 µs — ~5-10× better than kernel stack |
 | **FPGA inline (wire→wire)** | ~tens-100s ns | — | hardware on the NIC (Ch. 69) — below software bypass, with a *flat tail* |
 | **PCIe round-trip (device register read)** | ~300 ns-1 µs | — | non-posted read = full round-trip (Ch. 66) — the floor under every offload (GPU/Ch. 67); why accelerators stay off the order path |
 | **SSD/NVMe random read** | ~10-100 µs | — | off-hot-path only (Ch. 75 capture) — never on the path |
@@ -38,11 +38,11 @@ Modern x86-64 server, ~3 GHz (so **~0.33 ns/cycle**; cycles ≈ ns × 3). Repres
 
 A few ratios worth burning in (Ch. 1's "reason about the distribution and the ratios"):
 
-- **L1 : DRAM ≈ 1 : 100.** A cache miss is ~100 cycles you didn't budget — the single most important number in Parts II/IV. The whole cache-aware/data-oriented agenda (Ch. 7–10, 25) exists to keep you out of the DRAM row.
-- **Branch mispredict ≈ an L2/L3-ish hit, ~10-20 cycles** — cheap *individually*, but on a hot path executed millions of times an unpredictable branch is a real tax (Ch. 13) — hence branchless techniques.
+- **L1 : DRAM ≈ 1 : 50–100.** A cache miss is ~250 cycles you didn't budget — two orders of magnitude, the single most important number in Parts II/IV. The whole cache-aware/data-oriented agenda (Ch. 7–10, 25) exists to keep you out of the DRAM row.
+- **Branch mispredict ≈ an L2/L3-ish hit, ~15-20 cycles (~5-7 ns)** — cheap *individually*, but on a hot path executed millions of times an unpredictable branch is a real tax (Ch. 13) — hence branchless techniques.
 - **Cross-core HITM (~40-100 ns) > branch mispredict, ≈ a DRAM access** — false sharing (Ch. 33) and contended atomics (Ch. 30) cost like a cache miss *every time the line bounces*. This is why "lock-free" with a contended hot line can be *slower* than a well-tuned lock (Ch. 32).
-- **Syscall (~50-100 ns) ≫ everything microarchitectural; context switch (µs) ≫ syscall.** The user/kernel boundary is a cliff (Ch. 41); crossing it on the hot path (a `write` to log — Ch. 71, a blocking call — Ch. 47) is why Parts VII-VIII work so hard to avoid it.
-- **Kernel stack (µs) : kernel bypass (~1 µs) : FPGA (~100 ns).** The three network tiers (Ch. 47, 62, 69) — each ~5-10× the next. The tick-to-trade budget (Ch. 76) is dominated by which tier you're on.
+- **Syscall (~50-400 ns, mitigation-dependent) ≈ one to several DRAM misses — before any real kernel work or the cache/TLB side effects; context switch (µs) ≫ syscall.** The user/kernel boundary is a cliff (Ch. 41); crossing it on the hot path (a `write` to log — Ch. 71, a blocking call — Ch. 47) is why Parts VII-VIII work so hard to avoid it.
+- **Kernel stack (µs) : kernel bypass (~0.5-1 µs) : FPGA (~100 ns).** The three network tiers (Ch. 47, 62, 69) — each ~5-10× the next. The tick-to-trade budget (Ch. 76) is dominated by which tier you're on.
 - **PCIe round-trip (~µs) is the floor under offload** (Ch. 66) — it's why a GPU (Ch. 67), however fast its kernel, can't be on the order path, and why the FPGA goes *inline* (Ch. 69) instead of behind PCIe.
 
 ## E.2 How each was measured, with pointers to the deriving chapter

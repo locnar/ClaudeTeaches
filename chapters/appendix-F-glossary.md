@@ -63,11 +63,11 @@
 - **`mlockall`** — locks a process's pages resident in RAM so they're never swapped or paged out, eliminating page-fault stalls on the hot path. (Ch. 26)
 - **`nohz_full`** — kernel feature stopping the periodic scheduler-tick interrupt on a core running a single task (tickless), removing that recurring jitter source. (Ch. 45, Appendix C)
 - **NUMA** — Non-Uniform Memory Access: multi-socket systems where each CPU has faster access to its *local* memory node than to a remote node; node-local placement matters. (Ch. 16)
-- **Page fault** — a trap when a touched virtual page isn't mapped/resident; *minor* (map an existing page) costs ~µs, *major* (from disk) far more — both forbidden on the hot path. (Ch. 23, 26)
+- **Page fault** — a trap when a touched virtual page isn't mapped/resident; *minor* (map a zero or already-resident page) costs ~0.3–1 µs for 4 KiB, *major* (from disk) far more — both forbidden on the hot path. (Ch. 23, 26)
 - **`rcu_nocbs`** — kernel cmdline offloading RCU callback processing off specified cores, keeping grace-period work off the isolated hot cores. (Ch. 45, Appendix C)
 - **Shared memory (`mmap(MAP_SHARED)` / `shm_open` / `memfd_create`)** — a memory segment mapped into several processes' address spaces: the zero-copy data plane between feed-handler, strategy and gateway processes (single-writer rings, seqlock snapshots), with the pointers-across-address-spaces trap. (Ch. 26, 50, 74)
 - **Swappiness / swap** — the kernel's willingness to page memory to disk; on a trading box, disabled entirely (a swapped hot page is a multi-ms fault). (Ch. 23, Appendix C)
-- **THP** — Transparent Huge Pages: kernel-managed automatic huge pages; convenient but `khugepaged` compaction is a jitter source — often disabled in favor of explicit huge pages. (Ch. 15, Appendix C)
+- **THP** — Transparent Huge Pages: kernel-managed automatic huge pages; convenient, but fault-time 2 MiB allocation (with the direct compaction the `defrag` setting may allow) and the background `khugepaged` collapse of 4 KiB pages are jitter sources — often disabled in favor of explicit huge pages. (Ch. 15, Appendix C)
 
 ## F.4 Concurrency terms
 
@@ -125,7 +125,7 @@
 - **Aeron / eRPC / Homa** — purpose-built low-latency transports: **Aeron** (reliable UDP/multicast/IPC messaging, LMAX lineage), **eRPC** (µs RPC on commodity NICs), **Homa** (receiver-driven, connectionless, HOL-free). (Ch. 65)
 - **aRFS** — accelerated Receive Flow Steering: the kernel programs the NIC to steer each flow to the core its socket is consumed on, automatically. (Ch. 57)
 - **Busy-poll / poll-mode** — spinning on a NIC/socket for new data instead of taking interrupts — removing interrupt and wakeup latency at the cost of a burned core. (Ch. 47, 62)
-- **Cut-through / store-and-forward / layer-1** — switch types: **cut-through** starts forwarding after the header (frame-size-independent, sub-µs); **store-and-forward** receives the whole frame first (serialization delay, grows with size); **layer-1** is a physical cross-connect/replicator (sub-ns, no parsing). (Ch. 60)
+- **Cut-through / store-and-forward / layer-1** — switch types: **cut-through** starts forwarding after the header (frame-size-independent, sub-µs); **store-and-forward** receives the whole frame first (serialization delay, grows with size); **layer-1** is a physical cross-connect/replicator (~4–5 ns port-to-port, no parsing). (Ch. 60)
 - **DCQCN** — Data Center Quantized Congestion Notification: the RoCEv2 congestion-control algorithm that reacts to ECN marks by cutting rate, keeping buffers below the PFC threshold. (Ch. 64)
 - **DDIO (Data Direct I/O)** — Intel feature that DMAs inbound NIC data straight into L3 (skipping DRAM) — a receive-latency win that can also pollute the hot working set. (Ch. 56)
 - **devmem TCP** — kernel receive path that splits headers to the host and DMAs the payload directly into device memory (GPU/FPGA), never touching host DRAM. (Ch. 49)
@@ -170,7 +170,7 @@
 - **DMA (Direct Memory Access)** — a device reading/writing host memory without the CPU; the bulk-transfer mechanism behind NICs and accelerators. (Ch. 66)
 - **DOCA / P4** — DPU programming models: **DOCA** (NVIDIA BlueField SDK, C/C++ on ARM cores), **P4** (a declarative packet-processing language for match/action pipelines). (Ch. 70)
 - **DPU / SmartNIC** — a NIC with a programmable processor on it (ARM cores and/or FPGA) between wire and host, for offloading packet processing, RDMA, security, and even feed handling. (Ch. 70)
-- **FPGA / HLS / RTL** — Field-Programmable Gate Array (configurable hardware, deterministic-nanosecond pipelines); described in **RTL** (Verilog/VHDL, gate-level, lowest latency) or **HLS** (C/C++ compiled to hardware, easier). (Ch. 69)
+- **FPGA / HLS / RTL** — Field-Programmable Gate Array (configurable hardware, deterministic-nanosecond pipelines); described in **RTL** (Verilog/VHDL at register-transfer level — cycle-exact registers and the logic between them, which synthesis lowers to a gate-level netlist; lowest latency) or **HLS** (C/C++ compiled to hardware, easier). (Ch. 69)
 - **GPUDirect / P2P DMA** — peer-to-peer DMA directly between devices (NIC↔GPU/FPGA) bypassing host memory. (Ch. 66, 67)
 - **IOMMU** — I/O Memory Management Unit: translates and protects device DMA addresses (a TLB for devices). (Ch. 66)
 - **MMIO** — Memory-Mapped I/O: accessing device registers as memory; a non-posted *read* is a full PCIe round-trip. (Ch. 66)
