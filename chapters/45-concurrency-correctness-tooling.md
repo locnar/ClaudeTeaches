@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 33 (the memory model — TSan checks happens-before; the bugs are ordering bugs), Ch. 37–40 (the lock-free structures this validates), Ch. 26/39 (allocation/UAF — ASan's domain), Ch. 23 (UB — UBSan's domain), Ch. 3 (measurement rigor extends to correctness).
 >
-> **Leads into:** Ch. 87 (secure programming — sanitizers + fuzzing on the decode path), Ch. 98 (CI/regression — these tools belong in CI). Closes **Part VI** — the verification discipline that makes the lock-free and async work of Ch. 33–44 *trustworthy*.
+> **Leads into:** Ch. 87 (secure programming — sanitizers + fuzzing on the decode path), Ch. 99 (CI/regression — these tools belong in CI). Closes **Part VI** — the verification discipline that makes the lock-free and async work of Ch. 33–44 *trustworthy*.
 
 ---
 
@@ -152,7 +152,7 @@ Sanitizers only see *executed* interleavings (§45.2), so you must *produce* the
 - **Perturb the scheduling.** Add randomized delays/yields (`std::this_thread::yield`, random `sleep`/`pause` at suspect points), run on *more* threads than cores (oversubscribe — the opposite of the hot-path rule, but here it *helps* by forcing context switches and interleavings — Ch. 46), vary thread priorities, and run on machines with different core counts. TSan itself does *not* perturb the schedule (it finds races by happens-before analysis, not schedule exploration); for schedule perturbation use `rr record --chaos` (Ch. 5), randomised yields in the harness, oversubscription, or the systematic checkers of §45.4.3. Useful real `TSAN_OPTIONS`: `history_size=7` (longer stacks), `halt_on_error=1`, `report_atomic_races=1`, `suppressions=file`. The more interleavings explored, the more confidence.
 - **Run on ARM / weakly-ordered hardware (Ch. 33, Appendix A).** The single highest-value supplement: ARM exposes the ordering bugs x86 hides. Run the concurrency suite under TSan **on ARM (Graviton)** — many real ordering bugs surface there and nowhere else. If you deploy on x86 only, *still* test on ARM for the ordering coverage.
 - **Property/invariant checks under stress.** Beyond "did it crash," assert structural invariants continuously (the queue never loses or duplicates a message, the count is consistent, the sequence is monotonic) so a corruption is *caught*, not silently absorbed. Combine with stress to catch logic bugs sanitizers miss (§45.5).
-- **Long-soak and load-replay.** Run the realistic workload (captured market data — Ch. 93) at high rate for hours under sanitizers; market-open-burst replay is especially valuable (it's the load that hits the windows in production).
+- **Long-soak and load-replay.** Run the realistic workload (captured market data — Ch. 94) at high rate for hours under sanitizers; market-open-burst replay is especially valuable (it's the load that hits the windows in production).
 
 ### 45.4.2 Fuzzing
 
@@ -161,7 +161,7 @@ Fuzzing generates inputs to explore code paths — essential where **untrusted i
 - **Coverage-guided fuzzing (libFuzzer / AFL++).** Mutate inputs to maximize code coverage, finding paths (and their bugs) you didn't think to test. Run **with ASan/UBSan** so a malformed-input bug (buffer overflow in a zero-copy parse — Ch. 60, integer overflow in price math — Ch. 30, a UB — Ch. 23) is caught the instant the fuzzer reaches it. This is the primary defense for the **market-data decode path** (Ch. 60, 87) — feed it malformed/hostile packets and let ASan/UBSan catch the mishandling.
 - **Fuzz the message parsers.** The decode of ITCH/OUCH/FIX/SBE (Ch. 60) parses variable-length, untrusted wire data — exactly where bounds bugs live. A fuzz harness that throws random/mutated packets at the parser under ASan finds the buffer overruns and UB that a malicious or malformed feed could trigger (Ch. 87's security framing).
 - **Structure-aware fuzzing.** For structured protocols, a grammar/structure-aware fuzzer (or a custom mutator) generates *plausible-but-malformed* messages (valid headers, corrupt bodies) that reach deeper into the parser than random bytes — more effective for protocol code.
-- **Differential / replay fuzzing.** Feed the same input to two implementations (or the same one across versions) and diff — catching logic divergences (ties Ch. 93–98's determinism). Fuzz the *replay* path to ensure deterministic processing of arbitrary captures.
+- **Differential / replay fuzzing.** Feed the same input to two implementations (or the same one across versions) and diff — catching logic divergences (ties Ch. 94–99's determinism). Fuzz the *replay* path to ensure deterministic processing of arbitrary captures.
 - **Fuzzing finds inputs; combine with concurrency.** Fuzzing primarily explores *input* paths; combined with stress (concurrent fuzzing) it can also explore input×interleaving — but its main concurrency value is reaching the parsing/state-machine code that concurrency then operates on.
 
 ### 45.4.3 Model checking lock-free code
@@ -178,7 +178,7 @@ For the highest assurance on small, critical lock-free primitives, **model check
 
 - **"It passed on x86, so it's correct" (the cardinal sin).** x86-TSO hides missing acquire/release (§45.3, Ch. 33) — code can pass millions of x86 test runs and be fundamentally racy (failing on ARM or a rare interleaving). x86 testing is *structurally incapable* of catching the ordering bugs. **Run TSan; run on ARM; model-check** — don't trust x86 green.
 - **Sanitizer-clean but still racy (the limit of sampling).** TSan only flags races on interleavings it *observed*; a race reachable only under an interleaving you didn't hit goes unreported (§45.2). Clean TSan is necessary, **not sufficient**. *Drive* TSan with heavy **stress** (§45.4.1) and exhaust the small primitives with **model checking** (§45.4.3) — and don't conclude "no race" from a few clean runs.
-- **Not running the sanitizers at all / not in CI.** Sanitizers find these bugs *only if you run them*. Concurrency code that's never been under TSan/ASan is untested for its most dangerous bug class. **Put TSan/ASan/UBSan builds in CI** (Ch. 98), gating merges — make it impossible to land un-sanitized concurrent code.
+- **Not running the sanitizers at all / not in CI.** Sanitizers find these bugs *only if you run them*. Concurrency code that's never been under TSan/ASan is untested for its most dangerous bug class. **Put TSan/ASan/UBSan builds in CI** (Ch. 99), gating merges — make it impossible to land un-sanitized concurrent code.
 - **Running sanitizers in production.** TSan (~10×) / ASan (~2×) slow things down and change timing — they're *testing* tools, not production hardening. (For production, the hardening is `-fstack-protector`/`_FORTIFY_SOURCE`/CFI — Ch. 87, not sanitizers.) Don't ship a sanitizer build; do run it relentlessly in test/CI. The production-capable alternatives — hardened library modes (`_GLIBCXX_ASSERTIONS`, measured at +3–8 % on a decode loop), guard pages, poison-on-free and a hardware data breakpoint armed on the live PID from a sidecar — are Ch. 5 §5.4.5.
 - **TSan + ASan together (incompatible).** TSan and ASan can't be combined in one build; run **separate** builds (a TSan job and an ASan job). UBSan combines with ASan. Plan the CI matrix accordingly.
 - **Forgetting logic bugs (memory-model-legal but wrong).** A correctly-synchronized algorithm can still be *logically* wrong (right ordering, wrong result) — invisible to TSan. Assert **invariants** continuously under stress (§45.4.1) and test the *behavior*, not just the absence of races.
@@ -199,7 +199,7 @@ For the highest assurance on small, critical lock-free primitives, **model check
 
 **Checklist — concurrency correctness tooling**
 
-- [ ] All concurrency code is run under **TSan** (data races / missing happens-before — Ch. 33), **ASan** (UAF/overflow — Ch. 39), and **UBSan** (UB — Ch. 23) — in **separate builds** where required — and these are in **CI** (Ch. 98), gating merges.
+- [ ] All concurrency code is run under **TSan** (data races / missing happens-before — Ch. 33), **ASan** (UAF/overflow — Ch. 39), and **UBSan** (UB — Ch. 23) — in **separate builds** where required — and these are in **CI** (Ch. 99), gating merges.
 - [ ] I **never conclude "correct" from x86 testing alone** — I run TSan, test on **ARM** (Appendix A), and **model-check** small critical primitives (§45.5).
 - [ ] Sanitizers are **driven by stress** (many threads, high contention, oversubscription, randomized scheduling, long soak, captured-data replay — §45.4.1) and **continuous invariant assertions** (to catch logic bugs TSan misses).
 - [ ] The **message-decode path** (Ch. 60) is **fuzzed (libFuzzer/AFL++) under ASan+UBSan** with malformed/hostile input (ties Ch. 87).
@@ -214,13 +214,13 @@ For the highest assurance on small, critical lock-free primitives, **model check
 - The libFuzzer and AFL++ documentation — coverage-guided fuzzing with sanitizers (§45.4.2; ties Ch. 87).
 - GenMC, CDSChecker (Norris & Demsky, *"CDSChecker: Checking Concurrent Data Structures Written with C/C++ Atomics"*), and Relacy (Vyukov) — memory-model-aware model checking of lock-free code (§45.4.3).
 - H. Sutter, *"atomic<> Weapons"* and the C++ memory-model references (Ch. 33) — the happens-before semantics TSan checks against.
-- The OSS-Fuzz project and Google's sanitizer/fuzzing-in-CI writeups — running these tools continuously at scale (§45.5, ties Ch. 98).
+- The OSS-Fuzz project and Google's sanitizer/fuzzing-in-CI writeups — running these tools continuously at scale (§45.5, ties Ch. 99).
 
 ## 45.8 Additional Reading
 
 - P. McKenney, *Is Parallel Programming Hard?* — validation of concurrent code, stress testing, and formal methods.
 - The TLA+ (Lamport) and Spin (Holzmann) model-checking resources — abstract algorithm verification, for the design level above the C++ code.
-- Ch. 33 (*Memory Model*) — the happens-before TSan verifies; Ch. 37–44 (*Lock-Free / Seqlocks / Reclamation / Disruptor / Coroutines / Senders*) — the code this validates; Ch. 60 (*Wire Decoding*) — the fuzz target; Ch. 87 (*Secure Programming*) — sanitizers+fuzzing as security tooling; Ch. 98 (*CI/Regression*) — running it all continuously; **Appendix A** — ARM as the weak-ordering test bed.
+- Ch. 33 (*Memory Model*) — the happens-before TSan verifies; Ch. 37–44 (*Lock-Free / Seqlocks / Reclamation / Disruptor / Coroutines / Senders*) — the code this validates; Ch. 60 (*Wire Decoding*) — the fuzz target; Ch. 87 (*Secure Programming*) — sanitizers+fuzzing as security tooling; Ch. 99 (*CI/Regression*) — running it all continuously; **Appendix A** — ARM as the weak-ordering test bed.
 - **Appendix F** — the sanitizer (ASan / UBSan / TSan / MSan) glossary entry.
 
 ---

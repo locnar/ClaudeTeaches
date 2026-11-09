@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 58 (multicast sockets — the join call and the sysctl knobs this chapter explains), Ch. 60 (A/B arbitration and sequence-gap detection — the mechanisms that *cannot* see the failure treated here), Ch. 61 (gap recovery — what runs once a gap is detected; this chapter is logically before it), Ch. 68-preview (the fabric that replicates the feed), Appendix K (the colocation network the feed crosses), Ch. 53 (warming — a join is a warm-up step), Ch. 17 (the clock the watchdog reads), Ch. 1 (the tail — a dark feed is a tail of infinite length).
 >
-> **Leads into:** Ch. 63 and Ch. 65 (NIC and flow steering — the group lands in a queue), Ch. 70 (kernel bypass — who sends the IGMP report when the kernel is not in the path), Ch. 86 (telemetry — per-feed liveness age as a published gauge), Ch. 89 (kill-switch — what a dark feed triggers), Ch. 97 (network health — membership and querier state as monitored signals), Appendix M (the feed gate). Ch. 61 recovers the stream once it arrives; this chapter makes sure it arrives, on the right NIC, before the open, and that its absence is noticed within a heartbeat.
+> **Leads into:** Ch. 63 and Ch. 65 (NIC and flow steering — the group lands in a queue), Ch. 70 (kernel bypass — who sends the IGMP report when the kernel is not in the path), Ch. 86 (telemetry — per-feed liveness age as a published gauge), Ch. 89 (kill-switch — what a dark feed triggers), Ch. 98 (network health — membership and querier state as monitored signals), Appendix M (the feed gate). Ch. 61 recovers the stream once it arrives; this chapter makes sure it arrives, on the right NIC, before the open, and that its absence is noticed within a heartbeat.
 
 ---
 
@@ -107,7 +107,7 @@ Ch. 58 §58.4.2 listed the knobs; here is what each one *does* to a feed, and th
 - **`IP_MULTICAST_ALL` (default 1).** Set to 0 on every market-data socket, always. With the default, a socket bound to a port receives every group joined by *any* socket on the host for that port — the cross-talk trap of §62.4.1, and a performance trap too: the kernel delivers each packet to every matching socket.
 - **`net.ipv4.conf.<dev>.rp_filter` (strict = 1 on most distributions).** The feed's source (the venue's sender) is usually *not* reachable via the feed NIC in your routing table (you have a default route out the management NIC), so strict RPF drops every feed packet at IP input. The signature is `nstat -az IPReversePathFilter` incrementing with a clean `/proc/net/igmp` and clean `ethtool -S`. Set `rp_filter=0` or `2` (loose) on the feed interfaces, or add a route for the venue's source prefixes via the feed NIC (the cleaner fix — it also makes retransmission requests, Ch. 61, go out the right way). `all.rp_filter` takes the *maximum* of `all` and the interface value, so set both.
 - **`force_igmp_version`.** Pin to 3 when the switches speak v3 (so your SSM filters survive); pin to 2 only when a v2-only querier is unavoidable, and know that SSM is then a host-side fiction. `/proc/net/igmp`'s `Querier` column shows what the interface is *actually* running after hearing the network.
-- **`SO_REUSEPORT` / `SO_REUSEADDR`.** Two processes on one host receiving the same group:port (a handler and a capture process, Ch. 93) must both set `SO_REUSEADDR` before `bind`, or the second `bind` fails; `SO_REUSEPORT` additionally lets the kernel load-balance *unicast* across them — irrelevant for multicast, which is delivered to all matching sockets.
+- **`SO_REUSEPORT` / `SO_REUSEADDR`.** Two processes on one host receiving the same group:port (a handler and a capture process, Ch. 94) must both set `SO_REUSEADDR` before `bind`, or the second `bind` fails; `SO_REUSEPORT` additionally lets the kernel load-balance *unicast* across them — irrelevant for multicast, which is delivered to all matching sockets.
 - **Buffers.** `SO_RCVBUF` large enough for the open (Ch. 58, 60) and `net.core.rmem_max` raised to allow it; a join that *works* and then drops in the socket buffer shows as `UdpRcvbufErrors` and *does* produce gaps — that is Ch. 60's problem, and the counter that distinguishes it from a dark feed.
 
 ### 62.4.3 Verifying membership from the host
@@ -128,7 +128,7 @@ nstat -az IPReversePathFilter IpInAddrErrors UdpInErrors UdpRcvbufErrors   # rp_
 ethtool -S eth1 | grep -iE 'multicast|mcast'                               # the NIC saw the group frames (rx_multicast rising)
 ```
 
-Fold these into start-up: after joining, assert that `/proc/net/igmp` lists every expected group on the expected device, that a general query has been seen on each feed NIC within the last two intervals, and that `IPReversePathFilter` is not moving. Appendix M runs the same three checks at T-30 and T-5 as the **feed gate**, and Ch. 97 §97.4.3 samples them continuously (the "seconds since last general query" gauge is the one host-observable precursor of the querier failure).
+Fold these into start-up: after joining, assert that `/proc/net/igmp` lists every expected group on the expected device, that a general query has been seen on each feed NIC within the last two intervals, and that `IPReversePathFilter` is not moving. Appendix M runs the same three checks at T-30 and T-5 as the **feed gate**, and Ch. 98 §98.4.3 samples them continuously (the "seconds since last general query" gauge is the one host-observable precursor of the querier failure).
 
 ### 62.4.4 The dark-feed watchdog and the re-join policy
 
@@ -236,7 +236,7 @@ Under kernel bypass (Ch. 70) the kernel never sees the socket, so *something els
 
 - **Onload** and **ef_vi** (Solarflare/AMD): Onload sockets join through the normal `setsockopt` and Onload issues the report (and keeps the kernel's membership state coherent); raw `ef_vi` applications must join via a *kernel* socket on the same interface (or `ef_vi`'s multicast filter plus a kernel-side membership) — the filter programs the NIC, the kernel socket keeps the switch forwarding.
 - **DPDK**: the PMD owns the port and the kernel has no interface on it; the application must speak IGMP itself (build and send reports, answer general queries — `rte_eth_dev_set_mc_addr_list` programs the NIC's MAC filter but tells the switch nothing), or keep the port in a bifurcated mode (e.g. `mlx5` with the kernel netdev still present) and join through a kernel socket on the netdev.
-- **In every case**, §62.4.3's verification shrinks to what the bypass stack exposes: `/proc/net/igmp` is only meaningful for kernel-side joins, so the authoritative check becomes the switch's snooping table (`show ip igmp snooping groups`, via the network team or a monitoring API — Ch. 97 §97.4.4) and the dark-feed watchdog, which works identically on a ring poll.
+- **In every case**, §62.4.3's verification shrinks to what the bypass stack exposes: `/proc/net/igmp` is only meaningful for kernel-side joins, so the authoritative check becomes the switch's snooping table (`show ip igmp snooping groups`, via the network team or a monitoring API — Ch. 98 §98.4.4) and the dark-feed watchdog, which works identically on a ring poll.
 
 ## 62.5 Pitfalls & anti-patterns: silence is not a quiet market
 
@@ -289,7 +289,7 @@ Under kernel bypass (Ch. 70) the kernel never sees the socket, so *something els
 - Switch-vendor multicast configuration guides (Cisco NX-OS/IOS, Arista EOS *IGMP snooping* and *snooping querier* chapters) — the other side of the conversation, and the commands your network team runs to show the snooping table.
 - Beau Williamson, *Developing IP Multicast Networks* (Cisco Press) — the routed-multicast background (PIM, RPF, RPs) behind the venue distribution tree.
 - Talks and post-mortems on market-data feed handler incidents (silent feeds, join storms, querier outages) from the trading-systems community — the operational folklore this chapter formalises.
-- Ch. 63 (*NIC Features*) and Ch. 65 (*Flow Steering*) — where the joined group's frames land; Ch. 86 (*Telemetry*) — the per-feed age gauge; Ch. 97 (*Network Health*) — membership and querier state as continuous signals, and the switch-side counters; Appendix M — the T-30/T-5 feed gate built on §62.4.3; **Appendix F** — IGMP / querier / snooping / SSM / dark feed glossary; **Appendix I.8** — the membership one-liners.
+- Ch. 63 (*NIC Features*) and Ch. 65 (*Flow Steering*) — where the joined group's frames land; Ch. 86 (*Telemetry*) — the per-feed age gauge; Ch. 98 (*Network Health*) — membership and querier state as continuous signals, and the switch-side counters; Appendix M — the T-30/T-5 feed gate built on §62.4.3; **Appendix F** — IGMP / querier / snooping / SSM / dark feed glossary; **Appendix I.8** — the membership one-liners.
 
 ---
 

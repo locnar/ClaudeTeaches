@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 60 (zero-copy wire decoding — the untrusted-input surface this chapter hardens), Ch. 27 (arena/zero-allocation — where memory-safety bugs live without a GC to catch them), Ch. 30 (price/quantity arithmetic — integer-overflow safety), Ch. 21–23 (abstractions / aliasing — UB as a vulnerability class), Ch. 6 (system setup — spec-exec mitigations and their cost), Ch. 45 (sanitizers/fuzzing tooling), Ch. 84 (logging — keeping secrets out of it).
 >
-> **Leads into:** Ch. 89 (process topology — privilege reduction, fault domains, kill-switch as a safety mechanism), Ch. 93–98 (capture/case study — integrity of the captured record). A cross-cutting Part XIII chapter: security treated as a *hot-path* and *correctness* concern, not a bolt-on.
+> **Leads into:** Ch. 89 (process topology — privilege reduction, fault domains, kill-switch as a safety mechanism), Ch. 94–99 (capture/case study — integrity of the captured record). A cross-cutting Part XIII chapter: security treated as a *hot-path* and *correctness* concern, not a bolt-on.
 
 ---
 
@@ -114,11 +114,11 @@ Apply the §87.3 stance as concrete build configuration (Ch. 24, Appendix D):
 
 ### 87.4.5 Secret handling and secure wiping; keeping secrets out of logs
 
-Order sessions carry credentials (session passwords, API keys, signing keys). Handle them so they don't leak — including through this book's own machinery (Ch. 84 logging, Ch. 93 capture):
+Order sessions carry credentials (session passwords, API keys, signing keys). Handle them so they don't leak — including through this book's own machinery (Ch. 84 logging, Ch. 94 capture):
 
-- **Keep secrets out of logs and captures.** The binary logger (Ch. 84) and the capture journal (Ch. 93) record *everything* by default — so secrets must be explicitly excluded or redacted at the source. Never `LOG` a credential; mark secret fields non-capturable. This ties Ch. 84 directly: a fast logger that captures a password is a fast leak.
+- **Keep secrets out of logs and captures.** The binary logger (Ch. 84) and the capture journal (Ch. 94) record *everything* by default — so secrets must be explicitly excluded or redacted at the source. Never `LOG` a credential; mark secret fields non-capturable. This ties Ch. 84 directly: a fast logger that captures a password is a fast leak.
 - **Secure, non-elided wiping.** Zeroing a secret buffer with a plain loop can be *deleted by the optimizer* as a dead store (Ch. 4 — dead-store elimination under the as-if rule; cf. Ch. 23's aliasing rules for what else the optimizer may assume — the compiler sees the buffer is never read again). Use `explicit_bzero` (glibc ≥ 2.25 — the primary Linux choice), C23 `memset_explicit` (glibc ≥ 2.43; `memset_s` from C11 Annex K does **not** exist in glibc or musl), `std::fill` through a `volatile` view, or a wipe the compiler can't elide — verify in the codegen (Ch. 4) that the store survives. A buffer wipe also does not reach copies the compiler spilled to registers or stack slots: wipe in a non-inlined function and keep the secret's lifetime short. A "wiped" secret the optimizer left in memory is a vulnerability.
-- **Minimize lifetime and copies.** Hold secrets briefly, in as few places as possible; avoid `std::string` copies that scatter the secret across freed heap blocks (a problem in arena designs too — Ch. 27). `mlock` (Ch. 29) the secret pages so they're never swapped to disk — and exclude them from core dumps with `madvise(MADV_DONTDUMP)`, because Ch. 89 deliberately captures cores of crashed trading processes. The wire capture is the other leak: Ch. 93 journals every outbound packet, and the SoupBinTCP/OUCH Login Request and FIX Logon (tag 554) carry the session password in clear — redact that field in the capture path (and route cores and captures to a restricted sink).
+- **Minimize lifetime and copies.** Hold secrets briefly, in as few places as possible; avoid `std::string` copies that scatter the secret across freed heap blocks (a problem in arena designs too — Ch. 27). `mlock` (Ch. 29) the secret pages so they're never swapped to disk — and exclude them from core dumps with `madvise(MADV_DONTDUMP)`, because Ch. 89 deliberately captures cores of crashed trading processes. The wire capture is the other leak: Ch. 94 journals every outbound packet, and the SoupBinTCP/OUCH Login Request and FIX Logon (tag 554) carry the session password in clear — redact that field in the capture path (and route cores and captures to a restricted sink).
 
 ### 87.4.6 Privilege reduction (`seccomp`, capabilities, namespaces)
 
@@ -135,15 +135,15 @@ The binary that trades must be the binary you built from the source you reviewed
 
 - **Vet and pin dependencies.** A compromised dependency is a compromised hot path. Minimize the dependency surface (the low-latency ethos already favors few, well-understood libraries), pin versions, and review what goes into the parser/decoder especially (the untrusted-input surface, §87.4.1).
 - **Reproducible builds.** A bit-for-bit reproducible build lets you verify the deployed binary matches the audited source — no injected backdoor in the toolchain step. Pin the compiler and flags (Ch. 24, Appendix D).
-- **Signed builds and artifacts.** Sign the binary and config; verify signatures at deploy. Combined with the immutable, audited config (Ch. 88) and capture of what actually ran (Ch. 93), this gives a provenance chain for compliance and incident response.
+- **Signed builds and artifacts.** Sign the binary and config; verify signatures at deploy. Combined with the immutable, audited config (Ch. 88) and capture of what actually ran (Ch. 94), this gives a provenance chain for compliance and incident response.
 
 ### 87.4.8 Fuzzing message parsers (libFuzzer/AFL++); ASan/UBSan/MSan
 
 The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's the untrusted-input boundary (§87.2.1), and a bug there is remotely triggerable:
 
-- **Fuzz the decoder with libFuzzer/AFL++ under ASan+UBSan (+MSan).** Feed the ITCH/OUCH/FIX/SBE/FAST parser random and mutated inputs; the sanitizers (Ch. 45) turn latent memory-safety/UB bugs (§87.2.2) into loud, reproducible crashes. Seed the corpus with real captured packets (Ch. 93) and known-tricky messages (max-length, zero-length, truncated, oversized counts).
+- **Fuzz the decoder with libFuzzer/AFL++ under ASan+UBSan (+MSan).** Feed the ITCH/OUCH/FIX/SBE/FAST parser random and mutated inputs; the sanitizers (Ch. 45) turn latent memory-safety/UB bugs (§87.2.2) into loud, reproducible crashes. Seed the corpus with real captured packets (Ch. 94) and known-tricky messages (max-length, zero-length, truncated, oversized counts).
 - **MSan for uninitialized reads, ASan for spatial/temporal, UBSan for the rest.** The three catch complementary classes; run all (ASan+UBSan together, MSan separately due to its requirements). The arena (§87.4.2) especially benefits from ASan's use-after-free detection.
-- **Continuous, in CI (Ch. 45, 98).** Fuzzing is not a one-time audit — run it continuously so new parser code and new message types stay covered. A latency-regression gate (Ch. 98) and a fuzzing gate belong in the same CI.
+- **Continuous, in CI (Ch. 45, 99).** Fuzzing is not a one-time audit — run it continuously so new parser code and new message types stay covered. A latency-regression gate (Ch. 99) and a fuzzing gate belong in the same CI.
 - **Ship the fixes, not the instrumentation (§87.3).** Production runs the hardened-but-fast binary; the sanitizer builds are the test bench.
 
 ## 87.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
@@ -152,7 +152,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 - **Treating UB as a performance feature and forgetting it's a vulnerability.** Walking up to UB for codegen (Ch. 23) and not realizing the optimizer may delete a security check or that the UB is exploitable (§87.2.2). Run UBSan (Ch. 45); fix every finding.
 - **"Turn off all hardening for speed" without measuring.** Most hardening is ~free (§87.3); disabling `_FORTIFY_SOURCE`/ASLR/stack-protector wholesale trades real security for usually-immeasurable latency. Measure per feature; drop only the demonstrably expensive ones (CFI/spec-exec) and only with justification.
 - **The optimizer deleting your secret-wipe.** A plain `memset` to zero a key is a dead store the compiler removes (§87.4.5) — the secret stays in memory. Use `explicit_bzero`/C23 `memset_explicit`; verify in the asm (Ch. 4).
-- **Secrets in logs/captures.** The fast logger (Ch. 84) and capture journal (Ch. 93) record everything — a credential passed to `LOG` is leaked at full speed. Redact at the source.
+- **Secrets in logs/captures.** The fast logger (Ch. 84) and capture journal (Ch. 94) record everything — a credential passed to `LOG` is leaked at full speed. Redact at the source.
 - **Integer overflow in price/notional math.** Signed overflow is UB (§87.2.2) and a wrong-order bug (Ch. 30). Size types for headroom; check the risk-relevant ops (§87.4.3).
 - **Ignoring mitigation interactions.** Measuring CFI, retpoline, and devirtualization (Ch. 6, 14) *in isolation* and summing — they interact (retpoline changes indirect-call cost, CFI adds to it, devirt removes the calls entirely). Measure the *combination* on the isolated box (§87.3).
 - **Sanitizers in production as a shield.** ASan/UBSan are a 2-3× test/fuzz tool (§87.3, Ch. 45), not hot-path hardening. Shipping them tanks latency; *not* fixing what they find ships the bug. Do neither — fix and ship clean.
@@ -163,7 +163,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 **Exercises:**
 
 1. **Break a trusting parser.** Take a zero-copy ITCH/SBE parser (Ch. 60) that trusts its length fields and craft packets (truncated, oversized count, out-of-range index) that make it read out of bounds — confirm with ASan. Then add the §87.4.1 validation gate and re-run: the malformed packets are rejected, and measure the gate's hot-path cost (one early pass).
-2. **Fuzz the decoder.** Wire the parser to libFuzzer under ASan+UBSan (§87.4.8), seed with captured packets (Ch. 93), and run until it finds (or fails to find) a memory-safety/UB bug. Fix what it finds; add it to CI (Ch. 98).
+2. **Fuzz the decoder.** Wire the parser to libFuzzer under ASan+UBSan (§87.4.8), seed with captured packets (Ch. 94), and run until it finds (or fails to find) a memory-safety/UB bug. Fix what it finds; add it to CI (Ch. 99).
 3. **Bounds checks that vanish.** Write an order-book index access two ways — unchecked, and `.at()`/`span`-checked with a compile-time-known bound — and verify in Godbolt (Ch. 4) that the checked version compiles to *identical* code (the check folded away, §87.4.2). Then make the bound runtime-unknown and watch the check reappear; structure the code so it doesn't.
 4. **Measure the hardening ladder.** Build the feed handler at the §87.3 hardening levels and measure tick-to-trade (Ch. 66) at each. Reproduce "most are free, CFI/spec-exec are the costly few," and decide per-feature for your isolated box (Ch. 6).
 5. **Un-deletable secret wipe.** Zero a key buffer with a plain `memset` and with `explicit_bzero`; show in the asm (Ch. 4) that the plain one is deleted and the explicit one survives (§87.4.5).
@@ -177,7 +177,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 - [ ] Price/quantity/notional math uses **scaled integers with overflow headroom** and **checked arithmetic on risk-relevant ops** (`__builtin_*_overflow`); no FP for money (§87.4.3, Ch. 30).
 - [ ] **UB is treated as a vulnerability** — UBSan in CI, every finding fixed (§87.2.2).
 - [ ] Hardening: **free features on globally** (`_FORTIFY_SOURCE`, PIE/ASLR, stack-clash); stack-protector/CET tuned and **measured**; CFI/spec-exec **measured as a combination** on the isolated box and dropped only with justification (§87.3, §87.4.4).
-- [ ] **Secrets** never logged/captured (Ch. 84/93), wiped with **non-elided** `explicit_bzero`/`memset_explicit` (verified in asm), `mlock`'d, `MADV_DONTDUMP`'d, short-lived (§87.4.5).
+- [ ] **Secrets** never logged/captured (Ch. 84/94), wiped with **non-elided** `explicit_bzero`/`memset_explicit` (verified in asm), `mlock`'d, `MADV_DONTDUMP`'d, short-lived (§87.4.5).
 - [ ] **Privilege dropped after setup**; tight **seccomp** filter installed at the **steady-state boundary** so it never fires on the hot path (§87.4.6).
 - [ ] Build is **reproducible and signed**, dependencies vetted/pinned (§87.4.7); the wire **parser is continuously fuzzed** (libFuzzer/AFL++ under sanitizers) in CI (§87.4.8).
 
@@ -194,7 +194,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 - *Secure Coding in C and C++* (Seacord) and the OWASP/secure-design literature adapted to a systems/hot-path context.
 - Spectre/Meltdown and transient-execution mitigation analyses (Ch. 6 references) — the cost and interaction of spec-exec hardening (§87.4.4).
 - Talks on fuzzing network parsers and on memory safety in C++ (sanitizers, `std::span`, hardened standard libraries) — the parser-hardening and bounds-check-elision patterns (§87.4.1-2).
-- Ch. 89 (*Process Topology*) — fault domains, kill-switch/safe-state, privilege isolation as architecture; Ch. 88 (*Hot Reload*) — validated, signed config; Ch. 93 (*Capture*) — integrity and secret-redaction of the record; Ch. 45 (*Correctness Tooling*) — the sanitizer/fuzzing bench; Ch. 98 (*Case Study*) — fuzzing + latency-regression gates in CI.
+- Ch. 89 (*Process Topology*) — fault domains, kill-switch/safe-state, privilege isolation as architecture; Ch. 88 (*Hot Reload*) — validated, signed config; Ch. 94 (*Capture*) — integrity and secret-redaction of the record; Ch. 45 (*Correctness Tooling*) — the sanitizer/fuzzing bench; Ch. 99 (*Case Study*) — fuzzing + latency-regression gates in CI.
 - **Appendix D** (Compiler Flag Reference) — the optimization flags the hardening flags of §87.4.4 sit beside (`-fno-plt`/`-fno-semantic-interposition` for PIE, `-fsanitize=cfi`); **Appendix C** — `mitigations=` and isolated-box tuning; **Appendix F** — security/UB glossary.
 
 ---

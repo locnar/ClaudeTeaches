@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 18 (compile-time mechanics — `constexpr`/`consteval`, the template cost model; this chapter is the worked example §18.1 promised), Ch. 19 (templates as a design tool — type-based dispatch, `if constexpr`, the §19.4.6 concepts), Ch. 23 (aliasing and the sanctioned punning channels — every accessor generated here is a `memcpy` into a typed local), Ch. 31 (`std::byteswap`/`bswap`/`movbe`), Ch. 60 (the hand-written zero-copy decoder this chapter must match instruction for instruction).
 >
-> **Leads into:** Ch. 21 (the cost of abstractions — where the generated accessors' return types meet the calling convention, §21.4.5), Ch. 22 (`string_view` fields and symbols-as-integers, which the `Chars` encoding hands you), Ch. 25 (what the `consteval` parse costs the build and how to keep that cost bounded), Ch. 60 (the decode path proper: line arbitration, gaps, microbursts — this chapter only generates the field accessors it uses) and Ch. 93 (binary journal records are the same schema → layout problem, captured together with the schema version).
+> **Leads into:** Ch. 21 (the cost of abstractions — where the generated accessors' return types meet the calling convention, §21.4.5), Ch. 22 (`string_view` fields and symbols-as-integers, which the `Chars` encoding hands you), Ch. 25 (what the `consteval` parse costs the build and how to keep that cost bounded), Ch. 60 (the decode path proper: line arbitration, gaps, microbursts — this chapter only generates the field accessors it uses) and Ch. 94 (binary journal records are the same schema → layout problem, captured together with the schema version).
 
 ---
 
@@ -270,7 +270,7 @@ The compile-time decoder resolves everything that is *fixed* in the schema. Two 
 
 ### 20.4.5 Keeping the build-time cost bounded
 
-§20.3 priced a message type at 4–6 ms of front-end time per instantiating TU. Three habits keep that from compounding: instantiate each venue's `Message<…>` set in *one* decoder translation unit and expose a small non-template interface (or `extern template` the instantiations — Ch. 25 §25.4.2); keep the `consteval` parser's complexity linear in the schema length (the duplicate-name check above is O(n²) in field count, which is fine at 60 fields and would not be at 6,000 — SBE schemas with thousands of fields want a sorted check); and watch `-ftime-trace`'s `InstantiateFunction` rows in CI the way Ch. 98 watches a latency percentile — a decoder header that goes from 300 ms to 3 s is a regression even though no runtime number moved.
+§20.3 priced a message type at 4–6 ms of front-end time per instantiating TU. Three habits keep that from compounding: instantiate each venue's `Message<…>` set in *one* decoder translation unit and expose a small non-template interface (or `extern template` the instantiations — Ch. 25 §25.4.2); keep the `consteval` parser's complexity linear in the schema length (the duplicate-name check above is O(n²) in field count, which is fine at 60 fields and would not be at 6,000 — SBE schemas with thousands of fields want a sorted check); and watch `-ftime-trace`'s `InstantiateFunction` rows in CI the way Ch. 99 watches a latency percentile — a decoder header that goes from 300 ms to 3 s is a regression even though no runtime number moved.
 
 ### 20.4.6 The C++26 reflection form (unverified: no shipping compiler implements it)
 

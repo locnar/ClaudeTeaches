@@ -4,15 +4,15 @@
 
 > **Prerequisites:** Ch. 89 (process topology — the Risk role and the gateway that executes the kill-switch; §89.4.4's safe-state mechanism, whose *triggers* this chapter supplies), Ch. 28 (flat arrays indexed by id — the limit records), Ch. 8–9 (hot/cold split, sizing a record to a cache line), Ch. 30 and Ch. 87 §87.4.3 (scaled integers and checked arithmetic — the gate's math), Ch. 19 §19.4.4 (strong types — `Price`, `Qty`, `Notional`, `SymbolId`), Ch. 13 (branchless evaluation), Ch. 31 §31.4.1 (bitmaps — the live-order set the kill walks), Ch. 38 and Ch. 88 (seqlock/RCU publication — how limits change under a running gate), Ch. 47 (TSC token buckets and timers), Ch. 42 (staleness budgets — one of the triggers), Appendix J.3 and K.4 (what the regulators and venues require).
 >
-> **Leads into:** Ch. 91 (idempotent order entry — the gateway *after* the gate; the position accumulators built here are what Ch. 91 reconciles), Ch. 92 (the crash handler's kill-switch handoff is this chapter's trigger path entered from a signal handler), Ch. 93–94 (every gate decision and every kill is a journaled, sequenced event), Ch. 98 §98.3 (the ~40 ns row, now implemented), Ch. 77 §77.4.1 (the same checks in FPGA fabric), Appendix M (the readiness state machine the kill drives to `disarmed`). Ch. 89 said *where* the risk check lives and *who* executes a kill; this chapter is *what* the check is, how it runs in ~15 ns, and how long it takes from a trigger to a flat book.
+> **Leads into:** Ch. 91 (idempotent order entry — the gateway *after* the gate; the position accumulators built here are what Ch. 91 reconciles), Ch. 93 (the crash handler's kill-switch handoff is this chapter's trigger path entered from a signal handler), Ch. 94–95 (every gate decision and every kill is a journaled, sequenced event), Ch. 99 §99.3 (the ~40 ns row, now implemented), Ch. 77 §77.4.1 (the same checks in FPGA fabric), Appendix M (the readiness state machine the kill drives to `disarmed`). Ch. 89 said *where* the risk check lives and *who* executes a kill; this chapter is *what* the check is, how it runs in ~15 ns, and how long it takes from a trigger to a flat book.
 
 ---
 
 ## 90.1 Why it matters: the one stage you may not skip, budgeted at 40 ns
 
-Every order a firm sends to a US equity venue must pass pre-trade risk controls **before** it reaches the exchange — SEC Rule 15c3-5 (the Market Access Rule, 2010) requires "reasonably designed" systematic controls on order size, price, credit and capital exposure, and the prevention of erroneous orders; MiFID II RTS 6 (Art. 15–20) requires the same of EU algorithmic traders, plus a documented **kill functionality** that cancels all outstanding orders immediately; every venue adds its own price collars, message-rate throttles and self-match-prevention rules (Appendix K.4). The checks are not optional, cannot be post-trade, and sit on the tick-to-trade critical path: Ch. 98 §98.3 budgets them at **~40 ns p50 / ~120 ns p99.9**, Ch. 1 §1.2.3 at 50–200 ns including order encode, and the FPGA chapter (Ch. 77 §77.4.1) moves them into fabric precisely because they are simple, mandatory and hot. The book has pointed at this gate from seven chapters and two appendices and never built it.
+Every order a firm sends to a US equity venue must pass pre-trade risk controls **before** it reaches the exchange — SEC Rule 15c3-5 (the Market Access Rule, 2010) requires "reasonably designed" systematic controls on order size, price, credit and capital exposure, and the prevention of erroneous orders; MiFID II RTS 6 (Art. 15–20) requires the same of EU algorithmic traders, plus a documented **kill functionality** that cancels all outstanding orders immediately; every venue adds its own price collars, message-rate throttles and self-match-prevention rules (Appendix K.4). The checks are not optional, cannot be post-trade, and sit on the tick-to-trade critical path: Ch. 99 §99.3 budgets them at **~40 ns p50 / ~120 ns p99.9**, Ch. 1 §1.2.3 at 50–200 ns including order encode, and the FPGA chapter (Ch. 77 §77.4.1) moves them into fabric precisely because they are simple, mandatory and hot. The book has pointed at this gate from seven chapters and two appendices and never built it.
 
-The same regulation names the other half: the **kill-switch**. When something is wrong — a strategy process dead with four hundred working orders (Ch. 92 §92.1), a position that disagrees with the venue's drop-copy, a reject rate that says the venue is refusing us, a feed whose staleness budget is blown (Ch. 42 §42.2.3), a heartbeat lost (Ch. 89 §89.4.3), an operator's hand on the button — the system must reach a **safe state**: no new orders, every working order cancelled, positions flattened or held per policy. Ch. 89 §89.4.4 established the *mechanism* (the surviving gateway cancels on behalf of the dead) and listed the triggers in a parenthetical; this chapter builds the triggers as runtime monitors, the trigger-to-safe-state path, and measures it — because "immediately" in RTS 6 is a number, and §90.3 shows the difference between a kill that walks a 4 MiB order table (300–400 µs) and one that walks a live-order bitmap (4 µs for 400 orders).
+The same regulation names the other half: the **kill-switch**. When something is wrong — a strategy process dead with four hundred working orders (Ch. 93 §93.1), a position that disagrees with the venue's drop-copy, a reject rate that says the venue is refusing us, a feed whose staleness budget is blown (Ch. 42 §42.2.3), a heartbeat lost (Ch. 89 §89.4.3), an operator's hand on the button — the system must reach a **safe state**: no new orders, every working order cancelled, positions flattened or held per policy. Ch. 89 §89.4.4 established the *mechanism* (the surviving gateway cancels on behalf of the dead) and listed the triggers in a parenthetical; this chapter builds the triggers as runtime monitors, the trigger-to-safe-state path, and measures it — because "immediately" in RTS 6 is a number, and §90.3 shows the difference between a kill that walks a 4 MiB order table (300–400 µs) and one that walks a live-order bitmap (4 µs for 400 orders).
 
 The design constraints are the book's: the gate is a **pure function of (order, limits, position)** → accept/reject bitmask (Ch. 89 §89.2.2 — deterministic, replayable, journaled); its data is **flat, cache-line-sized and indexed by `SymbolId`/account slot** (Ch. 28, 8–9), published to the hot path with a seqlock or RCU swap (Ch. 38, 88) so limits change without a lock; its arithmetic is **checked** (Ch. 87 §87.4.3) because a notional overflow is an unbounded order; its evaluation is **branch-light** (Ch. 13) because rejects are rare and mispredicts are not free; and its throttles are **TSC token buckets** (Ch. 47) because a syscall is not allowed. §90.2 gives the check inventory and the data model; §90.3 measures the gate and the kill; §90.4 builds both.
 
@@ -56,7 +56,7 @@ Three observations shape the implementation. **Everything is a compare against a
 - **Limits and state are separate lines** so a limit *change* (rare, from another core) never invalidates the line the fill stream writes at full rate, and the fill-stream writes never evict the read-mostly limits (Ch. 36's false-sharing rule applied to *update rates*, Ch. 8's hot/cold split applied to *writers*).
 - **Everything the gate needs for a symbol is at `sym` in two arrays** — no map, no indirection (Ch. 28 §28.4.1); `SymbolId` is a dense integer assigned at reference-data load (Ch. 19 §19.4.4's strong type), and the universe is sized at start-up (Ch. 26).
 - **Replicated per NUMA node** on a dual-socket box (Ch. 16 §16.4.2): the limits arrays are read-mostly and small; a gate on socket 1 must not take a remote miss on every order.
-- **Audit fields are cold** — the gate's *decision* record (what was checked, against what values, with what result) is emitted as a journal event (Ch. 93), not kept in the hot record; RTS 6 requires the audit trail, not that it live in L1.
+- **Audit fields are cold** — the gate's *decision* record (what was checked, against what values, with what result) is emitted as a journal event (Ch. 94), not kept in the hot record; RTS 6 requires the audit trail, not that it live in L1.
 
 ### 90.2.3 Checked arithmetic and branch-light evaluation
 
@@ -71,13 +71,13 @@ A notional is `px × qty` in scaled integers (Ch. 30): 10⁸-scaled price × 10�
    position ≠ drop-copy position beyond tolerance (Ch. 91) │                                                 2. readiness → disarmed (Appendix M.1): may_send() false in every role
    P&L drawdown / loss limit (AcctState)               ├─► kill word (atomic store, release)              3. walk the LIVE-ORDER SET → one cancel per working order into the TX ring
    feed staleness budget breached (Ch. 42 §42.2.3)     │    + control event into every hot loop (Ch. 41)      (or the venue's mass-cancel message, if it has one — one message)
-   heartbeat lost / process dead (Ch. 89 §89.4.3, 89)  │    + journal record (Ch. 93) — the kill is an event 4. flatten or hold per policy (an IOC per net position, or nothing)
+   heartbeat lost / process dead (Ch. 89 §89.4.3, 89)  │    + journal record (Ch. 94) — the kill is an event 4. flatten or hold per policy (an IOC per net position, or nothing)
    operator command (control ring)                    ─┘                                                     5. verify: zero working orders in the in-flight table (Ch. 91); alert (Ch. 86)
    time-to-safe-state = detect + propagate + cancels on the wire + venue acks  — §90.3 measures the middle two
 ```
 
 - **Triggers are monitors over telemetry the system already publishes** (Ch. 86): the reject counter's rate, the position-vs-drop-copy delta Ch. 91 computes, the P&L accumulator, Ch. 42's staleness series, Ch. 89's heartbeat sequence. They run on a housekeeping core at Ch. 86's cadence (tens of microseconds to milliseconds) — the gate itself checks only the *word*.
-- **The word is the whole hot-path cost**: one relaxed load per order of a line that never changes until the day it does. On that day the store is a release and the gate's next load sees it — no IPI, no signal (Ch. 46 §46.4.3 — a signal on a hot thread is the wrong tool; Ch. 92 §92.4.3's `eventfd` handoff from a *crash* handler is the one exception, because the dying process has no loop left).
+- **The word is the whole hot-path cost**: one relaxed load per order of a line that never changes until the day it does. On that day the store is a release and the gate's next load sees it — no IPI, no signal (Ch. 46 §46.4.3 — a signal on a hot thread is the wrong tool; Ch. 93 §93.4.3's `eventfd` handoff from a *crash* handler is the one exception, because the dying process has no loop left).
 - **The cancels are the time.** Ch. 89's gateway owns the session and the in-flight table (Ch. 91); it must enumerate the working orders and emit a cancel for each — which is O(working orders) if it has a live-order *set*, and O(table capacity) if it scans the table (§90.3: 4 µs vs 300–400 µs). Venues that offer a **mass cancel** (one message cancelling all orders for a session/account/symbol — CME's Order Mass Action, Nasdaq OUCH's per-session cancel-on-disconnect trigger, FIX `OrderMassCancelRequest`) collapse the wire time to one message; use it where it exists and keep the per-order path as the fallback, because a mass-cancel *ack* is also the venue's confirmation, which the per-order path gets one at a time.
 
 ## 90.3 Measure it: the gate's cost, and the time from trigger to cancels queued
@@ -118,7 +118,7 @@ gate, hot, tight loop (no per-order rdtsc)               11.1           —     
 gate, 25 % fat-finger rejects (branch-light mix)         11.0           —       —       —     250 000    ← rejects cost nothing extra
 ```
 
-- **The gate is ~11 ns — a quarter of the 40 ns budget** (Ch. 98 §98.3), eight checks and a token bucket included, and L2-resident limit records cost ~0 extra at the median (the active symbols are in L1; the hardware prefetcher does nothing for random symbols, so the p99 rises 2 ns). There is room in the budget for the self-match and duplicate checks of §90.4.2 (two more compares each) and for the `SymState` line split of §90.4.1 (one more line, L1-hot).
+- **The gate is ~11 ns — a quarter of the 40 ns budget** (Ch. 99 §99.3), eight checks and a token bucket included, and L2-resident limit records cost ~0 extra at the median (the active symbols are in L1; the hardware prefetcher does nothing for random symbols, so the p99 rises 2 ns). There is room in the budget for the self-match and duplicate checks of §90.4.2 (two more compares each) and for the `SymState` line split of §90.4.1 (one more line, L1-hot).
 - **Branch-light pays exactly as promised**: a mix with a quarter of the orders rejected costs the same 11 ns as all-pass. A version with `if (qty > max) return QTY;` chains would show the Ch. 13 mispredict cost (~15–20 cycles each) on every reject *and* a polluted predictor for the passes.
 - **The p99.9 of 33–35 ns** against the 120 ns budget row is the VM's noise floor on a pinned-but-shared vCPU; on isolated cores (Ch. 51–52) the gate's tail is its L2 miss (~14 cycles) — this is the stage with the *flattest* distribution on the whole path, which is why Ch. 77 moves it to fabric last, not first.
 
@@ -131,7 +131,7 @@ kill via live bitmap (8 KiB)            4.4 µs  (11 ns/order)       28.8 µs (7
 ```
 
 - **Walking the table is a 300 µs stall regardless of how many orders are live** — 4 MiB of cold lines at ~5 ns each; with 400 orders that is 99.4 % wasted. The bitmap makes the kill proportional: **4.4 µs for 400 orders**, 7–11 ns per cancel queued. Every structure that the kill-switch must enumerate — working orders, open quotes per instrument, armed TTL timers (Ch. 47) — carries a live bitmap or an intrusive live list for exactly this reason.
-- **Time-to-safe-state, assembled.** Detect (a housekeeping monitor at Ch. 86's cadence: 10–100 µs; or a crash handler's `eventfd` — Ch. 92 §92.3: ~20 µs to the gateway) + propagate (one release store; the gate's next order is rejected within one loop iteration — <1 µs) + enumerate (4.4 µs for 400) + **put the cancels on the wire** (per-order: 400 × Ch. 67's ~0.5–1 µs TX cost ≈ 200–400 µs serialized on one session; mass-cancel: one message, ~1 µs) + the venue's round trip and acks (tens to hundreds of µs, venue-dependent). The software is the smaller part when the venue offers a mass cancel, and the *dominant* part — the cancel storm — when it does not, which is why Ch. 67's pacing and multiple sessions matter for the kill as much as for quoting. RTS 6's "immediately" is, in practice, **sub-millisecond to the wire for hundreds of orders**, and the structures above are what make it so.
+- **Time-to-safe-state, assembled.** Detect (a housekeeping monitor at Ch. 86's cadence: 10–100 µs; or a crash handler's `eventfd` — Ch. 93 §93.3: ~20 µs to the gateway) + propagate (one release store; the gate's next order is rejected within one loop iteration — <1 µs) + enumerate (4.4 µs for 400) + **put the cancels on the wire** (per-order: 400 × Ch. 67's ~0.5–1 µs TX cost ≈ 200–400 µs serialized on one session; mass-cancel: one message, ~1 µs) + the venue's round trip and acks (tens to hundreds of µs, venue-dependent). The software is the smaller part when the venue offers a mass cancel, and the *dominant* part — the cancel storm — when it does not, which is why Ch. 67's pacing and multiple sessions matter for the kill as much as for quoting. RTS 6's "immediately" is, in practice, **sub-millisecond to the wire for hundreds of orders**, and the structures above are what make it so.
 
 ## 90.4 Techniques
 
@@ -147,7 +147,7 @@ struct GateTables {                                                             
     SymState* sym_state; const AcctLimits* acct_limits; AcctState* acct_state;
     alignas(64) std::atomic<std::uint32_t> kill{0}; alignas(64) const std::atomic<std::uint8_t>* readiness;   // Appendix M.1's word
 };
-struct Decision { std::uint32_t reject; Notional notional; Qty pos_after; };                   // what is journaled with the order (Ch. 93): the checked values, not just the verdict
+struct Decision { std::uint32_t reject; Notional notional; Qty pos_after; };                   // what is journaled with the order (Ch. 94): the checked values, not just the verdict
 inline Decision gate(const GateTables& g, const Order& o, std::uint64_t now) noexcept {
     const SymLimits& L = g.sym_limits.load(std::memory_order_acquire)[o.sym.value];           // one acquire load; the array is immutable once published
     const SymState& S = g.sym_state[o.sym.value]; AcctState& A = g.acct_state[o.acct]; const AcctLimits& AL = g.acct_limits[o.acct];
@@ -168,7 +168,7 @@ inline Decision gate(const GateTables& g, const Order& o, std::uint64_t now) noe
 }
 ```
 
-- **Pure, and journaled with its inputs.** `gate()` reads tables and the order and returns a `Decision`; the caller journals `{order, decision}` (Ch. 93) so the audit trail RTS 6 Art. 17 demands is the same record that makes the decision replayable (Ch. 89 §89.2.2); a reject's *reason bits* and the checked values go with it.
+- **Pure, and journaled with its inputs.** `gate()` reads tables and the order and returns a `Decision`; the caller journals `{order, decision}` (Ch. 94) so the audit trail RTS 6 Art. 17 demands is the same record that makes the decision replayable (Ch. 89 §89.2.2); a reject's *reason bits* and the checked values go with it.
 - **Limits are RCU-published** (Ch. 88 §88.4.1–§88.4.2): an operator's change or a collar update builds a new `SymLimits[]` (or a copy-on-write page of it) off the hot path, validates it (§90.4.4), stores the pointer with release; the gate's acquire load sees either the old array or the new one, never a torn record; the old array is reclaimed after a grace period (Ch. 39). For a *per-symbol* collar that moves with every tick, a per-record seqlock (Ch. 38) on `SymLimits[s]` is the alternative — one version check per gate call instead of a pointer load.
 - **State has one writer.** `SymState` and `AcctState` are written by the gateway's ack/fill handler (Ch. 91 §91.4.3) on the gateway's core; the gate on the same core (the typical in-line placement — Ch. 89 §89.2.1's "mandatory in-line check") reads them with plain loads; a gate in a *separate* risk process reads them across a shm ring's publication (Ch. 57) with the seqlock. Never two writers, never a lock.
 - **Worst-case exposure, not just position.** RTS 6 §15 and 15c3-5 both count *outstanding* orders: the check is position plus open same-side quantity plus this order, so a strategy cannot blow the limit by resting ten orders that each pass alone.
@@ -199,7 +199,7 @@ inline bool take_token(Bucket& b, std::uint64_t now_tsc) {
 ### 90.4.4 Changing limits under a running gate: validate, publish, verify
 
 - **Validation before swap** (Ch. 88 §88.4.3): a new limits set is checked off-path for monotonic sanity (collar_lo < collar_hi, max_qty ≤ pos_limit…) and against the *current* state (no position already outside the new limit without an explicit flatten plan) before it is published; a bad limit set is the fat finger one level up.
-- **Four-eyes and a journal**: every limit change is a signed control event (Ch. 88, 93) with before/after values — RTS 6 Art. 16 requires it, and it is the first thing post-mortem (Ch. 92 §92.4.5) asks for.
+- **Four-eyes and a journal**: every limit change is a signed control event (Ch. 88, 94) with before/after values — RTS 6 Art. 16 requires it, and it is the first thing post-mortem (Ch. 93 §93.4.5) asks for.
 - **Verify on the hot path, cheaply**: `SymLimits.version` is journaled with each decision, so a replay can prove which limits each order was checked against.
 
 ### 90.4.5 Kill-switch triggers as runtime monitors
@@ -221,7 +221,7 @@ Each trigger is a monitor over published telemetry (Ch. 86), evaluated on a hous
 void Gateway::kill(Scope scope, Reason why, std::uint64_t now) {
     tables.kill.fetch_or(scope.bits, std::memory_order_release);        // 1. the gate rejects from the next order; every hot loop sees the control event (Ch. 41 §41.4.2)
     readiness.store(DISARMED, std::memory_order_release);               // 2. Appendix M.1: may_send() false in every role
-    journal.emit(KillEvent{scope, why, now});                           //    the kill is a sequenced, replayable event (Ch. 93, 94)
+    journal.emit(KillEvent{scope, why, now});                           //    the kill is a sequenced, replayable event (Ch. 94, 95)
     if (session.supports_mass_cancel()) tx.push(MassCancel{session.id, scope});   // 3a. one message where the venue offers it
     for (std::uint32_t w = 0; w < LIVE_WORDS; ++w)                      // 3b. and/or per-order cancels: proportional to working orders (§90.3: 4.4 µs for 400)
         for (std::uint64_t m = live[w] & scope.mask_for(w); m; m &= m - 1) {
@@ -249,7 +249,7 @@ void Gateway::kill(Scope scope, Reason why, std::uint64_t now) {
 - **The kill that walks the table.** 300–400 µs regardless of live orders (§90.3); a live bitmap or intrusive live list makes it proportional.
 - **Cancels through the order throttle.** A kill paced by the order-rate bucket is a kill that takes seconds; cancels bypass it (§90.4.3) and the mass-cancel message bypasses the wire cost.
 - **Flatten before stop.** Sending IOCs before the kill word is set races a strategy's next order; stop, cancel, then flatten (§90.4.6).
-- **A kill delivered by signal.** `SIGUSR1` to the hot thread is a 2.5 KB sigframe and a mis-routed interrupt (Ch. 46 §46.4.3); the word plus a control-ring event is the path — the crash handler's `eventfd` (Ch. 92) is the sole exception, for a process with no loop left.
+- **A kill delivered by signal.** `SIGUSR1` to the hot thread is a 2.5 KB sigframe and a mis-routed interrupt (Ch. 46 §46.4.3); the word plus a control-ring event is the path — the crash handler's `eventfd` (Ch. 93) is the sole exception, for a process with no loop left.
 - **Gate without journal.** A verdict without the values it was checked against is unauditable (RTS 6 Art. 17) and unreplayable (Ch. 89 §89.4.6); `Decision` carries the checked notional, exposure and limits version (§90.4.1).
 - **Never rehearsed.** A kill-switch exercised only in incidents has unknown timing and unknown failure modes; Appendix M.4's daily dry run on a test instrument is the minimum.
 
@@ -258,8 +258,8 @@ void Gateway::kill(Scope scope, Reason why, std::uint64_t now) {
 1. Reproduce §90.3's gate rows on an isolated core; add the self-match and duplicate checks of §90.4.2 and the `SymState` split of §90.4.1; confirm the gate stays under 15 ns and show its asm (Ch. 4) — count the `setcc`s and the single conditional branch.
 2. Replace the bitmask accumulation with early returns and measure the 25 %-reject mix; then measure a 1 %-reject mix. Explain both with `perf stat -e branch-misses`.
 3. Implement RCU-published limits with a grace period (Ch. 39) and hot-reload a collar 1 000 times per second while the gate runs; verify with the journaled `version` that every decision used a consistent record.
-4. Build the live-order bitmap into Ch. 91's in-flight table and measure the kill for 400/4 000/40 000 orders; then add a venue mass-cancel path in the Ch. 98 simulation harness and compare time-to-zero-working-orders including the simulated venue RTT.
-5. Write the five monitors of §90.4.5 against the Ch. 86 telemetry segment and drive a replayed open (Ch. 93) through a reject storm, a position drift and a dead strategy; record each trigger's detection latency.
+4. Build the live-order bitmap into Ch. 91's in-flight table and measure the kill for 400/4 000/40 000 orders; then add a venue mass-cancel path in the Ch. 99 simulation harness and compare time-to-zero-working-orders including the simulated venue RTT.
+5. Write the five monitors of §90.4.5 against the Ch. 86 telemetry segment and drive a replayed open (Ch. 94) through a reject storm, a position drift and a dead strategy; record each trigger's detection latency.
 6. Map your venue's rulebook (collars, throttles, SMP, mass cancel) onto the §90.2.1 table; note every check the venue performs that the gate does not, and vice versa.
 
 **Checklist**
@@ -282,7 +282,7 @@ void Gateway::kill(Scope scope, Reason why, std::uint64_t now) {
 - CME Group, *iLink 3 — Order Mass Action Request*; Nasdaq, *OUCH 5.0 Specification* and *Self Match Prevention*; FIX Trading Community, *FIX 5.0 SP2 — OrderMassCancelRequest (q)* — venue-side mass cancel and SMP.
 - McKenney, P. E. *Is Parallel Programming Hard, And, If So, What Can You Do About It?*, Ch. 9 (RCU) — the publication mechanism for limits.
 - GCC manual, §"Built-in Functions to Perform Arithmetic with Overflow Checking"; Intel SDM Vol. 1 §3.4.3 (flags) — the cost of a checked multiply.
-- Ch. 98 §98.3 and Ch. 1 §1.2.3 of this book — the budget rows this chapter implements.
+- Ch. 99 §99.3 and Ch. 1 §1.2.3 of this book — the budget rows this chapter implements.
 
 ## 90.8 Additional Reading
 

@@ -52,6 +52,7 @@ STEPS = [
     ("insert", 19),  # Ch. 20 compile-time-protocol-decoders
     ("insert", 21),  # Ch. 22 cost-of-modern-idioms-strings-without-allocation
     ("insert", 24),  # Ch. 25 build-systems-build-time-hygiene-hermetic-toolchains
+    ("insert", 91),  # Ch. 92 order-entry-gateway-session-layer
     # INSERT_STEPS_END
 ]
 def old2new(n):
