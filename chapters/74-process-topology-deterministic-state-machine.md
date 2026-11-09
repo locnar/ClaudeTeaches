@@ -31,12 +31,12 @@ Decompose the tick-to-trade path into separate processes by **role**, each a fau
                                     symbol shard)                        holds the session)
 ```
 
-- **Feed handler** — owns the market-data side (Ch. 53, 55): decode, normalize, sequence/gap-handle, publish a clean normalized stream into shared memory. If a strategy dies, the feed handler is untouched — the market view stays live.
+- **Feed handler** — owns the market-data side (Ch. 53–55): decode, normalize, sequence/gap-handle (A/B arbitration and recovery — Ch. 53 §53.4.3, Ch. 54), publish a clean normalized stream into shared memory. If a strategy dies, the feed handler is untouched — the market view stays live.
 - **Strategy** — the decision logic; often **one process per strategy or per symbol/venue shard** (§74.4.5) so strategies can't crash each other. Ideally a *pure state machine* (§74.2.2).
 - **Risk** — the pre-trade gate (limits, position, kill-switch, Ch. 72): a separate process (or a mandatory in-line check) that no strategy can bypass or crash. The last line before an order leaves.
 - **Order gateway** — owns the *venue session* (Ch. 51): the TCP/order-entry connection, sequence numbers, working-order state. Keeping this separate means a strategy crash doesn't drop the session or orphan orders — the gateway can cancel-on-disconnect / kill-switch the dead strategy's orders and keep the session up.
 
-The trade-off is **latency vs containment**: crossing a process boundary costs an IPC hop (a shared-memory ring write/read — Ch. 50, tens to low-hundreds of ns, *not* a syscall if done right). A monolith saves those hops but couples all failures. The HFT resolution: use **shared-memory data planes** (§74.4.1) so the hops are cheap (no kernel, no copy — Ch. 26/50), and accept a small, bounded latency cost for a large containment win. The hottest, most-coupled stages can be co-located if a benchmark justifies it; the *fault-critical* split (gateway and risk separate from strategy) is rarely worth giving up.
+The trade-off is **latency vs containment**: crossing a process boundary costs an IPC hop (a shared-memory ring write/read — Ch. 50; ~50–150 ns one-way *latency* per hop, a cross-core cache-line transfer — Ch. 33, Appendix E's HITM row; Ch. 50 §50.3's ~7–15 ns/msg is amortized throughput cost, not hop latency — *not* a syscall if done right). A monolith saves those hops but couples all failures. The HFT resolution: use **shared-memory data planes** (§74.4.1) so the hops are cheap (no kernel, no copy — Ch. 26/50), and accept a small, bounded latency cost for a large containment win. The hottest, most-coupled stages can be co-located if a benchmark justifies it; the *fault-critical* split (gateway and risk separate from strategy) is rarely worth giving up.
 
 ### 74.2.2 The Deterministic State Machine Pattern: pure, side-effect-free core decoupled from I/O for exact replayability
 
@@ -51,10 +51,65 @@ The most important pattern in the chapter: **isolate the core decision logic int
    network TX                         ◄─outputs─  • same (state, input sequence) ⇒ same outputs, ALWAYS
 ```
 
-The core is a function `apply(state, input) → (new_state, outputs)` — a **fold over the input stream**. Crucially:
+The core is a function `apply(state, input) → (new_state, outputs)` — a **fold over the input stream**. As a type, with the replay loop that proves the property:
+
+```cpp
+// dsm.cpp — the deterministic core as a type, and the replay loop that proves it. Build: g++ -O2 -std=c++20 dsm.cpp -o dsm
+#include <cstdint>
+#include <cstdio>
+#include <span>
+#include <variant>
+#include <vector>
+
+struct MdEvent    { std::uint64_t seq, ts_ns; std::uint32_t sym; std::int64_t px; std::int32_t qty; };
+struct Fill       { std::uint64_t seq, ts_ns, order_id; std::int64_t px; std::int32_t qty; };
+struct TimerFire  { std::uint64_t seq, ts_ns; };                 // time is an INPUT, never read inside
+struct ConfigSwap { std::uint64_t seq, ts_ns, version; };
+using Input = std::variant<MdEvent, Fill, TimerFire, ConfigSwap>;   // one sequenced stream, assigned by the shell (Ch. 75)
+
+struct Output { enum Kind : std::uint8_t { NewOrder, Cancel, Log } kind; std::uint64_t order_id; std::int64_t px; std::int32_t qty; };
+
+struct State { std::int64_t best_bid = 0, best_ask = 0; std::int32_t position = 0; std::uint64_t next_order = 1, config_version = 0; };
+
+// apply(): pure. No clock, no syscall, no I/O, no globals, no randomness — the fold over the input stream.
+std::size_t apply(State& s, const Input& in, std::span<Output> out) noexcept {
+    std::size_t n = 0;
+    std::visit([&](const auto& e) {
+        using T = std::decay_t<decltype(e)>;
+        if constexpr (std::is_same_v<T, MdEvent>) {
+            if (e.qty > 0) s.best_bid = e.px; else s.best_ask = e.px;
+            if (s.best_ask && s.best_bid >= s.best_ask - 1 && s.position < 100 && n < out.size())
+                out[n++] = {Output::NewOrder, s.next_order++, s.best_ask, 10};
+        } else if constexpr (std::is_same_v<T, Fill>)       { s.position += e.qty; }
+        else if constexpr (std::is_same_v<T, ConfigSwap>)   { s.config_version = e.version; }
+        // TimerFire: housekeeping decided from e.ts_ns, not from any clock
+    }, in);
+    return n;
+}
+
+// Replay harness (Ch. 75 → CI gate, §76.4.1): same inputs ⇒ bit-identical outputs, or the build fails.
+bool replay_matches(std::span<const Input> log, std::span<const Output> golden) {
+    State s; std::vector<Output> produced; Output buf[8];
+    for (const Input& in : log) { std::size_t n = apply(s, in, buf); produced.insert(produced.end(), buf, buf + n); }
+    if (produced.size() != golden.size()) return false;
+    for (std::size_t i = 0; i < golden.size(); ++i)
+        if (produced[i].kind != golden[i].kind || produced[i].order_id != golden[i].order_id ||
+            produced[i].px != golden[i].px || produced[i].qty != golden[i].qty) return false;
+    return true;
+}
+
+int main() {
+    std::vector<Input> log{ MdEvent{1, 100, 7, 10000, 5}, MdEvent{2, 101, 7, 10001, -5}, Fill{3, 150, 1, 10001, 10}, TimerFire{4, 200} };
+    std::vector<Output> golden; { State s; Output buf[8]; for (auto& in : log) { auto n = apply(s, in, buf); golden.insert(golden.end(), buf, buf + n); } }
+    std::printf("replay %s (%zu outputs)\n", replay_matches(log, golden) ? "bit-identical" : "DIVERGED", golden.size());
+}
+```
+
+Crucially:
 
 - **No side effects inside.** It reads no clock, makes no syscall, does no network I/O, touches no global mutable state, uses no randomness. Anything non-deterministic — the current time, a random seed, a sequence number — is passed *in as part of the input*, never read from the environment inside the core. (Time becomes a *timestamped input event*, so replay reproduces the exact timeline.)
 - **Inputs are an ordered, captured stream.** Every input — each market-data message, each timer fire, each fill, each config change (Ch. 73) — is a record in a single ordered log (Ch. 75). The core consumes that stream.
+- **The shell is the sequencer.** The impure shell around the core assigns a single global **sequence number** to *every* input — market data, fills, timer fires, config swaps — before the core sees it; that one sequenced stream, not the raw sources, is what Ch. 75 captures and what replay feeds back. Without it, two sources' relative order is a race the replay cannot reproduce.
 - **Determinism ⇒ exact replay.** Because outputs depend *only* on (initial state + input sequence), feeding the *same captured input log* through the core reproduces the *same outputs exactly* — the same orders, the same decisions, bit-for-bit. This is the property everything in Ch. 75–76 relies on: replay the captured session to debug a production crash, to backtest a strategy change against real history, to prove compliance, to gate regressions in CI.
 
 This is the same edge/core split as functional-core/imperative-shell, applied to trading for *both* fault isolation (the pure core has fewer ways to fail and no I/O to hang on) and reproducibility. The I/O, timers, and OS interaction — the non-deterministic, failure-prone parts — live in a thin shell around the core; the core itself is pure, testable, and replayable.
@@ -65,7 +120,7 @@ A **fault domain** is a boundary a failure can't cross; the **blast radius** is 
 
 - **Each role is its own fault domain** (§74.2.1) — a strategy crash can't corrupt the feed handler or gateway.
 - **Each shard is its own fault domain** (§74.4.5) — one symbol/venue's strategy crash doesn't touch another's.
-- **The blast radius of any single failure is bounded and known** — you can state, for each component, exactly what its death takes down and what survives. The gateway and risk survive *every* strategy failure (so orders can be cancelled and the session kept up); a feed handler failure is contained to its feed (the redundant A/B line, Ch. 53, and other feeds survive).
+- **The blast radius of any single failure is bounded and known** — you can state, for each component, exactly what its death takes down and what survives. The gateway and risk survive *every* strategy failure (so orders can be cancelled and the session kept up); a feed handler failure is contained to its feed (the redundant A/B line and the recovery channels, Ch. 53–54, and other feeds survive).
 - **Shared memory is a controlled hole in the isolation** (§74.4.1-2): processes share data-plane segments, so a writer corrupting its segment *can* feed bad data to readers — which is why the single-writer-per-segment discipline (§74.4.2) and reader-side validation (Ch. 72) matter. Isolation is the default; sharing is deliberate and disciplined.
 
 ### 74.2.4 Crash-only design
@@ -84,13 +139,13 @@ If fault containment is the goal, the metric is **how fast you recover** — and
 | **Warm** (Ch. 46) | pre-touch pages, prime caches/TLB/predictors, shadow traffic | the warm-up you skip = a cold-start tail on the first real tick |
 | **Live** | back to full-speed correct decisions | — |
 
-Representative shape (toolchain and machine: Appendix L.3; figures pending real runs): a crash-only process whose state lives in shared memory and that warms before going live can recover in **~hundreds of ms to low seconds**; the *dangerous* number is the **tail** — a restart that has to rebuild state from a long journal, or that skips warming and takes cold-start stalls on its first ticks (Ch. 46), can be far slower exactly when conditions are worst.
+The harness is the §74.4.3 supervisor itself: it `fork`/`exec`s a role that publishes a heartbeat sequence into a shared-memory slot; loop N times — `kill -9` the role (and, separately, `SIGSTOP` it to simulate a hang), timestamp (`CLOCK_MONOTONIC`) the detect (SIGCHLD vs heartbeat timeout), the re-exec, the shm attach, the snapshot + journal replay (Ch. 75) and the warm-up (Ch. 46), and record each as a histogram (Ch. 3) alongside the *survivors'* hot-path latency during the episode. Representative shape (toolchain and machine: Appendix L.3; figures pending real runs): a crash-only process whose state lives in shared memory and that warms before going live can recover in **~hundreds of ms to low seconds**; the *dangerous* number is the **tail** — a restart that has to rebuild state from a long journal, or that skips warming and takes cold-start stalls on its first ticks (Ch. 46), can be far slower exactly when conditions are worst.
 
 The lessons:
 
 - **Recovery time is detect + restart + recover + warm — measure all four, and the tail of each.** Teams measure "restart time" and forget **warm** (Ch. 46): a process that's "up" but cold is still effectively impaired for its first ticks. The case study (Ch. 76) measures *warm-and-correct*, not *process-alive*.
 - **Bound recovery state with snapshots.** If recovery replays a journal (Ch. 75), the journal length bounds recovery time — take periodic state snapshots so replay starts from a recent checkpoint, not session-start (§74.4, Ch. 75).
-- **Tune the heartbeat for detect-vs-false-positive.** Too slow and you're impaired longer before noticing; too fast and a GC-less hiccup looks like death and you restart needlessly (§74.4.3). Measure the false-positive rate against the detect latency.
+- **Tune the heartbeat for detect-vs-false-positive.** Too slow and you're impaired longer before noticing; too fast and a transient stall (a page fault, an SMI, a scheduler preemption on a non-isolated core) looks like death and you restart needlessly (§74.4.3). Measure the false-positive rate against the detect latency.
 - **The whole point is the *contained* failure has a *bounded, fast, warm* recovery** — the monolith's "recovery" is "restart everything and lose the session," which has no good tail.
 
 ## 74.4 Techniques
@@ -101,7 +156,8 @@ The processes are isolated but must exchange data on the hot path *without* a sy
 
 - **`mmap`'d shared segments (Ch. 26)** carry the data plane: the feed handler writes the normalized market stream into a shared ring (Ch. 34/50); strategies read it; strategies write orders into a ring the risk/gateway read. The segment is mapped once at startup, pre-faulted and `mlock`'d (Ch. 26) so steady state never faults.
 - **Lock-free cross-process rings (Ch. 50).** SPSC/MPSC rings (Ch. 34) laid out in the shared segment — same lock-free producer/consumer discipline as in-process, now across address spaces. A boundary crossing is a ring write + a ring read (tens to low-hundreds of ns — Ch. 50), *no kernel*, the cheap IPC that makes process-per-role affordable (§74.2.1).
-- **Offsets, not pointers (ties Ch. 73).** A segment maps at different virtual addresses in different processes; data in it uses *offsets/indices within the segment*, never raw pointers (a raw pointer from process A is meaningless in process B). Same discipline as cross-process config (Ch. 73.4.3).
+- **Offsets, not pointers (ties Ch. 73).** A segment maps at different virtual addresses in different processes; data in it uses *offsets/indices within the segment*, never raw pointers (a raw pointer from process A is meaningless in process B). Same discipline as cross-process config (§73.4.3).
+- **Dead readers and segment generations.** A reader process that dies mid-ring leaves a stale consumer cursor: a ring with back-pressure stalls on it (never on the hot path — Ch. 71's rule) and a ring without it overruns it; the supervisor (§74.4.3) must *reap* a dead reader's cursor (mark it detached, or let producers ignore cursors whose heartbeat has lapsed). A *writer* restart needs a **segment generation**: the restarted writer stamps a new generation into the segment header and re-initialises its rings, and readers that see the generation change resynchronise rather than consuming half-written state from the previous life.
 - **Control plane separate from data plane.** Slow, rare control (config — Ch. 73, commands, kill-switch) can go over a separate channel; the hot data plane stays a clean, fixed-layout shared ring.
 
 ### 74.4.2 Single-writer-per-segment discipline
@@ -114,7 +170,58 @@ The rule that keeps shared memory safe and lock-free: **exactly one process writ
 
 ### 74.4.3 Supervisor/watchdog, heartbeats and liveness
 
-A **supervisor** process owns the lifecycle: start the roles, watch them, restart the dead, enforce policy. It is the thing that makes failures *contained-and-recovered* rather than just contained:
+A **supervisor** process owns the lifecycle: start the roles, watch them, restart the dead, enforce policy. It is the thing that makes failures *contained-and-recovered* rather than just contained. Its whole loop is short enough to show:
+
+```cpp
+// supervisor.cpp — the role supervisor: start, watch (SIGCHLD + heartbeat), restart with backoff, measure recovery.
+// Build: g++ -O2 -std=c++20 supervisor.cpp -o supervisor      Run: ./supervisor ./strategy --shard 3
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+struct Heartbeat { std::atomic<std::uint64_t> seq; std::atomic<std::uint64_t> ts_ns; };   // one slot per role, in shm
+
+static std::uint64_t now_ns() { timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return std::uint64_t(t.tv_sec) * 1'000'000'000ull + t.tv_nsec; }
+
+static pid_t spawn(char** argv) {
+    pid_t p = fork();
+    if (p == 0) { execv(argv[0], argv); _exit(127); }               // child: the role binary maps the same shm by name
+    return p;
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) return 1;
+    int fd = shm_open("/hb_strategy", O_CREAT | O_RDWR, 0600); (void)!ftruncate(fd, sizeof(Heartbeat));
+    auto* hb = static_cast<Heartbeat*>(mmap(nullptr, sizeof(Heartbeat), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+    constexpr std::uint64_t kTimeoutNs = 50'000'000;               // tuned per §74.3: detect-latency vs false-positive
+    unsigned restarts_this_minute = 0; std::uint64_t backoff_ns = 10'000'000, minute_start = now_ns();
+    pid_t child = spawn(argv + 1); std::uint64_t last_seq = 0, last_seen = now_ns();
+    for (;;) {
+        usleep(1000);
+        int status; bool dead = waitpid(child, &status, WNOHANG) == child;           // catches exits
+        std::uint64_t seq = hb->seq.load(std::memory_order_acquire);
+        if (seq != last_seq) { last_seq = seq; last_seen = now_ns(); }
+        bool hung = now_ns() - last_seen > kTimeoutNs;                                // catches hangs — SIGCHLD cannot
+        if (!dead && !hung) continue;
+        const std::uint64_t t_detect = now_ns();
+        if (hung) { kill(child, SIGKILL); waitpid(child, &status, 0); }                // a hang is a crash we must cause
+        // kill-switch first (§74.4.4): tell the gateway to cancel this shard's working orders — then restart
+        if (now_ns() - minute_start > 60'000'000'000ull) { restarts_this_minute = 0; minute_start = now_ns(); }
+        if (++restarts_this_minute > 5) { std::fprintf(stderr, "crash-loop: safe-state and alert\n"); return 2; }
+        struct timespec b{0, long(backoff_ns)}; nanosleep(&b, nullptr); backoff_ns = backoff_ns * 2 > 1'000'000'000 ? 1'000'000'000 : backoff_ns * 2;
+        child = spawn(argv + 1); last_seen = now_ns();
+        while (hb->seq.load(std::memory_order_acquire) == last_seq) usleep(100);     // first heartbeat = "warm and live" (Ch. 46)
+        std::printf("recovered in %.1f ms (detect %s)\n", (now_ns() - t_detect) / 1e6, dead ? "SIGCHLD" : "heartbeat timeout");
+    }
+}
+```
+
 
 - **Liveness via heartbeats.** Each process periodically writes a heartbeat (a sequence/timestamp in a shared-memory slot — cheap, off the hot path); the supervisor reads them. A missed heartbeat (beyond a tuned timeout, §74.3) means the process is dead *or hung* (a hang is as bad as a crash and a plain `SIGCHLD` won't catch it — the heartbeat does). Combine `SIGCHLD`/`waitpid` (catches exits) with heartbeats (catches hangs).
 - **Restart policy.** On death, the supervisor restarts *that* process (warm — §74.4.4) under a policy: backoff to avoid a crash-loop hammering, a cap on restarts-per-interval, and an escalation (if a process won't stay up, kill-switch its orders and alert rather than loop forever). The supervisor itself must be simple and rock-solid (it's a fault domain whose failure is serious) — and often supervised in turn (systemd, a watchdog, or a peer).
@@ -124,7 +231,8 @@ A **supervisor** process owns the lifecycle: start the roles, watch them, restar
 
 When something fails, the system must reach a **safe state** fast, then recover:
 
-- **Kill-switch / safe-state.** On a detected failure (a dead strategy, a risk breach, a stuck process, an operator command), drive to a *safe state*: cancel the affected strategy's working orders, stop sending new orders, flatten or hold per policy. The **gateway** (separate process, §74.2.1) is what executes this — it owns the session and can cancel-on-disconnect / mass-cancel the dead component's orders *even though that component is gone*. This is *the* payoff of separating the gateway: a strategy crash doesn't strand its orders, because the surviving gateway kills them. (Ties Ch. 72 — the kill-switch is a safety/security control.)
+- **Kill-switch / safe-state.** On a detected failure (a dead strategy, a risk breach, a stuck process, an operator command), drive to a *safe state*: cancel the affected strategy's working orders, stop sending new orders, flatten or hold per policy. The **gateway** (separate process, §74.2.1) is what executes this — it owns the session and mass-cancels the dead component's orders (per-strategy order tagging → venue mass-cancel or per-order cancels — the gateway's own cancel-on-*client*-disconnect policy) *even though that component is gone*; the venue's cancel-on-disconnect only fires if the *gateway's* session drops, which is the opposite of what you want here. This is *the* payoff of separating the gateway: a strategy crash doesn't strand its orders, because the surviving gateway kills them. (Ties Ch. 72 — the kill-switch is a safety/security control.)
+- **When the gateway itself dies.** The gateway is the one role whose failure *is* a session failure: the venue's **cancel-on-disconnect** (enable it — Appendix K) is the safety net that flattens working orders, and recovery is a **hot-standby gateway** that re-logs on and performs sequence-number recovery (replaying the venue's unacknowledged messages — the session protocol's resend request) before the strategies are allowed to resume. Measure that path (§74.3) like any other restart; it is the longest one.
 - **Fast restart with warm-up (Ch. 46).** Restart is crash-only recovery (§74.2.4): map the surviving shared state (Ch. 26), replay from the last snapshot to current (Ch. 75), **warm** the process (pre-touch pages, prime caches/TLB/predictors, run shadow traffic — Ch. 46) so its *first real tick is at full speed*, then go live. Skipping the warm step (§74.3) means the freshly restarted process limps through its first ticks — a tail event right after a failure, when the market may be moving.
 - **Determinism makes restart correct.** Because the core is a deterministic state machine (§74.2.2) fed from the captured input stream (Ch. 75), a restarted process replays the inputs and arrives at *exactly* the correct current state — no guesswork, no divergence from the process that died. Crash-only + deterministic-replay = provably-correct fast recovery.
 
@@ -132,7 +240,7 @@ When something fails, the system must reach a **safe state** fast, then recover:
 
 Two operational techniques for keeping failures small and debuggable:
 
-- **Capture core dumps without stalling survivors.** A core dump of a crashed process can be large and slow to write — and if it stalls the box (I/O storm, lock, freezing the writing thread) it can hurt the *surviving* processes (a shared-fate hazard, §74.5). Mitigate: write cores to a separate disk/path off the hot cores (Ch. 42), bound/compress them, use `core_pattern` piping to an async handler that doesn't block, or capture a minimal dump. The dead process must yield *diagnostics* without taking the survivors' latency with it.
+- **Capture core dumps without stalling survivors.** A core dump of a crashed process can be large and slow to write — and if it stalls the box (I/O storm, lock, freezing the writing thread) it can hurt the *surviving* processes (a shared-fate hazard, §74.5). Mitigate: shrink the dump first — `madvise(MADV_DONTDUMP)` on the data-plane segments every role maps (or clear the matching `coredump_filter` bits), `RLIMIT_CORE` for file dumps (note it is *not* enforced for piped dumps) — then pipe `core_pattern` to a handler on a housekeeping core (Ch. 42) that writes to a separate disk/path and compresses asynchronously, or capture a minimal dump. The dead process must yield *diagnostics* without taking the survivors' latency with it.
 - **Symbol/venue sharding.** Partition strategies by symbol or venue across processes (and cores, Ch. 42) so that (1) one shard's crash contains to that shard's symbols — the rest keep trading (§74.2.3), and (2) load spreads across cores/NUMA nodes (Ch. 16). Sharding is fault-containment *and* scaling: a bug triggered by one symbol's data takes down only that symbol's strategy, and the blast radius is one shard, not the book. Choose the shard key (symbol, venue, asset class) so correlated work and correlated failures stay within a shard.
 
 ## 74.5 Pitfalls & anti-patterns: shared fate, cascading restarts
@@ -142,7 +250,7 @@ Two operational techniques for keeping failures small and debuggable:
 - **A non-deterministic "deterministic" core.** Calling `now()`/`clock_gettime` (Ch. 17), reading a random seed, depending on map iteration order or thread scheduling, or doing I/O *inside* the core — any of these breaks exact replay (§74.2.2), and you discover it when a replay diverges from production. Time and randomness are *inputs*; the core touches nothing else. Test it: replay a captured session and assert bit-identical outputs.
 - **Hidden side effects / global state in the core.** A static counter, a cached `errno`, a lazily-initialized singleton — non-obvious state that makes `apply` depend on more than (state, input). Keep the core's state explicit and passed-in.
 - **Monolith creep "for latency."** Merging roles back together to save IPC hops (§74.2.1) without measuring — re-coupling fault domains for a few ns that the shared-memory data plane (§74.4.1) mostly eliminates anyway. Keep the fault-critical splits (gateway, risk); co-locate only with a benchmark *and* a fault-containment justification.
-- **No kill-switch, or a kill-switch in the dead process.** If the safe-state logic lives in the strategy that just crashed, it can't run. The kill-switch must live in a *surviving* process (the gateway, §74.4.4) that can cancel the dead component's orders. A trading system without a working kill-switch is a regulatory and financial hazard (Ch. 72).
+- **No kill-switch, or a kill-switch in the dead process.** If the safe-state logic lives in the strategy that just crashed, it can't run. The kill-switch must live in a *surviving* process (the gateway, §74.4.4) that can cancel the dead component's orders. A trading system without a working kill-switch is a regulatory and financial hazard (the market-access / pre-trade-risk mandate — Appendix K §K.4, SEC 15c3-5; the safe-state discipline — Ch. 54 §54.4.3).
 - **Restart that's up-but-cold.** Declaring recovery done when the process is *alive* rather than *warm-and-correct* (Ch. 46, §74.3). The first ticks after a cold restart are slow — measure warm-and-live, not process-alive.
 - **Heartbeat that only catches exits.** Relying on `SIGCHLD` alone misses *hangs* (a live-but-stuck process). Use heartbeats to catch the hang (§74.4.3).
 - **Raw pointers in shared memory.** Segments map at different addresses per process; raw pointers stored in shared memory are garbage in another process (Ch. 26, 73). Use offsets (§74.4.1).
@@ -184,7 +292,7 @@ Two operational techniques for keeping failures small and debuggable:
 - Talks on trading-system architecture, fault domains, and deterministic replay (LMAX, exchange/matching-engine designs) — the process topology and state-machine pattern in production (§74.2).
 - The functional-core / imperative-shell and event-sourcing literature — the pure-core/impure-edge split and replay from an event log (§74.2.2).
 - Ch. 75 (*Capture/Persistence/Replay*) — recording the input stream and replaying it through the deterministic core; Ch. 76 (*Case Study*) — the whole topology end-to-end with replay-based regression gates; Ch. 46 (*Warming*) — fast warm restart; Ch. 72 (*Security*) — kill-switch and reader-side validation; Ch. 73 (*Hot Reload*) — config distribution to the processes.
-- **Appendix F** — fault-domain / crash-only / state-machine / kill-switch glossary; **Appendix C** — isolation and core-affinity tuning that keeps the processes off each other's cores.
+- **Appendix F** — crash-only / state-machine / kill-switch glossary; **Appendix C** — isolation and core-affinity tuning that keeps the processes off each other's cores.
 
 ---
 
