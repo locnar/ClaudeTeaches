@@ -148,7 +148,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 10.2.1 `__builtin_prefetch` / `_mm_prefetch` and locality hints
   - 10.2.2 Prefetch distance and timeliness
   - 10.2.3 Streaming (non-temporal) stores and the write path
-- 10.3 Measure it: prefetch-distance sweep on a linked traversal
+- 10.3 Measure it: prefetch-distance sweep on a dependent random gather
 - 10.4 Techniques
   - 10.4.1 Manual prefetch for irregular access
   - 10.4.2 Non-temporal stores to avoid cache pollution

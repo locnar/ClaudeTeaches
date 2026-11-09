@@ -67,8 +67,10 @@ The experiment isolates the *only* thing that matters: branch **predictability**
 
 ```cpp
 // branch.cpp — same conditional sum on sorted vs shuffled data.
-// Build: g++ -O2 -std=c++20 -march=native branch.cpp -o branch
-//   (Keep the compiler from turning the branch into a cmov for THIS experiment — see note.)
+// Build: g++ -O2 -std=c++20 -march=native -fno-tree-vectorize -fno-tree-loop-if-convert -fno-if-conversion -fno-if-conversion2 branch.cpp -o branch
+//   (THIS experiment needs a real branch. Plain -O2 -march=native vectorizes the loop
+//    (vpcmpgtd/vpand/vpaddq — no branch at all) or if-converts it to a cmov; the flags above turn
+//    both off. Clang: -fno-vectorize -fno-slp-vectorize plus the asm barrier below. Confirm in the asm.)
 // Run pinned, turbo off:  taskset -c 2 ./branch sorted   |   ./branch shuffled
 #include <algorithm>
 #include <cstdint>
@@ -92,8 +94,10 @@ int main(int argc, char** argv) {
     std::int64_t sum = 0;
     for (int r = 0; r < REPS; ++r)
         for (std::size_t i = 0; i < N; ++i)
-            if (a[i] >= threshold)                  // data-dependent branch
+            if (a[i] >= threshold) {                // data-dependent branch
                 sum += a[i];                        // taken ~50% (shuffled) vs in a run (sorted)
+                asm volatile("" : "+r"(sum));      // opaque side effect: the arm cannot become a cmov/mask
+            }
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
     std::printf("%-9s sum=%lld  %.3f ns/elem\n", sorted ? "sorted" : "shuffled",
@@ -102,19 +106,19 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *ratio* is the point):
+Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 with the flags above, Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                                  sorted (predictable)   shuffled (unpredictable)
-ns / element                        ~0.4 ns                ~1.6 ns        <- ~4x slower
-IPC                                 high (~3+)             low (~1)
-branch-misses / branch              ~0.1%                  ~50%           <- the whole story
-branch-misses (count)               ~tiny                  HUGE
+ns / element                        ~0.7 ns                ~3.5 ns        <- ~5x slower
+IPC                                 ~3 (7 insns, ~2.3 cyc) ~0.7
+branch-misses / branches            ~0.05%                 ~25%           <- the whole story: ~50% of the DATA branch
+branch-misses (count)               ~tiny                  ~65 M (half of 131 M data branches)
 L1-dcache-load-misses               ~same                  ~same          <- memory NOT the cause
 instructions                        ~same                  ~same          <- identical work
 ```
 
-Read it the Ch. 2 way: **identical instructions, identical memory traffic — and 4× slower, entirely from `branch-misses`.** The sorted array's branch flips direction *once*; the predictor learns it and the loop runs near peak IPC. The shuffled array's branch is a coin flip; the predictor floors at ~50% misprediction and every other element eats a ~15–20-cycle flush. That is the **Bad Speculation** fingerprint: high `branch-misses`, low IPC, clean memory. When you see it, you have an unpredictable branch on the hot path — and §13.4 is how you remove it. (Note: at higher `-O2`/`-O3` the compiler may *itself* convert this exact loop to a branchless `cmov` form — §13.5 — erasing the gap; to *observe* the mispredict cost you may need to obscure the pattern or inspect the asm to confirm a real branch was emitted.)
+Read it the Ch. 2 way: **identical instructions, identical memory traffic — and ~5× slower, entirely from `branch-misses`.** The sorted array's branch flips direction *once*; the predictor learns it and the loop runs near peak IPC. The shuffled array's branch is a coin flip; the predictor floors at ~50% misprediction on it and every other element eats a ~15-20-cycle flush — ~8-10 cycles per element on average, ~3 ns on top of the ~0.7 ns loop body, which is where the ~3.5 ns comes from. (`perf`'s `branch-misses / branches` reads ~25%, not 50%, because `branches` also counts the always-predicted loop back-edge — one per element.) That is the **Bad Speculation** fingerprint: high `branch-misses`, low IPC, clean memory. When you see it, you have an unpredictable branch on the hot path — and §13.4 is how you remove it. (Note the flags: at plain `-O2 -march=native` GCC 13 *vectorizes* this loop — `vpcmpgtd`/`vpand`/`vpaddq`, no branch at all — and at `-O1`/`-O2` without AVX it if-converts to a `cmov`; either erases the gap. The listing turns both off and pins the arm with an opaque side effect; §13.5 shows the branch-vs-`cmov` codegen. Always confirm a real branch was emitted before trusting a mispredict measurement.)
 
 ---
 
@@ -241,7 +245,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 
 **Exercises**
 
-1. **Measure the mispredict cost.** Build `branch.cpp`, run `sorted` vs `shuffled` pinned/ turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Confirm: same instructions and memory, but ~50% `branch-misses` and ~4× slowdown on shuffled. What's the IPC of each? Which top-down bucket (Ch. 2) is shuffled?
+1. **Measure the mispredict cost.** Build `branch.cpp`, run `sorted` vs `shuffled` pinned/ turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Confirm: same instructions and memory, but ~25% of all branches mispredicted (~50% of the data branch — the loop back-edge halves the ratio) and ~5× slowdown on shuffled. What's the IPC of each? Which top-down bucket (Ch. 2) is shuffled?
 2. **Did the compiler go branchless?** Disassemble the §13.3 loop at `-O1`, `-O2`, `-O3` (Ch. 4). At which level does the `jcc` become a `cmov`/masked add? When it does, re-run §13.3 — does the sorted/shuffled gap disappear? Explain why.
 3. **`cmov` vs branch on predictable data.** Take a *highly predictable* branch (e.g. 99% one-way) and force a branchless version (explicit `cmov`/mask). Measure both. Is branchless *slower*? Tie the result to the control-vs-data-dependency trade-off (§13.4.1, §13.6).
 4. **Build a dispatch table.** Replace an `if/else` (or `switch`) message-type classifier with a `constexpr` lookup table indexed by the type byte. Measure on a mixed (unpredictable) message stream. Compare against the branch chain *and* against sorting the stream by type first (§13.4.3).

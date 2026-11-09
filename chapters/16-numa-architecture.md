@@ -77,31 +77,40 @@ The experiment is the cleanest possible isolation of the NUMA factor: run the *i
 #include <vector>
 #include <random>
 #include <chrono>
+#include <sys/mman.h>
 
 int main() {
     constexpr std::size_t BYTES = std::size_t(512) << 20;   // 512 MiB: defeats all caches
     constexpr std::size_t N = BYTES / sizeof(std::size_t);
     constexpr std::size_t STEPS = 100'000'000;
 
-    std::vector<std::size_t> a(N);                          // first-touch here → node set by numactl --membind
+    // The chase buffer on 2 MB pages (THP via madvise; check AnonHugePages in smaps_rollup), so that
+    // each step is ONE DRAM access and not DRAM + an STLB-miss page walk — on 4 KiB pages the 512 MiB
+    // of PTEs (1 MiB) spill L2 and ~20 ns of every step would be translation (Ch. 15), on both nodes.
+    auto* a = static_cast<std::size_t*>(mmap(nullptr, BYTES, PROT_READ | PROT_WRITE,
+                                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (a == MAP_FAILED) { std::perror("mmap"); return 1; }
+    madvise(a, BYTES, MADV_HUGEPAGE);
     // Build a random permutation cycle so each load depends on the previous (true latency).
     std::vector<std::size_t> perm(N);
     for (std::size_t i = 0; i < N; ++i) perm[i] = i;
     std::mt19937_64 rng(42);
     for (std::size_t i = N - 1; i > 0; --i) std::swap(perm[i], perm[rng() % (i + 1)]);
-    for (std::size_t i = 0; i < N; ++i) a[perm[i]] = perm[(i + 1) % N];
+    for (std::size_t i = 0; i < N; ++i) a[perm[i]] = perm[(i + 1) % N];   // first touch → node per --membind
 
     auto t0 = std::chrono::steady_clock::now();
     std::size_t p = 0;
     for (std::size_t s = 0; s < STEPS; ++s) p = a[p];        // dependent chase: one miss at a time
     auto t1 = std::chrono::steady_clock::now();
+    asm volatile("" :: "r"(p));                               // keep the chain live
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
     std::printf("chase end=%zu  %.1f ns/access\n", p, ns / STEPS);
+    munmap(a, BYTES);
     return 0;
 }
 ```
 
-Profile with `perf stat`, and use the **uncore/offcore** counters that distinguish local from remote DRAM (names vary by platform; on Ice Lake-SP look for `mem_load_l3_miss_retired.remote_dram` vs `...local_dram`, or the uncore `UNC_M_*`/offcore-response remote events). Representative results — reference machine **2× Xeon Gold 6326** (dual-socket Ice Lake-SP), pinned, turbo off (illustrative; the *ratio* is the point):
+Profile with `perf stat`, and use the **uncore/offcore** counters that distinguish local from remote DRAM (names vary by platform; on Ice Lake-SP look for `mem_load_l3_miss_retired.remote_dram` vs `...local_dram`, or the uncore `UNC_M_*`/offcore-response remote events). Representative results — reference machine **2× Xeon Gold 6326** (dual-socket Ice Lake-SP), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x with `kernel.numa_balancing=0` (so the kernel cannot migrate the chased pages mid-run) and the buffer on 2 MB pages as the listing requests (check `AnonHugePages` in `/proc/<pid>/smaps_rollup`), pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                                           local (CPU0→mem0)   remote (CPU1→mem0)
@@ -112,7 +121,7 @@ L3 / LLC miss rate                           ~same               ~same        <-
 instructions                                 same                same         <- identical work
 ```
 
-Read it the Ch. 2 way: **identical instructions, identical access pattern and LLC-miss rate — yet ~1.8× the per-access latency, entirely from `remote_dram` replacing `local_dram`.** The program is byte-for-byte the same; only `numactl`'s `--cpunodebind` moved the *touching core* to the other socket while the data stayed on node 0, so every miss now crosses UPI. That ~65 ns gap *per dependent access* is the NUMA cliff, and on a pointer-chasing hot path (a node-based book, a hash probe — Ch. 25) it compounds into a large, invisible-without-NUMA-counters tail. The fingerprint: **high `remote_dram` / cross-socket offcore responses with unchanged cache-miss rates.** When you see it, the cure is placement and pinning (§16.4); if accesses are already local, NUMA isn't your problem.
+Read it the Ch. 2 way: **identical instructions, identical access pattern and LLC-miss rate — yet ~1.8× the per-access latency, entirely from `remote_dram` replacing `local_dram`.** The program is byte-for-byte the same; only `numactl`'s `--cpunodebind` moved the *touching core* to the other socket while the data stayed on node 0, so every miss now crosses UPI. That ~65 ns gap *per dependent access* is the NUMA cliff (on 4 KiB pages both columns would carry ~20 ns more — an STLB-miss page walk per access, Ch. 15 — with the page tables themselves sitting on node 0 by `--membind`; the huge-page mapping keeps the measurement DRAM-only), and on a pointer-chasing hot path (a node-based book, a hash probe — Ch. 25) it compounds into a large, invisible-without-NUMA-counters tail. The fingerprint: **high `remote_dram` / cross-socket offcore responses with unchanged cache-miss rates.** When you see it, the cure is placement and pinning (§16.4); if accesses are already local, NUMA isn't your problem.
 
 (Run `numactl --hardware` first to confirm the node→core map and the distance matrix for your box; and note that an *interleaved* allocation — `numactl --interleave=all` — would land ~halfway between local and remote, the bandwidth-vs-latency trade-off of §16.4.1.)
 

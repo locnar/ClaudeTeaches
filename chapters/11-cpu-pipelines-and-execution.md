@@ -78,7 +78,7 @@ serial chain (latency-bound):   add ──4cy──► add ──4cy──► ad
 
 split into 4 chains (throughput-bound):
    add0 ─► add0 ─►        4 independent chains interleave; the core issues
-   add1 ─► add1 ─►        ~2 adds/cycle across them ──►  ~1 cy / element (≈4x)
+   add1 ─► add1 ─►        ~1 add/cycle across them ──►  ~1 cy / element (≈4x; 8 chains → ~0.5 cy)
    add2 ─► add2 ─►
    add3 ─► add3 ─►
 ```
@@ -93,8 +93,10 @@ The signature of a dependency-chain bottleneck is **low IPC with low cache-miss 
 
 ```cpp
 // dep_chain.cpp — same sum, one serial chain vs four independent chains.
-// Build: g++ -O2 -std=c++20 -march=native dep_chain.cpp -o dep_chain
-//   (NOTE: -O2 WITHOUT -ffast-math, so the compiler must preserve FP order — §11.5.)
+// Build: g++ -O2 -std=c++20 -march=native -fno-tree-vectorize -fno-tree-slp-vectorize dep_chain.cpp -o dep_chain
+//   (NOTE: -O2 WITHOUT -ffast-math, so the compiler must preserve FP order — §11.5; and with the
+//    vectorizers OFF, so both variants stay SCALAR vaddsd and "same instructions" holds — GCC 13
+//    otherwise turns the 4-chain loop into vaddpd ymm. Clang: -fno-vectorize -fno-slp-vectorize.)
 // Run pinned, turbo off: taskset -c 2 ./dep_chain 1   |   ./dep_chain 4
 #include <cstdint>
 #include <cstdio>
@@ -131,18 +133,18 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile each with `perf stat -e cycles,instructions,fp_arith_inst_retired.scalar_double,L1-dcache-load-misses,branch-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, FP add ~4-cycle latency, ~2/cycle throughput), `-O2 -march=native` (no fast-math), pinned, turbo off (illustrative; the *ratio* is the point):
+Profile each with `perf stat -e cycles,instructions,fp_arith_inst_retired.scalar_double,L1-dcache-load-misses,branch-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; FP add 4-cycle latency, 2/cycle throughput), GCC 13 `-O2 -march=native -fno-tree-vectorize -fno-tree-slp-vectorize` (no fast-math), Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                               chains=1 (serial)      chains=4 (split)
-ns / element                     ~1.4 ns                ~0.36 ns       <- ~4x faster
-IPC                              low (~1.0)             higher (~3+)
+ns / element                     ~1.4 ns                ~0.35 ns       <- ~4x faster
+IPC                              ~0.75 (3 insns/4 cyc)  ~2.5           <- same 3 insns/elem; 4x fewer cycles
 L1-dcache-load-misses            ~0 (L1-resident)       ~0              <- memory NOT the cause
 branch-misses                    ~0                     ~0             <- branches NOT the cause
-fp adds retired                  same                   same           <- identical work
+fp_arith_inst_retired.scalar_double   8.19 G            8.19 G         <- identical work: one vaddsd per element
 ```
 
-Read it the Ch. 2 way: **same instructions, same (near-zero) misses, same (near-zero) mispredicts — and 4× the speed.** The only thing that changed is the *dependency structure*. `chains=1` is latency-bound at one FP-add-latency per element (~4 cyc ≈ 1.4 ns); `chains=4` keeps four adds in flight, saturating FP-add throughput (~2/cyc), and runs ~4× faster. The PMU fingerprint of a dependency-chain bottleneck is exactly this: **low IPC, clean memory, clean branches** — top-down would call it Back-End → Core-Bound. When you see that signature, look for a serial chain to break.
+Read it the Ch. 2 way: **same instructions, same (near-zero) misses, same (near-zero) mispredicts — and 4× the speed.** The only thing that changed is the *dependency structure*. `chains=1` is latency-bound at one FP-add-latency per element (4 cyc ≈ 1.4 ns); `chains=4` keeps four adds in flight — four adds per 4 cycles, **one add per cycle, half of the two FP-add ports' peak** — and runs ~4× faster; eight independent chains would saturate both ports (§11.4.2). (The vectorizer flags matter for the *measurement*, not the technique: left on, GCC 13 turns the four-accumulator loop into `vaddpd ymm` — one packed add per four elements — so `scalar_double` would read ~0 for `chains=4` and "same instructions" would be false; §11.5 shows that codegen.) The PMU fingerprint of a dependency-chain bottleneck is exactly this: **low IPC, clean memory, clean branches** — top-down would call it Back-End → Core-Bound. When you see that signature, look for a serial chain to break.
 
 ---
 

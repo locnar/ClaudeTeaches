@@ -16,7 +16,7 @@ Order-of-magnitude costs on a modern x86-64 server core (reference machine **Int
 
 | Access | Latency | ≈ cycles @ ~3 GHz | Relative to L1 |
 |---|---:|---:|---:|
-| L1 data cache hit | ~1 ns (4–5 cyc) | 4–5 | 1× |
+| L1 data cache hit | ~1.5 ns (4–5 cyc) | 4–5 | 1× |
 | L2 hit | ~4 ns | ~14 | ~4× |
 | L3 (LLC) hit | ~15–20 ns | ~45–60 | ~15× |
 | Local DRAM (LLC miss) | ~80 ns | ~240 | ~80× |
@@ -24,7 +24,7 @@ Order-of-magnitude costs on a modern x86-64 server core (reference machine **Int
 
 (Some texts quote the L1-to-DRAM ratio as "~200×" using a faster core clock and a 1-cycle L1; the exact multiplier shifts with frequency, but the lesson — **two-plus orders of magnitude** — does not.)
 
-This is why Ch. 1's tail is so often a *memory* tail. A hot path that hits L1 every time runs at a tight, predictable ~1 ns/access; the same code that occasionally misses to DRAM gets an 80 ns spike *per miss*, and a handful of those land you in the p99.9. Ch. 2's `perf_demo` already showed it: identical instructions, 16× the cycles, purely from access pattern. The order book (Ch. 25) lives or dies here — a book update that touches one cache-resident price level is a different animal from one that chases pointers across DRAM.
+This is why Ch. 1's tail is so often a *memory* tail. A hot path that hits L1 every time runs at a tight, predictable ~1 ns/access; the same code that occasionally misses to DRAM gets an 80 ns spike *per miss*, and a handful of those land you in the p99.9. Ch. 2's `perf_demo` already showed it: identical instructions, ~50× the cycles, purely from access pattern. The order book (Ch. 25) lives or dies here — a book update that touches one cache-resident price level is a different animal from one that chases pointers across DRAM.
 
 The good news is that the hardware is *trying to help you*: caches keep recently-used data close, and prefetchers guess what you'll need next. The bad news is that they help only if your **access pattern cooperates** — sequential, predictable, locally-clustered. The entire craft of cache-aware programming (Ch. 7–10) is arranging your data and your accesses so the hardware's bets pay off. This chapter builds the mental model; the next three spend it.
 
@@ -106,7 +106,7 @@ The classic experiment that makes the whole hierarchy *visible* is a **pointer-c
 ```cpp
 // cache_sweep.cpp — reveal L1/L2/L3/DRAM by measuring pointer-chase latency vs size.
 // Build: g++ -O2 -std=c++20 cache_sweep.cpp -o cache_sweep
-// Run pinned with fixed frequency (Ch.3, 6):  taskset -c 2 ./cache_sweep
+// Run pinned with fixed frequency (Ch. 3, 6):  taskset -c 2 ./cache_sweep
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -130,34 +130,35 @@ int main() {
         // Chase the cycle many times; total steps fixed so each size does equal work.
         const std::size_t steps = 200u * 1000 * 1000;
         std::uint32_t idx = 0;
+        for (std::size_t s = 0; s < n; ++s) idx = next[idx];        // warm-up lap (untimed)
         auto t0 = std::chrono::steady_clock::now();
-        for (std::size_t s = 0; s < steps; ++s) idx = next[idx];  // dependent load
+        for (std::size_t s = 0; s < steps; ++s) idx = next[idx];    // dependent load
         auto t1 = std::chrono::steady_clock::now();
 
-        volatile std::uint32_t sink = idx; (void)sink;  // keep the chain live
+        asm volatile("" :: "r"(idx));                     // keep the chain live (Appendix L)
         double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         std::printf("%8zu KiB   %6.2f ns/access\n", kib, ns / steps);
     }
 }
 ```
 
-Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP: 48 KiB L1d, 1.25 MiB L2, ~24 MiB L3 per core domain), pinned, turbo off (illustrative; the *plateaus and cliffs* are the point, not the exact ns):
+Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base: 48 KiB L1d, 1.25 MiB L2 per core, 24 MiB L3 shared across the socket — 1.5 MiB slice per core), GCC 13 `-O2 -std=c++20`, Linux 6.x, 4 KiB pages, pinned, turbo off (illustrative; the *plateaus and cliffs* are the point, not the exact ns):
 
 ```
-       4 KiB     1.10 ns/access     ┐
-      32 KiB     1.15 ns/access     ├─ fits in L1d            (~1 ns plateau)
-      64 KiB     4.10 ns/access     ┐
-     512 KiB     4.30 ns/access     ├─ spilled to L2          (~4 ns plateau)
-    2048 KiB    16.80 ns/access     ┐
-   16384 KiB    19.50 ns/access     ├─ spilled to L3          (~17 ns plateau)
-   65536 KiB    78.00 ns/access     ┐
-  262144 KiB    82.00 ns/access     ├─ spilled to DRAM        (~80 ns plateau)
+       4 KiB     1.72 ns/access     ┐
+      32 KiB     1.75 ns/access     ├─ fits in L1d            (5-cycle load-to-use: ~1.7 ns plateau)
+      64 KiB     4.80 ns/access     ┐
+     512 KiB     5.20 ns/access     ├─ spilled to L2          (~14 cycles: ~5 ns plateau)
+    2048 KiB    20.50 ns/access     ┐
+   16384 KiB    24.00 ns/access     ├─ spilled to L3          (~60-70 cycles: ~20 ns plateau; STLB misses creep in)
+   65536 KiB    95.00 ns/access     ┐
+  262144 KiB   105.00 ns/access     ├─ spilled to DRAM        (~100 ns plateau = DRAM + page walk)
 ```
 
 This single table *is* §7.2.1, measured. Read it the Ch. 1–2 way:
 
-- **The plateaus reveal the cache sizes.** Latency is flat while the working set fits a level, then jumps at each capacity boundary — the cliff edges sit right at ~L1, ~L2, ~L3 sizes. You just measured your machine's cache hierarchy with a 20-line program.
-- **The cliffs are the cost of a miss.** Each step up (1→4→17→80 ns) is the latency of the *next* level. The 80 ns DRAM plateau is the ~80× number from §7.1, in your own hands.
+- **The plateaus reveal the cache sizes.** Latency is flat while the working set fits a level, then jumps at each capacity boundary — the cliff edges sit right at ~L1, ~L2, ~L3 sizes. You just measured your machine's cache hierarchy with a 20-line program. The L1 plateau is the floor the hardware allows: a dependent `idx = next[idx]` cannot go faster than the L1d load-to-use latency, **5 cycles on Ice Lake** (4 on Skylake-class cores) — 1.72 ns at 2.9 GHz. If you see less, the chain was broken (or turbo was on).
+- **The cliffs are the cost of a miss.** Each step up (1.7→5→20→100 ns) is the latency of the *next* level. The ~100 ns DRAM plateau is the "~80-100 ns" number from §7.1 and Appendix E, in your own hands — plus translation: above ~8 MiB on 4 KiB pages the chase also misses the STLB (~2 K entries ≈ 8 MiB of reach — Ch. 15) and pays a page walk on nearly every access, so the DRAM plateau is **DRAM + page walk**. Re-run the buffer on 2 MB pages (`madvise(MADV_HUGEPAGE)`, Ch. 15) and it drops toward ~85-90 ns: the difference *is* the walk.
 - **This is the *latency-exposed* worst case** (dependent pointer chase, no prefetch). Replace the chase with a *sequential* scan and the DRAM-sized case drops back toward L1-like throughput — because the prefetcher (§7.2.4) hides the latency. That contrast, measured, is the entire argument for cache-friendly access. Confirm both with `perf stat -e LLC-load-misses,L1-dcache-load-misses` (Ch. 2): the chase shows miss-per-access at large sizes; the sequential scan does not.
 
 ---
