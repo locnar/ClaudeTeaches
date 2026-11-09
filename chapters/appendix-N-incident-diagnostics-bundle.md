@@ -164,4 +164,4 @@ Write the verdict — mechanism, evidence rows, knob or fix, gate entry — into
 
 ---
 
-*This completes Appendix N and the book. The chapters (Parts I–XIII) and Appendices A–N together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 95) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, connectivity and physical layer, benchmark harness, the pre-open readiness gate, and the incident diagnostics bundle) that outlive any single chapter.*
+*Next: Appendix O — Hot-Path Anti-Pattern Catalogue: every chapter's pitfalls re-sorted by where the sin lives, each row symptom → the counter or probe that exposes it → the fix → the section that develops it — the reviewer's checklist before a merge and the first-look table when the bundle of this appendix lands on your desk.*

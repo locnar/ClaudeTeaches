@@ -135,6 +135,11 @@ Discovering the machine and placing threads on it (Ch. 16, 45, 46; Appendix C).
    cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 45)
    sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 93 §93.2.4)
    turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
+   cat /proc/<pid>/task/*/timerslack_ns                                # 50000 = the default 50 µs timer slack on every sleeping thread (Ch. 44 §44.3); 1 after prctl(PR_SET_TIMERSLACK, 1)
+   echo 1 | sudo tee /proc/<pid>/task/<tid>/timerslack_ns              # set it from outside for a component you cannot patch (Ch. 44 §44.4.4)
+   cat /proc/sys/kernel/sched_rt_runtime_us                            # 950000 = RT throttle ON: a busy-polling SCHED_FIFO thread stalls 50 ms/s (Ch. 44 §44.3); -1 on isolated boxes (Ch. 48, Appendix C)
+   perf trace -e 'timer:hrtimer_expire_entry' -C 2 -- sleep 10         # whose hrtimers fire on the isolated cpu (want: none but the hot thread's own — Ch. 44 §44.4.4)
+   sudo cyclictest -p 80 -i 200 -h 400 -a 1 -t 1 -D 60s                # wake-up latency of a sleeping RT thread on cpu1 — the kernel-timer half of Ch. 44, after Ch. 48's tuning
 ```
 
 **Interpreting:** `lstopo` is the map you tune against (Ch. 46) — it shows which logical CPUs are SMT siblings and which cores share an L2/L3, so you can leave siblings idle (Ch. 46) and keep a thread and its data on one NUMA node (Ch. 16). These are the runtime counterparts to the boot-time isolation in Appendix C.

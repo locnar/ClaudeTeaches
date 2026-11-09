@@ -59,8 +59,8 @@ Code & content guidelines:
 
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
-> appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), and then — with a new Part XII (Beyond C++) — to **89 chapters in thirteen Parts and fourteen appendices (A–N)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–N)
+> appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to **95 chapters in thirteen Parts and fifteen appendices (A–O)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
+> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–O)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
 
@@ -430,19 +430,27 @@ Code & content guidelines:
   host fingerprint) and checkable (raw rings and sample windows with a manifest and checksums); the
   evidence per layer with the producing chapter; the ten-minute first look; retention and scrubbing
   (current numbering: Ch. 5, 46, 60, 73–75, 77, 79–83; Appendices C, D, I, K, M).
+- **Appendix O — Hot-Path Anti-Pattern Catalogue** (added 2026-11-09 with the design-pattern chapters) —
+  every chapter's §N.5/§N.6 *Pitfalls & anti-patterns* re-sorted by where the sin lives (allocation;
+  dispatch/type erasure; control flow & memory ordering; sharing; queues/flow control/timers;
+  kernel/scheduling/syscalls; I/O/networking/logging/capture; layout & caches; numerics; build/flags;
+  measurement; operational/architectural), each row symptom → the counter/probe that exposes it
+  (Appendix I's invocations) → fix → the §N.6 that develops it; a ten-row short list; the pre-merge
+  review checklist Ch. 95 §95.4.1 asks for and Appendix I's companion.
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 89
-  chapters and appendices A–N — see Phases 2–3 and the three 2026-11-09 insertions below).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 95
+  chapters and appendices A–O — see Phases 2–3 and the four 2026-11-09 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 89 chapters + 14 appendices (A–N);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 95 chapters + 15 appendices (A–O);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
-  with the 2026-11-09 monitoring chapters and N with the 2026-11-09 debugging chapters.**
+  with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters and O with
+  the 2026-11-09 design-pattern chapters.**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 89 chapters + 14 appendices (A–N). Appendix H's version numbers and
+  now: front matter + 95 chapters + 15 appendices (A–O). Appendix H's version numbers and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
 - Phase 3 (done): **the book was reorganized into twelve topical Parts** (thirteen since the
@@ -456,9 +464,12 @@ Code & content guidelines:
   - **III — Compile-Time & Language Mechanics** (18–22).
   - **IV — Memory Management** (23–26).
   - **V — Numerics & Data Parallelism** (27–29).
-  - **VI — Concurrency** (30–42): …coroutines, `std::execution`, correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (43–50): …SMT, cache allocation (RDT), RT scheduling, hunting
-    residual noise (Ch. 46, added 2026-11-09), warming.
+  - **VI — Concurrency** (30–42): …the Disruptor, threading topologies & the hot loop (Ch. 38, added
+    2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 39, P3-4), coroutines, `std::execution`,
+    correctness tooling.
+  - **VII — OS, Scheduling & Isolation** (43–50): context switching, timers & deadlines without jitter
+    (Ch. 44, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
+    residual noise (Ch. 49, added 2026-11-09 P3-1), warming.
   - **VIII — Kernel I/O, Sockets & Zero-Copy** (51–56): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
   - **IX — Market Data, NIC & Fabric** (57–65): decoding, reliable multicast, multicast membership &
@@ -470,10 +481,12 @@ Code & content guidelines:
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
   - **XIII — Observability & Operations in Production** (81–95): logging, in-band latency tracing
-    (Ch. 74, added 2026-11-09 P3-2), application telemetry (Ch. 75, added 2026-11-09 P3-1), security,
-    hot reload, process topology, crash handling & post-mortem (Ch. 79, P3-2), capture/replay,
-    latency-spike forensics (Ch. 81, P3-2), host health telemetry and network health & drop forensics
-    (Ch. 82–83, P3-1), end-to-end case study (the capstone, still last).
+    (Ch. 82, added 2026-11-09 P3-2), application telemetry (Ch. 83, P3-1), security, hot reload, process
+    topology, the pre-trade risk gate & kill-switch path (Ch. 87, P3-4), idempotent order entry &
+    order-state recovery (Ch. 88, P3-4), crash handling & post-mortem (Ch. 89, P3-2), capture/replay, the
+    sequencer & replicated deterministic consumers (Ch. 91, P3-4), latency-spike forensics (Ch. 92, P3-2),
+    host health telemetry and network health & drop forensics (Ch. 93–94, P3-1), end-to-end case study
+    (the capstone, still last).
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved
   chapter's framing/teasers and regenerating `chapters/README.md` from the chapter files.
@@ -520,6 +533,29 @@ Code & content guidelines:
   reduced to a two-page summary + tier table pointing at Part XII; Appendix L.5 (cross-language
   protocol pointer; L.5–L.6 → L.6–L.7); Appendix I.11 (other toolchains' asm and runtime-log
   one-liners; I.11–I.12 → I.12–I.13); Appendix E's C-ABI-call row; Appendix F/G/H entries.
+- **2026-11-09 design-patterns insertion (work-queue item P3-4):** six chapters and one appendix were
+  added with `insert_chapter.py` (six ascending insertions, one commit each — no new Part): **38**
+  Threading Topologies & the Hot Loop and **39** Flow Control, Backpressure & Conflation on the Hot
+  Path (Part VI, after the Disruptor), **44** Timers & Deadlines Without Jitter (Part VII, after
+  context switching), **87** The Pre-Trade Risk Gate & Kill-Switch Path and **88** Idempotent Order
+  Entry & Order-State Recovery (Part XIII, after process topology), **91** The Sequencer: Total-Order
+  Broadcast & Replicated Deterministic Consumers (between capture and spike forensics), and
+  **Appendix O** Hot-Path Anti-Pattern Catalogue. Renumber map from the post-P3-3 numbering: 1–37
+  unchanged; old 38–41 → 40–43; old 42–83 → 45–86; old 84–85 → 89–90; old 86–89 → 92–95. Composite
+  from the Phase-3 (pre-P3-1) numbering: 1–37 unchanged; 38–41 → 40–43; 42–45 → 45–48; 46–54 → 50–58;
+  55–70 → 60–75; 71 → 81; 72 → 84; 73 → 85; 74 → 86; 75 → 90; 76 → 95. Part XIII order is now: logging
+  → tracing → telemetry → security → hot reload → topology → risk gate → order entry → crash → capture
+  → sequencer → spike forensics → host health → network health → capstone. Also added: Ch. 19
+  §19.4.4 (strong types and units) and §19.4.5 (type-state and compile-time state machines) with the
+  register-passing asm proof in §19.5 and the §19.4.3 static-DI/null-object bullet; Ch. 25 §25.4.4
+  (slot maps and generational handles — the LOB case study is now §25.4.5 and adopts it) with a §25.3
+  measurement row and §25.5 pitfalls; Appendix F (sequencer, replicated state machine, fencing token,
+  conflation, hop, slot-ownership protocol, staleness budget, timer slack, timing wheel, slot map, RT
+  throttle, strong type, type-state, static DI, pre-trade risk gate, in-flight order table,
+  unknown-state matrix, journal-before-send, degraded mode; kill-switch/drop-copy/order gateway
+  re-pointed), Appendix G (Schneider, Lamport, Défago et al., Varghese & Lauck, hrtimers, Helland,
+  Gray & Reuter, SEDA/Kleinrock, 15c3-5/RTS 6/FIA, venue session specs; G.6 lines), Appendix I.6
+  timer-slack/RT-throttle one-liners, Appendix J.6/K.4 and Ch. 1/27/84/86/90/95 pointers.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to

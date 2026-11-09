@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 95 chapters are grouped into thirteen Parts; fourteen appendices (A–N) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 95 chapters are grouped into thirteen Parts; fifteen appendices (A–O) follow.
 
 ---
 
@@ -414,7 +414,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part VI — Concurrency
 
-*The memory model, lock-free structures, the Disruptor, coroutines, std::execution, and correctness tooling.*
+*The memory model, lock-free structures, the Disruptor, threading topologies and the hot loop, flow control and conflation, coroutines, std::execution, and correctness tooling.*
 
 ### [30. The C++ Memory Model & Atomics](30-cpp-memory-model-atomics.md)
 - 30.1 Why it matters: correctness and cost of sharing
@@ -571,7 +571,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part VII — OS, Scheduling & Isolation
 
-*Building and keeping a quiet, isolated, warm core — including cache and bandwidth partitioning — and attributing the noise that remains.*
+*Building and keeping a quiet, isolated, warm core — timers and deadlines without jitter, cache and bandwidth partitioning included — and attributing the noise that remains.*
 
 ### [43. Context Switching & Its Mitigation](43-context-switching-mitigation.md)
 - 43.1 Why it matters: a switch trashes the caches and TLB
@@ -1073,7 +1073,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 80.7 Exercises & checklist
 ## Part XIII — Observability & Operations in Production
 
-*Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology, crash handling, capture/replay, latency-spike forensics, host and network health, and the end-to-end case study.*
+*Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology, the pre-trade risk gate and kill-switch, idempotent order entry and order-state recovery, crash handling, capture/replay, the sequencer and replicated consumers, latency-spike forensics, host and network health, and the end-to-end case study.*
 
 ### [81. Zero-Overhead Logging](81-zero-overhead-logging.md)
 - 81.1 Why it matters: logging must never stall the hot path
@@ -1441,3 +1441,18 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - N.5 The collection script (skeleton): bounded by `taskset`/`nice`/`ionice`/`timeout`, per-group logs, manifest and checksums
 - N.6 The ten-minute first look (cheap exonerations first)
 - N.7 Retention, pattern analysis and what to scrub
+
+### [Appendix O — Hot-Path Anti-Pattern Catalogue](appendix-O-hot-path-anti-pattern-catalogue.md)
+- O.1 Allocation, page faults and memory lifetime
+- O.2 Dispatch, type erasure and abstraction cost
+- O.3 Control flow, data dependencies and memory ordering
+- O.4 Sharing, contention and false sharing
+- O.5 Queues, pipelines, flow control and timers
+- O.6 Kernel, scheduling, syscalls and isolation
+- O.7 I/O, networking, logging and capture
+- O.8 Layout, caches and the memory hierarchy
+- O.9 Numerics, bits and SIMD
+- O.10 Build, flags, codegen and toolchain
+- O.11 Measurement and observability mistakes
+- O.12 Operational and architectural
+- O.13 The ten that pay for the appendix
