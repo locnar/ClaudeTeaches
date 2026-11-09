@@ -244,6 +244,52 @@ recur elsewhere (TLB reach, 24 MiB L3) were checked against Appendices E/F (no o
 remains P1-3. **Hedged:** the Sunny Cove STLB 2 MB cap is written as "≤ ~1024" (the finding's figure) pending the
 Phase-4 hardware check; the pre/post-6.17 uprobe cost is stated qualitatively ("roughly halves") rather than in ns.
 
+**Status (2026-11-09): fixed** (work-queue item P1-5, branch `work/item-10-appendix-gf`) — the Appendix G and F rows above
+(and the confirmed per-line rows behind them in the part-4 findings), as in-line edits to the two appendices only; every new
+bibliography entry was checked against the chapter §N.7/§N.8 lists that cite it, every new or re-pointed glossary entry
+against a grep for where the term is actually defined. **Appendix G:** `G:55` Pikus → *The Art of Writing Efficient
+Programs* (Packt, 2021) and *Hands-On Design Patterns with C++* (2nd ed., 2023), annotated as a general companion since no
+chapter cites him; `G:60` "Mark Newman" removed — the entry is now Harris, *Trading and Exchanges: Market Microstructure for
+Practitioners* (the only microstructure text a chapter/appendix cites, J.8), pointed at Appendix J; `G:19` Cliff Click
+dropped from the Ch. 34 lock-free entry (Ch. 34's sources are Michael & Scott, Herlihy & Shavit, Vyukov, Preshing) — the line
+is now Michael & Scott (PODC 1996) and Click is re-homed at `G:74` as the JVM/GC note Appendix B.7 cites; `G:16` Lamport
+re-pointed to Ch. 40 (TLA+), the only chapter that cites him, with the paper's full title; `G:14` Disruptor's "capture (Ch. 75)
+/ process topology (Ch. 74)" → IPC rings (Ch. 50) and Aeron (Ch. 65) (0 Disruptor hits in 74/75); `G:50–51` Part II = Ch. 7–17
+(+ "6th ed., 2017" as Ch. 1 cites), Part VI = Ch. 30–40; `G:66` the `constexpr` talks are Deane & Turner ("constexpr ALL the
+Things!") and Dusíková, Doumler listed under hardware-aware C++; `G:67` Carl Cook removed from the Godbolt line. **Added**
+(G.1 `:13, 19–25`; G.2 `:38–46`; G.3 `:52, 54`; G.4 `:70–74`; G.5 `:88`): Dean & Barroso *Tail at Scale* (Ch. 1); Boehm & Adve
+PLDI 2008 (Ch. 30) + Boehm's seqlock paper (Ch. 35); Michael, Hazard Pointers TPDS 2004 + Fraser, *Practical Lock-Freedom*
+(Ch. 36); Anderson 1990 + Mellor-Crummey & Scott 1991 (Ch. 32); Goldberg 1991 (Ch. 27); NanoLog ATC'18 (Ch. 71); DCQCN /
+eRPC / Homa (Ch. 64–65); Intel Intrinsics Guide (Ch. 10, 28, 29); IEEE 1588-2019 (Ch. 58); rdma-core/verbs + RDMA Aware
+Networks manual (Ch. 63); CUDA Programming/Best Practices guides (Ch. 67); MPI Standard + Open MPI/MPICH/UCX (Ch. 68);
+Vivado/Vitis HLS/Quartus (Ch. 69); DOCA + P4 (Ch. 70); Intel RDT/`resctrl` + `pqos` (Ch. 44); SEC 15c3-5 / MiFID II RTS 25
+(Ch. 58, 74, 75); ★ Herlihy & Shavit (Ch. 34, 36); Vandevoorde/Josuttis/Gregor + Alexandrescu (Ch. 18–19, 24); Sutter
+"atomic<> Weapons" (Ch. 30, 40); Preshing (Ch. 30, 34, 35); Vyukov/1024cores + Relacy (Ch. 34, 37, 50, 40); Meyers' "CPU
+Caches" talk (Ch. 8); `linuxptp` (Ch. 58) — so every source F.9 sends readers to G for now has an annotated entry; `G:36`
+protocol specs also point at J.5; `G:107` the appendix map extended to H–L. **Appendix F re-pointed:** `F:18` Maker/Taker →
+J.1; `F:21` NBBO → J.2 (+ Ch. 25 for the data structure); `F:38` LFB and `F:41` MLP → Ch. 10 (Ch. 7 never names either) with
+MLP's duplicated "(Ch. 7, 10)" and `F:51` TLB's duplicated "(Ch. 15)" removed; `F:109` RAII → Ch. 39 / Ch. 24 / Appendix B
+(Ch. 23 has 0 hits); `F:114` `std::span`/`mdspan` → Ch. 72, 4, Appendix H (Ch. 49/53 have 0 hits); `F:12` Drop-copy → Ch. 52,
+72 (the only chapters that use it; none develops it — see *left* below); `F:11` Colocation → K.1 / Ch. 60; `F:19` Matching
+engine → J.1; `F:67` `rcu_nocbs` → Ch. 45 + Appendix C (Ch. 36 never mentions it); the other F.1 entries (`F:9–28`) gained
+their Appendix J.2/J.4–J.7 pointers; `F:78` EBR no longer called "bounded" (Ch. 36 §36.4.3 teaches unbounded deferral —
+hazard pointers are the bounded scheme); `F:112` sanitizer cost = ASan ~2×, TSan ~5–15× per Ch. 40:23, MSan pointed at Ch. 72;
+the redundant "µop cache — see DSB" line deleted (the headword at `F:34` is already "DSB / µop cache"). **Appendix F added**
+(F.2 `:36, 39, 42, 44, 47, 49, 53`; F.3 `:58, 61, 68`; F.4 `:76, 81–83, 87, 89–90, 93`; F.6 `:133, 139`): ILP, LLC, MPKI, PMU,
+SIMD/SSE/AVX/AVX-512, STLB, TSC/`rdtsc`/`rdtscp`; Context switch, IRQ affinity/`irqbalance`, Shared memory; CAS, Lock convoy,
+Lock-free/wait-free, MCS/CLH, Shared-nothing, SMR, Spinlock/TTAS/backoff, USL/Amdahl; `epoll`/readiness vs completion and
+IPC (inter-process) — with a see-also on `F:37` IPC (instructions per cycle). **Deliberately left:** `G:30` "Parts IX" was
+already "Part XI" (fixed by the P0-1 remap); the layer-1 "sub-ns" (`F:124`), RTL "gate-level" (`F:169`) and `khugepaged`
+"compaction" (`F:70`) wordings mirror what Ch. 60:34, Ch. 69:17 and Ch. 15:136 themselves say, so correcting the glossary
+alone would create a contradiction — they belong with those chapters' prose (P1-3 reconciliation); no drop-copy sentence was
+added to Appendix J.3/J.6 or §74.2 (outside the two appendices; gap item G33); the uncited Meyers *Effective Modern C++* /
+Core Guidelines, Love and trading-blog lines, and Appendix H's `std::span` row (Ch. 8, 29) are untouched (H is item P1-4);
+the book-wide "ROB → Ch. 11, 43", `F:43` µop and `F:153` RSS heuristic STALE rows are unchanged (pre-existing; not in the
+P1-5 rows). **Bibliographic hedges:** Herlihy & Shavit is given as "2nd ed., with Luchangco & Spear" without a year; Boehm's
+seqlock paper is given without venue/year; Harris without publisher/year — each omitted rather than guessed. Checks:
+`tools/review/sweep.py` output identical to `main`; `stale_crossrefs.py` 163 → 162 STALE rows (the `F:92` RAII row is gone,
+none added — three new entries were worded so the keyword heuristic does not misfire).
+
 ---
 
 ## 8. Duplication and placement
