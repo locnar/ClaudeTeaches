@@ -14,7 +14,7 @@ The minimal, correct micro-benchmark — defeating dead-code elimination (Ch. 3)
    #include <benchmark/benchmark.h>
    #include <bit>
    #include <vector>
-   #include "orderbook.hpp"   // the code under test (Ch. 25 §25.4.4; its pools in Ch. 24)
+   #include "orderbook.hpp"   // the code under test (Ch. 25 §25.4.5; its pools in Ch. 24)
 
    // Setup (book construction) happens ONCE per benchmark instance, outside the
    // timed loop — this is the setup/steady-state split Ch. 3 insists on.

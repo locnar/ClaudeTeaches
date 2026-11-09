@@ -2,7 +2,7 @@
 
 # Chapter 77 — Rust for the Hot Path
 
-> **Prerequisites:** Ch. 76 (reading and arguing with the emitted asm — every parity claim here is settled that way), Ch. 23–24 (the zero-allocation discipline Rust's ownership model re-expresses), Ch. 9 and 33 (layout, alignment and false sharing — `#[repr(C)]`, `#[repr(align(64))]`), Ch. 30 (the memory model Rust shares with C++, down to the instruction), Ch. 21 (aliasing — `&mut` is the `restrict` you do not have to promise), Ch. 34 (the SPSC ring), Ch. 57 (the decoder) and Ch. 25 §25.4.4 (the book update) — the three kernels this chapter ports and measures.
+> **Prerequisites:** Ch. 76 (reading and arguing with the emitted asm — every parity claim here is settled that way), Ch. 23–24 (the zero-allocation discipline Rust's ownership model re-expresses), Ch. 9 and 33 (layout, alignment and false sharing — `#[repr(C)]`, `#[repr(align(64))]`), Ch. 30 (the memory model Rust shares with C++, down to the instruction), Ch. 21 (aliasing — `&mut` is the `restrict` you do not have to promise), Ch. 34 (the SPSC ring), Ch. 57 (the decoder) and Ch. 25 §25.4.5 (the book update) — the three kernels this chapter ports and measures.
 >
 > **Leads into:** Ch. 78 (the C ABI boundary — how a Rust component and the C++ core call each other, and what a `panic` may not do), Ch. 79 (the languages on the other side of the GC line, measured the same way), Ch. 80 (the cross-language table these numbers feed, and `const fn` beside `constexpr` and `comptime`), Appendix B (the summary that now points here).
 
@@ -44,7 +44,7 @@ The book's hot path does four things the borrow checker cannot see through: it o
 
 *Toolchain and machine.* rustc 1.97.0 (LLVM 20; `-C opt-level=3 -C target-cpu=native -C panic=abort`, edition 2021), GCC 13.3 and Clang 18.1 (`-O2 -std=c++23 -march=native`), on the 4-vCPU Intel Xeon VM of Appendix L.2 (Linux 6.18, 2.7 GHz TSC, `taskset -c 2`) — the Ch. 80 protocol: same box, same core, same 1 M-message capture, cold and warm windows separated, five runs, medians. Not the reference machine; the comparisons are the result.
 
-**Kernel 1 — decode + book update** (Ch. 57's `decode()` fused with Ch. 25 §25.4.4's flat-array `apply()`, over a replayed 1 M-message capture; the C++ source is Ch. 80's `kernel.hpp`). The Rust version, complete and idiomatic — no `unsafe` in the kernel itself:
+**Kernel 1 — decode + book update** (Ch. 57's `decode()` fused with Ch. 25 §25.4.5's flat-array `apply()`, over a replayed 1 M-message capture; the C++ source is Ch. 80's `kernel.hpp`). The Rust version, complete and idiomatic — no `unsafe` in the kernel itself:
 
 ```rust
 // kernel.rs — decode + flat-book update in Rust (Ch. 80's kernel, Rust side). Build: rustc --edition 2021 -C opt-level=3 -C target-cpu=native -C panic=abort kernel.rs
@@ -78,7 +78,7 @@ impl Book {
         } else {
             let take = (m.qty as i64).min(l.qty);
             l.qty -= take; if l.count > 0 { l.count -= 1; }
-            if l.qty == 0 {                                                                   // BBO re-seek (Ch. 25 §25.4.4): walk toward the touch until a non-empty level
+            if l.qty == 0 {                                                                   // BBO re-seek (Ch. 25 §25.4.5): walk toward the touch until a non-empty level
                 if is_bid && m.px == self.best_bid { while self.best_bid > 0 && self.bids[self.best_bid as usize & (LEVELS - 1)].qty == 0 { self.best_bid -= 1; } }
                 if !is_bid && m.px == self.best_ask { while (self.best_ask as usize) < LEVELS - 1 && self.asks[self.best_ask as usize & (LEVELS - 1)].qty == 0 { self.best_ask += 1; } }
             }

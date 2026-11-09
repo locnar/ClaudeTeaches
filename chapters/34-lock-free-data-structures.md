@@ -150,7 +150,7 @@ The ring buffer is the concrete structure behind bounded queues, and the details
 
 ### 34.4.3 Avoiding ABA (tagged pointers)
 
-For the CAS-based structures that *do* manipulate pointers (MPMC, lock-free stacks/lists), defeat ABA (§34.2):
+For the CAS-based structures that *do* manipulate pointers (MPMC, lock-free stacks/lists), defeat ABA (§34.2) — and note that the index-plus-generation handle Ch. 25 §25.4.4 builds as a slot map is the same mechanism in single-threaded form:
 
 - **Tagged pointers (version counters).** Pack a monotonically-incrementing **version/tag** alongside the pointer (in the unused high bits of a 64-bit pointer, or as a separate counter in a double-width CAS). Every modification bumps the tag, so A-with-tag-5 ≠ A-with-tag-7 even at the same address — the CAS fails as it should when the world changed. Double-width CAS (`cmpxchg16b` on x86-64, `casp` on ARM) swaps pointer+tag atomically.
 - **Avoid reuse entirely (the simpler escape).** ABA arises from *address reuse* (a node freed and reallocated to the same address). If you **don't free** — use a fixed pool indexed by integer (Ch. 24), or indices into a ring instead of pointers — there's no reuse and no ABA. This is why allocation-free, index-based designs (rings, slot maps) sidestep the whole problem, and why they're preferred on the hot path.

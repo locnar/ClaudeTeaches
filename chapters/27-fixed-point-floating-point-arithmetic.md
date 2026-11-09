@@ -130,7 +130,7 @@ Read it the Ch. 1 / Ch. 11 way: the denormal run is **~100× slower** with no co
 
 Implement prices/quantities/money as scaled integers (§27.2.1) — the hot-path default:
 
-- **Pick a scale and stick to it.** A fixed scale (e.g. 10⁸, or "in ticks") in `int64`; document it, and ideally wrap it in a strong type (`struct Price { std::int64_t ticks; };` — a zero-cost abstraction, Ch. 19) so you can't accidentally mix a scaled and unscaled value or add a price to a quantity. The strong type also lets you *forbid* nonsensical ops (price × price) at compile time.
+- **Pick a scale and stick to it.** A fixed scale (e.g. 10⁸, or "in ticks") in `int64`; document it, and ideally wrap it in a strong type (`struct Price { std::int64_t ticks; };` — a zero-cost abstraction, Ch. 19 §19.4.4) so you can't accidentally mix a scaled and unscaled value or add a price to a quantity. The strong type also lets you *forbid* nonsensical ops (price × price) at compile time.
 - **Exact add/subtract/compare.** Same-scale add/subtract/compare are just integer ops — exact, fast (Ch. 28), branchless-friendly (Ch. 13). This covers the overwhelming majority of price math (book updates, spread = ask − bid, P&L = Σ(price × qty)).
 - **Multiply/divide need scale management.** `price × qty` (a price times a share count) is fine into a wider notional integer; multiplying two *scaled* values double-scales (divide back by the scale, with rounding); division needs explicit rounding (§27.2.2). Use `__int128` (GCC/Clang), or `__builtin_mul_overflow` for a checked 64-bit product, for intermediate products that might overflow `int64` (notional = price × large qty), then rescale — and **check for overflow** (Ch. 84): a silent `int64` overflow in notional is a correctness/security bug.
 - **Tick handling is integer rounding** (§27.2.2) — round to the tick grid with integer arithmetic and a compile-time tick table (Ch. 18, 25). Exact, no FP.
@@ -199,7 +199,7 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 - **NaN/Inf poisoning silently.** A bad market value (zero price, garbage decode — Ch. 57) producing a NaN propagates through the whole computation undetected (`NaN != NaN` defeats comparisons). Guard/validate inputs; consider checking for NaN/Inf at boundaries (FP traps are usually masked on the hot path).
 - **`-ffast-math` breaking determinism (or correctness).** Fast-math reassociates and assumes no NaN/Inf — changing results (non-deterministic across builds — §27.4.3, breaks replay Ch. 90) and miscompiling NaN-dependent code. Don't blanket-enable it on financial/replay-critical math; opt into specific relaxations and verify (§27.5).
 - **Accumulated error in long sums.** Summing many `double`s loses precision (small terms lost against a large running sum); use Kahan/compensated summation, or (better for money) integers. Order-dependent results also hurt determinism.
-- **Mixing scales / unit confusion.** Adding a scaled price to an unscaled one, or a price to a quantity, silently — a classic fixed-point bug. Wrap in **strong types** (Ch. 19) so the compiler catches it.
+- **Mixing scales / unit confusion.** Adding a scaled price to an unscaled one, or a price to a quantity, silently — a classic fixed-point bug. Wrap in **strong types** (Ch. 19 §19.4.4 — the allowed-operations matrix) so the compiler catches it.
 - **Integer overflow in notional/price math (Ch. 84).** `price × qty` overflowing `int64` is a silent wrap — a correctness *and* security bug. Use `__int128` intermediates and check ranges; treat price/qty arithmetic as needing overflow safety (Ch. 84).
 - **x87 / 80-bit intermediates.** Legacy x87 FP uses 80-bit intermediates that vary by spill timing — non-deterministic and slow. Use SSE/AVX (default on x86-64); don't resurrect x87.
 
@@ -215,7 +215,7 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 
 **Checklist — fixed/floating-point arithmetic**
 
-- [ ] Prices, quantities, and notional are **scaled integers** (`int64`/`__int128`), ideally **strong-typed** (Ch. 19) — never `double`; conversion to FP/string is at the **boundaries** only.
+- [ ] Prices, quantities, and notional are **scaled integers** (`int64`/`__int128`), ideally **strong-typed** (Ch. 19 §19.4.4) — never `double`; conversion to FP/string is at the **boundaries** only.
 - [ ] **FTZ + DAZ are set in every hot thread's startup** (thread-local MXCSR) — the denormal cliff (§27.3) can't occur; the state is asserted/logged (Appendix C; Ch. 45).
 - [ ] **No `==` on computed floats** (`-Wfloat-equal`); FP comparison uses tolerance, exactness uses integers.
 - [ ] **`div`/`sqrt` are off dependency chains** (Ch. 11) — hoisted/reciprocal-multiplied; FMA used where precision/perf allow.

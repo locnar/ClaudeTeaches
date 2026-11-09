@@ -138,7 +138,7 @@ The hot-path IPC primitive — the Ch. 34/37 ring, placed in shared memory and m
 
 ### 54.4.2 Shared-memory layout and addressing
 
-The discipline that makes a shared region correct across address spaces:
+The discipline that makes a shared region correct across address spaces (the generational slot map of Ch. 25 §25.4.4 is the relocatable, validated handle these rules ask for):
 
 - **Offsets/indices, never pointers (the cardinal rule — §54.5).** The segment maps at different base addresses per process, so store **offsets from the segment base** (compute the real address as `base + offset` in each process) or **integer indices** (into the ring's slot array). A `T*` written by one process is garbage in another. This applies to the ring indices (already integers), *and* to any internal structure you put in shared memory (a free-list, a map) — index-based designs (Ch. 25's index handles) are mandatory here, not optional.
 - **Define a fixed, versioned layout (a wire format — Ch. 57).** The shared region's structure (header, ring offsets, slot format) is a *contract* between processes that may be compiled separately and deployed at different versions. Define it as a fixed-layout struct (explicit sizes, no implementation-defined padding — Ch. 9), put a **version/magic** field in a header, and check it on attach (so a version mismatch fails loudly, not silently corrupts). Treat layout changes like protocol changes (Ch. 57).

@@ -1,6 +1,6 @@
 # Appendix J — HFT Market-Structure & Protocol Primer
 
-> **Consolidates the trading framing** the main text assumes but never teaches from scratch — the book targets advanced C++ developers who may be new to electronic trading. It gives the domain vocabulary and mechanics behind the running examples: the order-book case study (Ch. 25 §25.4.4, with the order/level pools of Ch. 24), zero-copy market-data decoding (Ch. 57 — ITCH/OUCH/FIX/SBE/FAST), reliable multicast and A/B feed arbitration (Ch. 58), and the end-to-end tick-to-trade path (Ch. 95). It complements **Appendix F** (Glossary): F *defines* the terms one line at a time; this appendix explains how the pieces *work together*.
+> **Consolidates the trading framing** the main text assumes but never teaches from scratch — the book targets advanced C++ developers who may be new to electronic trading. It gives the domain vocabulary and mechanics behind the running examples: the order-book case study (Ch. 25 §25.4.5, with the order/level pools of Ch. 24), zero-copy market-data decoding (Ch. 57 — ITCH/OUCH/FIX/SBE/FAST), reliable multicast and A/B feed arbitration (Ch. 58), and the end-to-end tick-to-trade path (Ch. 95). It complements **Appendix F** (Glossary): F *defines* the terms one line at a time; this appendix explains how the pieces *work together*.
 
 **How to use this:** read top-down for the onramp, or jump to J.5 for the protocol quick reference. This is *background*, not a performance chapter — no benchmarks; it exists so the trading scenarios in the rest of the book are self-contained and a reader never has to guess what "BBO," "IOC," or "A/B feed" means. Nothing here is legal, regulatory, or trading advice, and market structure varies by asset class, venue, and jurisdiction — the model below is the US-equities / listed-derivatives archetype most HFT literature assumes; adapt to your market.
 
@@ -23,7 +23,7 @@ The **order book** is the aggregated set of resting buy orders (**bids**) and se
 
 - A **price level** is all resting size at one price on one side. The book is two sorted sequences of levels — bids descending, asks ascending.
 - The **best bid** (highest buy price) and **best ask** (lowest sell price) together are the **top of book** or **BBO** (Best Bid and Offer). The gap between them is the **spread**. The **mid** is their average.
-- **Depth** is the size available beyond the top — level 2, level 3, and deeper. A "deep book" update touches a level away from the top; a "top-of-book" update moves the BBO. This distinction drives data-structure choice (Ch. 25 §25.4.4: array-of-pointers vs. intrusive lists for levels; BBO fast path vs. deep-book path; the pools behind them are Ch. 24).
+- **Depth** is the size available beyond the top — level 2, level 3, and deeper. A "deep book" update touches a level away from the top; a "top-of-book" update moves the BBO. This distinction drives data-structure choice (Ch. 25 §25.4.5: array-of-pointers vs. intrusive lists for levels; BBO fast path vs. deep-book path; the pools behind them are Ch. 24).
 - The **NBBO** (National Best Bid and Offer) is the best bid/ask *across all venues* for a US-equity symbol — a consolidated view a strategy compares its local book against.
 
 **Building the book** from a feed is the feed handler's core job (Ch. 25, 57): apply each incremental message (add / modify / delete / execute) to the right price level, maintaining the sorted levels and the BBO, so downstream strategy code can read a coherent snapshot cheaply (ties Ch. 35's seqlock publication).
@@ -104,7 +104,7 @@ The functions the process-topology chapter (Ch. 86) maps onto separate processes
 - **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — outside this book's scope, but the thing everything else serves).
 - **Order gateway / OMS** — encodes and sends orders (J.3), tracks their state machine, handles acks/fills/cancels.
 - **Pre-trade risk** — enforces limits on the order path (J.3) before anything reaches the wire.
-- **Sequencer** — in some designs, a single process that stamps a total order on every input (ticks, acks, timers, commands) so that deterministic consumers (Ch. 86) can be replayed exactly from the journal (Ch. 90); this book's reference topology (Ch. 86 §86.4.1) uses point-to-point shared-memory rings and does not build one.
+- **Sequencer** — a single process (or switch/FPGA) that stamps a total order on every input (ticks, acks, timers, commands, strategy decisions) and fans the sequenced stream out, so that deterministic consumers (Ch. 86) hold bit-identical state and can be replayed exactly from the journal (Ch. 90). Built, measured and failed-over in **Ch. 91**; Ch. 86 §86.4.1's point-to-point rings remain the minimal topology when only one consumer needs each stream.
 
 ## J.7 The tick-to-trade path, end to end
 
@@ -128,7 +128,7 @@ Each hop has a latency budget; the sum, measured wire-to-wire with hardware time
 ## J.9 Additional Reading
 
 - **Appendix F** (Glossary) — one-line definitions of every term used here (tick-to-trade, NBBO, IOC, maker/taker, A/B arbitration, …).
-- Ch. 25 §25.4.4 (the order-book case study; its pools in Ch. 24), Ch. 57 (decoding), Ch. 58 (reliable multicast), Ch. 86 (process topology / deterministic state machine), Ch. 95 (tick-to-trade) — where these mechanics become C++.
+- Ch. 25 §25.4.5 (the order-book case study; its pools in Ch. 24), Ch. 57 (decoding), Ch. 58 (reliable multicast), Ch. 86 (process topology / deterministic state machine), Ch. 95 (tick-to-trade) — where these mechanics become C++.
 - **Appendix K** (Exchange Connectivity) — the physical and commercial layer beneath the protocols (colocation, cross-connects, access, entitlements).
 - The exchange operators' own developer portals (Nasdaq, CME, Cboe, NYSE) — the current, authoritative message specs, which supersede any summary here.
 

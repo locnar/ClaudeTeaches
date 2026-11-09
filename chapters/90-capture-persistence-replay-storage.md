@@ -141,7 +141,7 @@ The writer's job: drain the ring and get bytes durably to storage **fast enough 
 
 ### 90.4.4 Sequencing and gap-free persistence; retention and compaction
 
-A capture is only useful if it's **complete and ordered** — and manageable over long retention:
+A capture is only useful if it's **complete and ordered** — and manageable over long retention. (When several consumers must agree on *one* order across ticks, acks, timers and commands, the order is produced upstream by the sequencer of Ch. 91, and this journal is that sequenced log's persistence.)
 
 - **Sequence every record; detect gaps.** A monotonic sequence number per record (and the *feed's own* sequence numbers from the protocol — Ch. 57) lets you *prove* the capture is gap-free, and detect/locate any hole. On a gap in one feed line, fill from the redundant line (Ch. 57–58 A/B and recovery, §90.4.1); an unrecoverable gap is flagged (replay can't be trusted across it — §90.5).
 - **Gap-free persistence under burst.** The lossless guarantee (§90.3) plus sequence-checking: size buffers for the burst, capture off-NIC where possible, and *verify* no sequence holes in the persisted journal. "We think it's complete" isn't good enough for replay or compliance — *check* the sequence.
@@ -264,4 +264,4 @@ Where a database belongs: a Parquet dataset on a filesystem is the cheapest and 
 
 ---
 
-*Next: Ch. 91 — The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers.*
+*Next: Ch. 91 — The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers: the component that produces the single ordered input stream this chapter journals — one process stamping a global sequence on ticks, acks, timer fires, commands and strategy decisions, fanned out over shm rings or multicast; replicas folding it to bit-identical state verified by digest; hot/warm/cold standby with RPO/RTO; the sequencer as single point of failure and its failover.*

@@ -277,6 +277,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 19.4.1 CRTP for static polymorphism
   - 19.4.2 Expression templates
   - 19.4.3 Policy-based design
+  - 19.4.4 Strong types and units
+  - 19.4.5 Type-state and compile-time state machines
 - 19.5 Verify the codegen: zero-overhead confirmation
 - 19.6 Pitfalls & anti-patterns: template bloat, error-message cost
 - 19.7 Exercises & checklist
@@ -350,7 +352,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 25.4.1 Flat / open-addressing & robin-hood hashing
   - 25.4.2 `std::flat_map`/`std::flat_set` (C++23)
   - 25.4.3 Intrusive containers and small-buffer types
-  - 25.4.4 Case Study — Building the Limit Order Book
+  - 25.4.4 Slot maps and generational handles
+  - 25.4.5 Case Study — Building the Limit Order Book
 - 25.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn
 - 25.6 Exercises & checklist
 
@@ -1170,21 +1173,39 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 86.6 Exercises & checklist
 
 ### [87. The Pre-Trade Risk Gate & Kill-Switch Path](87-pre-trade-risk-gate-kill-switch.md)
-- 87.1 Why it matters: TODO
-- 87.2 Mental model: TODO
-- 87.3 Measure it: TODO
+- 87.1 Why it matters: the one stage you may not skip, budgeted at 40 ns
+- 87.2 Mental model
+  - 87.2.1 The check inventory: regulation → concrete per-order checks
+  - 87.2.2 Data layout for a ~40 ns gate
+  - 87.2.3 Checked arithmetic and branch-light evaluation
+  - 87.2.4 The kill-switch path: triggers, propagation, safe state
+- 87.3 Measure it: the gate's cost, and the time from trigger to cancels queued
 - 87.4 Techniques
-  - 87.4.1 TODO
-- 87.5 Pitfalls & anti-patterns: TODO
+  - 87.4.1 The gate as a pure function over flat records, with limits published lock-free
+  - 87.4.2 Self-match prevention and duplicate detection without a book lookup
+  - 87.4.3 Throttles: TSC token buckets per venue port
+  - 87.4.4 Changing limits under a running gate: validate, publish, verify
+  - 87.4.5 Kill-switch triggers as runtime monitors
+  - 87.4.6 The safe-state sequence, measured and rehearsed
+- 87.5 Pitfalls & anti-patterns
 - 87.6 Exercises & checklist
 
 ### [88. Idempotent Order Entry & Order-State Recovery](88-idempotent-order-entry-order-state-recovery.md)
-- 88.1 Why it matters: TODO
-- 88.2 Mental model: TODO
-- 88.3 Measure it: TODO
+- 88.1 Why it matters: a duplicated or orphaned order is a real position
+- 88.2 Mental model
+  - 88.2.1 Order identity: slot + generation, never a string
+  - 88.2.2 The in-flight table and the per-order state machine
+  - 88.2.3 The unknown-state matrix after a crash
+  - 88.2.4 Session resynchronization and the two sources of truth
+- 88.3 Measure it: correlation cost, and time-to-known-state after a kill
 - 88.4 Techniques
-  - 88.4.1 TODO
-- 88.5 Pitfalls & anti-patterns: TODO
+  - 88.4.1 Allocating ids and sending: journal-before-send
+  - 88.4.2 Correlating responses: acks, fills, rejects, cancels, replaces
+  - 88.4.3 Position and exposure accumulators: one writer, from fills only
+  - 88.4.4 Recovery after a kill: replay, resync, resolve
+  - 88.4.5 Reconciliation against drop-copy and order status; position rebuild
+  - 88.4.6 Type-state for the session and the order
+- 88.5 Pitfalls & anti-patterns
 - 88.6 Exercises & checklist
 
 ### [89. Crash Handling, Core Dumps & Post-Mortem Diagnostics](89-crash-handling-core-dumps-post-mortem.md)
@@ -1220,12 +1241,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 90.6 Exercises & checklist
 
 ### [91. The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers](91-sequencer-total-order-replicated-consumers.md)
-- 91.1 Why it matters: TODO
-- 91.2 Mental model: TODO
-- 91.3 Measure it: TODO
+- 91.1 Why it matters: one truth, or the replay lies
+- 91.2 Mental model
+  - 91.2.1 The sequencer and its stream
+  - 91.2.2 Replicated deterministic consumers and the digest
+  - 91.2.3 Standby: hot, warm, cold — RPO, RTO and what each survives
+  - 91.2.4 The sequencer as the single point of failure
+- 91.3 Measure it: the hop the sequencer adds, the digest, and catch-up
 - 91.4 Techniques
-  - 91.4.1 TODO
-- 91.5 Pitfalls & anti-patterns: TODO
+  - 91.4.1 Building the sequencer: the loop, the stamp, the log
+  - 91.4.2 Fan-out: shm ring on-host, reliable multicast across hosts
+  - 91.4.3 Replicas: the fold, the digest, the monitor
+  - 91.4.4 The slow replica: gate, drop, or demote
+  - 91.4.5 Sequencer failover and the standby sequencer
+  - 91.4.6 Reducing what the other chapters carry
+- 91.5 Pitfalls & anti-patterns
 - 91.6 Exercises & checklist
 
 ### [92. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](92-latency-spike-forensics-anomaly-triggered-diagnostics.md)

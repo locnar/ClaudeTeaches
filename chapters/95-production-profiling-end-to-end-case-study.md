@@ -57,11 +57,11 @@ The capstone measurement: decompose the **end-to-end tick-to-trade latency distr
 | **Wire → NIC → userspace** | packet arrives, kernel-bypass RX (poll-mode) | Ch. 60, 67 | ~700 ns | ~1 µs |
 | **Decode / normalize** | parse ITCH/SBE off the wire, zero-copy | Ch. 57, 28 | ~80 ns | ~200 ns |
 | **Book update / strategy** | update order book, run decision (state machine) | Ch. 25, 86, 8–13 | ~150 ns | ~500 ns |
-| **Pre-trade risk** | limit/position/kill-switch check | Ch. 84, 86 | ~40 ns | ~120 ns |
+| **Pre-trade risk** | limit/position/kill-switch check | Ch. 87 (built there: ~11–15 ns measured), 84, 86 | ~40 ns | ~120 ns |
 | **Order encode → TX** | build order message, kernel-bypass TX | Ch. 57, 67 | ~500 ns | ~700 ns |
 | **End-to-end tick-to-trade** | wire-in to wire-out (measured, not summed) | (all) | **~1.5 µs** | **~2.0 µs** |
 
-The end-to-end p99.9 is *less* than the sum of the stage p99.9s (~2.5 µs): the stages' tails rarely coincide, so the measured end-to-end tail is roughly the sum of p50s plus the dominant stage's excess — which is why the end-to-end row is measured at the wire, never summed. The Ch. 86 process-per-role topology would add ~3 shared-memory ring hops at ~50–150 ns each (Ch. 54) — the containment-vs-latency trade of §86.2.1, paid deliberately or co-located after a benchmark like this one.
+The end-to-end p99.9 is *less* than the sum of the stage p99.9s (~2.5 µs): the stages' tails rarely coincide, so the measured end-to-end tail is roughly the sum of p50s plus the dominant stage's excess — which is why the end-to-end row is measured at the wire, never summed. The Ch. 86 process-per-role topology would add ~3 shared-memory ring hops at ~50–150 ns each (Ch. 54; Ch. 38 §38.3 measures the hop and the topologies) — the containment-vs-latency trade of §86.2.1, paid deliberately or co-located after a benchmark like this one; a sequencer in front of those roles (Ch. 91) replaces the point-to-point rings with one stamped stream for the price of one such hop, and makes the gateway, risk and journal replicas of one fold.
 
 Read it the way the whole book taught:
 

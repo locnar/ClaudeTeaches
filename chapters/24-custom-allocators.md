@@ -159,7 +159,7 @@ The arena (bump/monotonic) allocator is the tool for **all-at-once lifetimes** �
 
 ### 24.4.2 Object pools and free-lists
 
-The pool is the tool for **many same-sized objects with individual, interleaved lifetimes** — the order/node/event case.
+The pool is the tool for **many same-sized objects with individual, interleaved lifetimes** — the order/node/event case. (When other code must *refer* to a pooled object without owning it, hand out an index plus a generation rather than a pointer — the slot map of Ch. 25 §25.4.4 is the pool's free-list with a stale-handle check added.)
 
 - **The core (§24.3).** Pre-carve a slab into fixed-size slots threaded on a free-list; `allocate` pops, `deallocate` pushes — O(1), no search, no fragmentation (uniform slots). Intrusively store the free-list `next` pointer *in the free slot itself* (it's unused while free), so the pool needs no side storage.
 - **Type-specific pools.** A pool per hot object type (`Pool<Order>`, `Pool<PriceLevel>`) gives each the determinism of §24.3 and packs same-type objects contiguously (locality — Ch. 8, and the order-book case study of Ch. 25). Construct with placement-`new` into the slot, destruct explicitly before returning it (Ch. 21).

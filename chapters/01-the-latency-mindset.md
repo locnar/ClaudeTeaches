@@ -90,7 +90,7 @@ The discipline is to treat that end-to-end number as a **budget** and to allocat
 | Wire → NIC → host memory (DMA, kernel bypass) | 0.5–1 µs | Ch. 60, 67, 71 |
 | Feed decode / book update | 100–400 ns | Ch. 25, 57 |
 | Strategy / signal logic | 50–300 ns | Ch. 8–14, 18–21 |
-| Risk checks & order encode | 50–200 ns | Ch. 27, 57, 84, 86 |
+| Risk checks & order encode | 50–200 ns | Ch. 27, 57, 84, 86, 87 |
 | Host memory → NIC → wire | 0.4–0.8 µs | Ch. 60, 67, 71 |
 | **Tick-to-trade total** | **≈ 1–3 µs** | the whole book |
 
