@@ -213,4 +213,4 @@ Batching is the Disruptor's throughput-and-latency engine, and it's *automatic* 
 
 ---
 
-*Next: Ch. 38 — Threading Topologies & the Hot Loop.*
+*Next: Ch. 38 — Threading Topologies & the Hot Loop, which takes the Disruptor's claim/publish/consume mechanics and asks the question that precedes them: how many threads should a tick touch at all? Run-to-completion vs staged pipeline vs shard fan-out with a measured hop-cost model, the hot loop that polls many sources in fixed priority order, and the slot-ownership lifecycle written down as a protocol — with types and a test.*

@@ -499,21 +499,37 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 37.6 Exercises & checklist
 
 ### [38. Threading Topologies & the Hot Loop](38-threading-topologies-hot-loop.md)
-- 38.1 Why it matters: TODO
-- 38.2 Mental model: TODO
-- 38.3 Measure it: TODO
+- 38.1 Why it matters: the number of threads a tick touches is the latency floor
+- 38.2 Mental model
+  - 38.2.1 Three topologies
+  - 38.2.2 The hop-cost model
+  - 38.2.3 The hot loop is a scheduler
+  - 38.2.4 The slot lifecycle is a protocol
+- 38.3 Measure it: the hop, the three topologies, and the loop's own tax
 - 38.4 Techniques
-  - 38.4.1 TODO
-- 38.5 Pitfalls & anti-patterns: TODO
+  - 38.4.1 Choosing the topology: a decision procedure
+  - 38.4.2 The many-source hot loop: polling order, batch caps, the timer queue
+  - 38.4.3 Mapping stages and shards onto cores and NUMA nodes
+  - 38.4.4 The slot-ownership protocol as types
+  - 38.4.5 Testing the protocol: a stage that holds a view one sequence too long
+- 38.5 Pitfalls & anti-patterns
 - 38.6 Exercises & checklist
 
 ### [39. Flow Control, Backpressure & Conflation on the Hot Path](39-flow-control-backpressure-conflation.md)
-- 39.1 Why it matters: TODO
-- 39.2 Mental model: TODO
-- 39.3 Measure it: TODO
+- 39.1 Why it matters: every trading system has a consumer slower than the open
+- 39.2 Mental model
+  - 39.2.1 The policy taxonomy for a full channel, by consumer class
+  - 39.2.2 Conflation structures: latest-value slot + dirty set
+  - 39.2.3 Staleness as a first-class metric
+  - 39.2.4 Degraded modes and load shedding at the open
+- 39.3 Measure it: a replayed microburst against a slow consumer
 - 39.4 Techniques
-  - 39.4.1 TODO
-- 39.5 Pitfalls & anti-patterns: TODO
+  - 39.4.1 Declaring the policy per channel, in the type
+  - 39.4.2 Building the conflator: bitmap, deduplicating queue, priorities, merge semantics
+  - 39.4.3 Measuring staleness and setting budgets
+  - 39.4.4 Degraded modes: the shedding plan as a state machine
+  - 39.4.5 Retiring the scattered policies
+- 39.5 Pitfalls & anti-patterns
 - 39.6 Exercises & checklist
 
 ### [40. Coroutines & Async Models](40-coroutines-async-models.md)
@@ -566,12 +582,20 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 43.6 Exercises & checklist
 
 ### [44. Timers & Deadlines Without Jitter](44-timers-deadlines-without-jitter.md)
-- 44.1 Why it matters: TODO
-- 44.2 Mental model: TODO
-- 44.3 Measure it: TODO
+- 44.1 Why it matters: every order carries a deadline, and the kernel's clock is 50 µs late by default
+- 44.2 Mental model
+  - 44.2.1 Two kinds of thread, two kinds of timer
+  - 44.2.2 Deadline queues for the busy loop: list, heap, wheel
+  - 44.2.3 Timer fires are inputs
+  - 44.2.4 The Linux timer stack beneath a sleeping thread
+- 44.3 Measure it: the deadline queue at 10⁴–10⁶ timers, and the kernel's wake-up
 - 44.4 Techniques
-  - 44.4.1 TODO
-- 44.5 Pitfalls & anti-patterns: TODO
+  - 44.4.1 The polled deadline queue: wheel + heap over pooled nodes, bounded per tick
+  - 44.4.2 Deadlines as data: TTLs, cancel-if-no-ack, quote refresh, heartbeats, throttles
+  - 44.4.3 Replayable time: the fire in the journal, the clock as an input
+  - 44.4.4 Sleeping threads done right: slack, `TIMER_ABSTIME`, `timerfd`
+  - 44.4.5 Measuring your timers in production
+- 44.5 Pitfalls & anti-patterns
 - 44.6 Exercises & checklist
 
 ### [45. Thread & Interrupt Pinning](45-thread-interrupt-pinning.md)

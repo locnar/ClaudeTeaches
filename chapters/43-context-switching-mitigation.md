@@ -204,4 +204,4 @@ A signal is a context-switch-class event that nobody budgets for, because nobody
 
 ---
 
-*Next: Ch. 44 — Timers & Deadlines Without Jitter.*
+*Next: Ch. 44 — Timers & Deadlines Without Jitter, which sits exactly on this chapter's busy-poll-vs-block fork: for the thread that never sleeps, a user-space deadline queue (timing wheel vs heap vs intrusive list, measured at 10⁴–10⁶ armed timers) polled with `rdtsc` and emitting replayable events; for the threads that do sleep, the Linux hrtimer stack, the 50 µs default timer slack, `clock_nanosleep(TIMER_ABSTIME)`, `timerfd` and the measured wake-up latency behind every cyclictest number.*
