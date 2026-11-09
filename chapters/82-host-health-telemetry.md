@@ -2,7 +2,7 @@
 
 # Chapter 82 — Host Health Telemetry: Proving the Quiet Box Stayed Quiet
 
-> **Prerequisites:** Ch. 42, 45, 46 (pinning, isolation, the residual-noise catalog — the invariants this chapter watches continuously), Ch. 6 §6.4.4 (SMIs and the clocksource watchdog), Ch. 15–16 (THP/compaction, NUMA balancing — the memory-system knobs that drift), Ch. 44 §44.4.2 (CMT/MBM — the one host monitor the book already runs), Ch. 75 (the telemetry segment and the off-core scraper this chapter's sampler feeds), Ch. 41 (what a context switch or page fault costs the hot thread), Ch. 1.
+> **Prerequisites:** Ch. 42, 45, 46 (pinning, isolation, the residual-noise catalog — the invariants this chapter watches continuously), Ch. 81 (spike forensics — the suspect table whose fingerprints this chapter's sampler records, and the clock anchors it logs every second), Ch. 6 §6.4.4 (SMIs and the clocksource watchdog), Ch. 15–16 (THP/compaction, NUMA balancing — the memory-system knobs that drift), Ch. 44 §44.4.2 (CMT/MBM — the one host monitor the book already runs), Ch. 75 (the telemetry segment and the off-core scraper this chapter's sampler feeds), Ch. 41 (what a context switch or page fault costs the hot thread), Ch. 1.
 >
 > **Leads into:** Ch. 83 (network health — the NIC and stack counters sampled by the same scraper), Ch. 84 (the case study — where a drifted knob shows up as a tail), Appendix C.6 and Appendix M (configuration as code, the baseline fingerprint and the pre-open gate that consume this chapter's signals). Ch. 42–46 verified the box was quiet *once, at setup*; this chapter makes "still quiet" a number that is sampled every second and compared against a recorded baseline — and shows how to sample it without the sampler becoming the noise.
 

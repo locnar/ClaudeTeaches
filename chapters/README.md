@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 84 chapters are grouped into twelve Parts; thirteen appendices (A–M) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 84 chapters are grouped into twelve Parts; fourteen appendices (A–N) follow.
 
 ---
 
@@ -916,7 +916,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part XII — Observability & Operations in Production
 
-*Running the system: logging and telemetry, security, hot reload, process topology, capture/replay, host and network health, and the end-to-end case study.*
+*Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology, crash handling, capture/replay, latency-spike forensics, host and network health, and the end-to-end case study.*
 
 ### [73. Zero-Overhead Logging](73-zero-overhead-logging.md)
 - 73.1 Why it matters: logging must never stall the hot path
@@ -1045,12 +1045,20 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 80.6 Exercises & checklist
 
 ### [81. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](81-latency-spike-forensics-anomaly-triggered-diagnostics.md)
-- 81.1 Why it matters: TODO
-- 81.2 Mental model: TODO
-- 81.3 Measure it: TODO
+- 81.1 Why it matters: the book can say it happened; this chapter says why
+- 81.2 Mental model
+  - 81.2.1 From one outlier to a mechanism: the forensic loop
+  - 81.2.2 One timeline across clocks
+  - 81.2.3 Suspects and fingerprints
+  - 81.2.4 Always-on, frozen on trigger
+- 81.3 Measure it: the always-on record, the freeze, and the clock alignment
 - 81.4 Techniques
-  - 81.4.1 TODO
-- 81.5 Pitfalls & anti-patterns: TODO
+  - 81.4.1 Reconstructing the timeline
+  - 81.4.2 The flight recorder: always-on, frozen by a swap
+  - 81.4.3 Kernel and hardware capture on the same trigger: ftrace, `perf record` in overwrite mode, Intel PT snapshots
+  - 81.4.4 Testing the suspects: the decision table in practice
+  - 81.4.5 From spike to incident: the bundle and the reproduction
+- 81.5 Pitfalls & anti-patterns
 - 81.6 Exercises & checklist
 
 ### [82. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](82-host-health-telemetry.md)
@@ -1174,6 +1182,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - I.7 Layout & memory inspection (`pahole`, cachegrind, `smaps`)
 - I.8 Network & NIC (`ethtool`, `ss`, `tcpdump`, PTP)
 - I.9 Codegen, binaries & sanitizers (`objdump`, Godbolt, BOLT, ASan/UBSan/TSan)
+- I.10 Crash, core-dump, live-introspection & incident one-liners (`coredumpctl`, `eu-stack`, gdb non-stop, `perf record --snapshot`, Intel PT, the ftrace freeze, the bundle)
 
 ### [Appendix J — HFT Market-Structure & Protocol Primer](appendix-J-market-structure-primer.md)
 - J.1 Market microstructure: exchanges, matching engines, price-time priority
@@ -1208,3 +1217,12 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - M.6 The host fingerprint micro-suite (Appendix L harness vs Appendix E and the host's history)
 - M.7 Configuration as code and drift detection (summary; Appendix C.6)
 - M.8 The gate runner (skeleton)
+
+### [Appendix N — Incident Diagnostics Bundle](appendix-N-incident-diagnostics-bundle.md)
+- N.1 What a bundle is for: alignable, attributable, checkable (and bounded)
+- N.2 Provenance: build IDs, recorded compiler flags, load bases, configuration hash, kernel/firmware/microcode, host fingerprint, NIC settings
+- N.3 Clocks and anchors: TSC↔MONOTONIC sandwiches, PHC cross-timestamps, PTP journal and steps, the clock each ring used
+- N.4 The evidence, per layer: application (trace record, frozen flight recorder, binary log, telemetry snapshot, crash record, venue-stamp series), kernel ring (ftrace, `perf.data`, Intel PT, journal), host (Ch. 82 samples, `/proc`, RAS), network (Ch. 83 samples, counters, membership, bypass stacks), capture and tap slices
+- N.5 The collection script (skeleton): bounded by `taskset`/`nice`/`ionice`/`timeout`, per-group logs, manifest and checksums
+- N.6 The ten-minute first look (cheap exonerations first)
+- N.7 Retention, pattern analysis and what to scrub

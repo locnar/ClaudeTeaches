@@ -247,4 +247,4 @@ The runner is deliberately dull: no logic beyond compare-and-report, no threshol
 
 ---
 
-*This completes Appendix M and the book. The chapters (Parts I–XII) and Appendices A–M together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 84) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, connectivity and physical layer, benchmark harness, and the pre-open readiness gate) that outlive any single chapter.*
+*Next: Appendix N — Incident Diagnostics Bundle, the other end of the operating day: when the gate passed and a spike, a crash or a drop happened anyway, the checklist and bounded collector that gather provenance, clock anchors and every layer's frozen evidence into one alignable, attributable, checkable bundle (Ch. 79, 81).*

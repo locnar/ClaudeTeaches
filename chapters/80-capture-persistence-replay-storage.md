@@ -202,4 +202,4 @@ Capture's payoff is replaying it through the deterministic core (Ch. 78) — for
 
 ---
 
-*Next: Ch. 81 — Latency-Spike Forensics & Anomaly-Triggered Diagnostics.*
+*Next: Ch. 81 — Latency-Spike Forensics & Anomaly-Triggered Diagnostics, for the event the capture cannot reproduce: a one-off 40 µs stall on one message. From a single over-budget trace record to a named mechanism — one timeline across the TSC, the kernel's clocks, the PHC and the venue's; always-on flight-recorder rings frozen by a pointer swap; ftrace, `perf` in overwrite mode and Intel PT snapshots armed on the same trigger; and the suspect-by-fingerprint table that says whether it was the kernel, the hardware, the message or the venue.*
