@@ -204,3 +204,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 ---
 
 *This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 98) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
+
+---
+
+*Next: Appendix P — Attributes, Builtins & the UB Catalogue: the per-function companion to Appendix D's per-build flags — what each attribute and builtin tells the optimizer and how to verify it fired — and the undefined-behaviour rules read as optimizer licences, with the measured cost of buying each one back.*

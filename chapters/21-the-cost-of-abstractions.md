@@ -184,6 +184,26 @@ The abstractions above decide how the hot path reports an *expected* failure. Th
 
 The through-line: **a check is a predictable compare; a report is a cold path.** `source_location` makes the report free to *locate*; `stacktrace` makes it affordable to *explain*, if you symbolise later; `<debugging>` and contracts make the policy standard. None of them changes §21.3's conclusion about the error *channel* — values on the hot path, exceptions for the fatal — they decide what the fatal path writes down.
 
+### 21.4.5 Passing and returning values: categories, elision and the calling convention
+
+Every abstraction in Part III eventually becomes a function call, and the System V x86-64 ABI decides whether its arguments and result travel in registers or through memory (Ch. 4 §4.2.1 states the rule; this section measures it). *VM-measured, GCC 13.3 / Clang 18.1, `-O2 -std=c++23`; asm in §21.5.*
+
+- **Trivially copyable and ≤ 16 bytes: registers.** `Price{int64_t}` is passed *as* its member (`lea rax, [rdi + 1]` for `Price f(Price)`); `Fill{int64_t px; int32_t qty, venue}` (16 bytes) arrives in `rdi:rsi` and returns in `rax:rdx`; `std::string_view` (two words), `std::optional<int64_t>` (value + flag → `rax` + `dl`) and `std::expected<int64_t, Err>` (GCC: `rax` + `dl`, with the error path a pair of `cmov`s) all stay in registers. This is the §19.5 proof generalised: a strong type, a view or a small sum type costs what its members cost.
+- **Over 16 bytes: memory.** `Fill3{int64_t px, qty, id}` (24 bytes) is read from `[rsp + 8..24]` on entry and returned through a hidden pointer; `std::expected<Big, Err>` with a 16-byte `Big` is 24 bytes and returns through `[rdi]` with three stores. The jump from 16 to 24 bytes is a jump from two registers to a stack round-trip on *every* call and return — which is why Ch. 22 keeps `expected`'s `T` at 8 bytes plus the discriminant, and why a 24-byte `Order` is passed by `const&`.
+- **A non-trivial destructor: invisible reference, however small.** `struct Guarded { int64_t v; ~Guarded(); }` is 8 bytes and is still passed by hidden pointer (`[rsi]`) and returned through `[rdi]`: the ABI requires the *caller* to own the object's storage so it can run the destructor. `std::unique_ptr<T>` by value is the famous case: the callee gets a pointer to the caller's stack slot and loads through it (`mov rax, [rdi]` then the real `T*`), and the *caller* must still test the slot and call `operator delete` after the call returns. Measured on a `noinline` callee: `T*` 0.36–0.52 ns per call, `unique_ptr<T>` by value 0.64–0.67 ns, `const unique_ptr&` 0.52–0.55 ns — a 0.1–0.3 ns tax plus a destructor branch in the caller, per call. Pass `T*`/`T&` for non-owning access; pass `unique_ptr<T>&&` only where ownership *transfers*, and not per message.
+- **Value categories and elision.** A **prvalue** return (`return Order{px, 1, 2, 3};`) is *guaranteed* elided since C++17: the object is constructed directly in the caller's slot — four stores through `[rdi]`, no temporary, no move. **NRVO** (`Order o{…}; o.qty = …; return o;`) is permitted and both compilers do it here, but it is not guaranteed and is *lost* when the function can return two different named objects (`return cond ? a : b;` — the asm builds both on the stack and copies the winner with a `cmove` plus two 16-byte moves). Return a single prvalue or a single named object; never the conditional of two.
+- **`[[clang::trivial_abi]]`** (Clang only) makes a class with a non-trivial destructor pass in registers anyway, with the *callee* running the destructor: `GuardedTA f(GuardedTA)` takes its argument in `rdi` and returns in `rax`, calling `~GuardedTA` inside. It is an **ABI break** (the mangled name does not change, so a TU compiled without the attribute passes the type differently — Ch. 79 §79.4 for the C-ABI waist, Ch. 25 §25.4.5 for why the flag policy must be uniform), and GCC ignores it. Inside one binary with one flag policy it is how `unique_ptr`-like handles can be passed by value for free; across a library boundary it is a landmine.
+
+The rule for hot-path value types follows from the measurements: **trivially copyable, ≤ 16 bytes, returned as prvalues** — strong types, `string_view`, `optional<trivial>`, `expected<≤8-byte trivial, enum>` qualify; owning handles, 24-byte records and anything with a destructor are passed by reference or pointer.
+
+### 21.4.6 Statics, `thread_local` and initialization: what the compiler emits
+
+Three idioms hide runtime in plain declarations. *VM-measured, GCC 13.3 / Clang 18.1, `-O2 -std=c++20`, 100 M calls to a `noinline` accessor; asm in §21.5.*
+
+- **The function-local static (magic static) pays a guard check on every call, and a lock on the first.** `const Cfg& cfg() { static const Cfg c = load(); return c; }` compiles to `movzx eax, byte ptr [guard]; test al, al; je .slow` before the address is returned: an acquire load and a predicted branch, **0.52 ns per call against 0.32–0.35 ns** for a `constinit` global read the same way. The slow path calls `__cxa_guard_acquire` — a futex-capable lock — exactly once, on the *first* call, which for a hot-path singleton is the first tick of the day (Ch. 53's cold-start list). `-fno-threadsafe-statics` removes the lock (the check becomes `cmp byte ptr [guard], 0`) but not the check, and is unsafe if two threads can race to the first call. The fix is to not have the question: a `constinit` global (Ch. 18 §18.4.1) when the value is a constant expression, or an explicit `init()` at startup writing a plain global that the hot path reads with one load.
+- **Static initialization order is link order, except where you say otherwise.** Dynamic initializers run from `.init_array` in the order the linker placed the TUs — unspecified across TUs (the "static initialization order fiasco"), so a strategy's global that reads a venue table's global may run first. `[[gnu::init_priority(101)]]` (101–65535; lower runs earlier) and `__attribute__((constructor(prio)))` impose an order; `constinit`/`constexpr` globals have *no* dynamic initializer and cannot be part of the problem; a `dlopen`'d strategy `.so` (Ch. 88 §88.4.4) runs its `.init_array` inside `dlopen`, under the loader lock, on the thread that called it. Prefer constant initialization, then explicit ordered `init()` calls from `main`, and treat `init_priority` as the escape hatch.
+- **`thread_local` costs depend on where the variable lives.** In the main executable the TLS model is *local-exec*: `mov rax, qword ptr fs:t@tpoff` — one load off the thread pointer, 0.52 ns for a `++counter`, identical to a plain global. In a shared object the default is *general-dynamic*: `lea rdi, t@tlsgd[rip]; call __tls_get_addr@PLT`, a call per access — **1.34–1.43 ns, 2.7×**. Building the `.so` with `-ftls-model=initial-exec` gives `mov rdx, [t@gottpoff]; mov rax, fs:[rdx]` — 0.63–0.87 ns — at the price that the library must be loaded at startup (its TLS lands in the static block; glibc keeps a small surplus for `dlopen`'d initial-exec objects and fails the load when it is exhausted). A `thread_local` in a `dlopen`'d library stays general-dynamic — **2.85–3.10 ns per access**, and its *first* access on each thread allocates that thread's DTV slot: **1.5–2.6 µs**, a `malloc` inside the hot thread's first touch. Per-thread logger rings (Ch. 84), pool handles (Ch. 27) and `errno` are all TLS; put them in the executable or an initial-exec library, touch every one at thread start (Ch. 53), or pass a per-thread context pointer explicitly and avoid the question.
+
 ## 21.5 Verify the codegen: unwinding tables and landing pads
 
 The costs of §21.2 are visible in the binary, and the verification settles where they live. Snippets are **verified** Clang 18.1 / GCC 14.2 output (Appendix L.3; `--target=x86_64-linux-gnu -O2`).
@@ -230,6 +250,56 @@ The verification habits:
 - **Locate the cost**: landing pads in `.text.unlikely`, tables in `.eh_frame`/`.gcc_except_table`; measure the size delta with `-fno-exceptions`/`-fno-rtti` if code size matters (Ch. 12).
 - **Verify `noexcept` move ctors** make `std::vector` reallocation *move* (read the asm or step the reallocation) — the silent copy-instead-of-move is a classic, invisible-without-checking regression.
 
+**Registers vs the hidden pointer (§21.4.5).** `clang++ -O2 -std=c++23`; GCC 13.3 agrees on every classification:
+
+```asm
+; Price f_price(Price)          — a strong type IS its int64:        ; Fill f_fill(Fill)  — 16 bytes: two registers in, two out
+        lea     rax, [rdi + 1]                                        ;         mov     rax, rdi            ; px
+        ret                                                           ;         lea     ecx, [rsi + 1]      ; qty + 1 …
+                                                                      ;         …                            ; … repacked into rdx with venue
+; Fill3 f_fill3(Fill3)          — 24 bytes: MEMORY both ways:         ; Guarded f_guarded(Guarded) — 8 bytes + a destructor: invisible reference
+        mov     rax, rdi                    ; hidden return pointer   ;         mov     rax, rdi            ; hidden return pointer
+        inc     qword ptr [rsp + 16]        ; the argument is ON THE STACK      mov     rcx, qword ptr [rsi]  ; the argument is BEHIND A POINTER
+        movaps  xmm0, xmmword ptr [rsp + 8] ; copy 24 bytes out…      ;         inc     rcx
+        movups  xmmword ptr [rdi], xmm0     ; …through the pointer    ;         mov     qword ptr [rsi], rcx ; (caller's copy, so its dtor sees it)
+                                                                      ;         mov     qword ptr [rdi], rcx
+; int64 use_uptr(unique_ptr<int>) — pointer to a pointer:             ; int64 use_ptr(int*) — the pointer:
+        mov     rax, qword ptr [rdi]        ; load the T* from the caller's slot;         test    rdi, rdi
+        test    rax, rax                                              ;         je      .null
+        movsxd  rax, dword ptr [rax]        ; then the value           ;         movsxd  rax, dword ptr [rdi]
+;  …and the CALLER, after the call:  mov rdi, [rsp]; test rdi, rdi; je …; call operator delete   — the destructor it still owns
+; Order make_order(int64)        — prvalue: guaranteed elision, built in place:   ; make_order_no_nrvo — `return c ? a : b`: both built, one copied
+        mov     rax, rdi                                              ;         mov     qword ptr [rsp - 32], rsi  … (8 stores for two Orders)
+        mov     qword ptr [rdi], rsi                                  ;         cmove   rdx, rcx                   ; pick the address
+        mov     qword ptr [rdi + 8], 1                                ;         movups  xmm0, xmmword ptr [rdx]    ; copy the winner
+        mov     qword ptr [rdi + 16], 2                               ;         movups  xmm1, xmmword ptr [rdx + 16]
+        mov     qword ptr [rdi + 24], 3                               ;         movups  xmmword ptr [rdi], xmm0 …
+; optional<int64> f_opt(int64)  — rax + dl, no memory:                ; expected<Big,Err> f_exp_big — 24 bytes: sret, three stores through [rdi]
+        test    rdi, rdi
+        setns   dl                          ; engaged flag
+        lea     rax, [rdi + 1]
+```
+
+**Statics and TLS (§21.4.6).** `g++ -O2 -std=c++20`:
+
+```asm
+; const Cfg& cfg_magic()   — function-local static:             ; const Cfg& cfg_global() — constinit global:
+        movzx   eax, byte ptr [_ZGVZ9cfg_magicvE1c]  ; guard byte (acquire)       lea     rax, [g_cfg]
+        test    al, al                                                       ;         ret
+        je      .Linit                               ; first call only →
+        lea     rax, [_ZZ9cfg_magicvE1c]             ;   __cxa_guard_acquire / load_cfg / __cxa_guard_release
+        ret
+; thread_local in the EXECUTABLE (local-exec):                  ; in a -fPIC .so (general-dynamic, the default):
+        mov     rax, qword ptr fs:t_exe@tpoff        ; one load     data16 lea rdi, t_counter@tlsgd[rip]
+        add     rax, 1                                            ; rex64 call __tls_get_addr@PLT   ; a CALL per access
+        mov     qword ptr fs:t_exe@tpoff, rax                    ;         mov     rax, qword ptr [rax]
+; in a .so built -ftls-model=initial-exec:
+        mov     rdx, qword ptr t_counter@gottpoff[rip] ; offset from the GOT
+        mov     rax, qword ptr fs:[rdx]               ; one fs-relative load
+```
+
+What to look for: `[rsp + …]` reads on entry or an `sret` pointer in `rdi` where you expected registers (a type crossed 16 bytes or grew a destructor); a `movzx` of a `_ZGV…` guard symbol in a hot accessor (`nm -C | grep 'guard variable'` lists them all); `call __tls_get_addr` anywhere in a hot `.so` (`objdump -d lib.so | grep -c __tls_get_addr`; Appendix I.12).
+
 ## 21.6 Pitfalls & anti-patterns: throwing on the hot path
 
 - **Throwing on a frequent condition.** The headline disaster: using exceptions for malformed packets, sequence gaps, full queues, rejects — anything that happens with any regularity. Each throw is microseconds and non-deterministic (§21.2–§21.3); even 0.1% error rates tank the tail (Ch. 1). Use `std::expected`/error codes for *expected* failures.
@@ -241,6 +311,12 @@ The verification habits:
 - **Heavy error type in `expected`.** A large/non-trivially-copyable `E` bloats every `expected` return and copy (Ch. 9). Keep `E` a small enum/struct on the hot path.
 - **Assuming exceptions are "slow" (or "free").** Both half-truths mislead. Exceptions are *free on the happy path and expensive when thrown*. The engineering is putting the throw where throws are rare; "never use exceptions" and "exceptions are fine everywhere" are both wrong.
 - **Throwing across an ABI/`noexcept` boundary.** A throw escaping a `noexcept` function calls `std::terminate`; a throw across a C ABI boundary is UB. Keep throws within their exception-aware region.
+- **`unique_ptr<T>` (or any destructor-bearing type) by value on the per-message path.** Invisible reference in, a destructor test and possible `operator delete` in the caller out — 0.1–0.3 ns and a branch per call (§21.4.5). `T*`/`T&` for access; `&&` only where ownership moves.
+- **A hot `expected`/`optional`/record that crosses 16 bytes.** It left the registers for a stack round-trip on every call (§21.4.5, §21.5); keep `T` ≤ 8 bytes beside the discriminant, or pass by reference.
+- **`return cond ? a : b;` of two named locals.** NRVO is lost; both are built and one is copied (§21.5). One named return object, or two `return` statements.
+- **The function-local static singleton on the hot path.** A guard load and branch per call, and `__cxa_guard_acquire` on the first tick (§21.4.6). `constinit`, or initialise at startup into a plain global.
+- **`thread_local` in a `dlopen`'d strategy or a default-built `.so`.** `__tls_get_addr` per access (2.7–6×) and a `malloc` on each thread's first touch (§21.4.6). Executable or `-ftls-model=initial-exec`, and pre-touch at thread start.
+- **Cross-TU dynamic initialization order assumed.** A global's constructor that reads another TU's global reads it uninitialized on the wrong link order (§21.4.6). Constant-initialise, or order explicitly from `main`.
 
 ## 21.7 Exercises & checklist
 
@@ -261,6 +337,10 @@ The verification habits:
 - [ ] **No `dynamic_cast`** on the hot path — static dispatch (Ch. 19) or `variant` visitor (Ch. 14) instead.
 - [ ] I verified the **happy path is straight-line** (Ch. 4) and know where the **unwinding tables/landing pads** live (`.eh_frame`/`.gcc_except_table`/`.text.unlikely` — §21.5).
 - [ ] `-fno-exceptions`/`-fno-rtti` (if used) is a **deliberate, measured** whole-program stance with an all-value error strategy (Ch. 24), not cargo-culted.
+- [ ] Hot-path value types are **trivially copyable and ≤ 16 bytes** so they ride in registers; records above that and owning handles are passed by **reference/pointer**, never `unique_ptr` by value per message (§21.4.5).
+- [ ] Hot functions return a **single prvalue or single named object** (guaranteed elision / NRVO), never the conditional of two (§21.4.5).
+- [ ] **No function-local `static` on the hot path** — state is `constinit` or initialised at startup — and `nm -C | grep 'guard variable'` on the hot TU is empty (§21.4.6).
+- [ ] Every `thread_local` the hot path touches lives in the **executable or an initial-exec library** and is **pre-touched at thread start**; `objdump -d | grep __tls_get_addr` on hot objects is empty (§21.4.6).
 - [ ] I treat exceptions as **free-until-thrown**, not as "slow" or "free everywhere" — the throw is placed where it's rare.
 
 ## 21.8 References

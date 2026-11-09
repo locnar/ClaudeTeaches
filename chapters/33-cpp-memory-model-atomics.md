@@ -125,6 +125,22 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
 
 Two distinct lessons. (1) **Ordering cost (uncontended):** on x86, `relaxed` and `release` stores are *the same* plain `mov` — release is **free** under TSO (§33.5) — while `seq_cst` costs ~20× because it emits a full barrier. So defaulting to `seq_cst` when acquire/release would do is pure waste on the store side. (2) **Contention cost:** the *atomic operation itself* is cheap (~6 ns uncontended), but when multiple cores hammer the *same cache line*, the line ping-pongs (the HITM coherence transfer of Ch. 7 — and across sockets, the NUMA cliff of Ch. 16), and throughput **collapses** — ~8× worse per op at 8 cores than uncontended, so eight cores together do *less* than one did alone (retrograde scaling; Ch. 34 §34.3 plots the same curve). This is the dominant cost in real concurrent code, and the lesson that drives Part VI: **the expensive thing isn't the atomic, it's the *contention*** — the cure is not a faster atomic but *not sharing the line* (per-thread state, padding — Ch. 36, sharding — Ch. 34). The memory-order choice (§33.4) is the cheaper, second-order optimization on top.
 
+**Wide atomics, `atomic_ref` and waiting** (§33.4.3; VM-measured — the 4-vCPU Xeon VM of Appendix L.2, GCC 13.3 / Clang 18.1, `-O2 -std=c++20 -latomic`):
+
+```
+16-byte CAS on alignas(16) struct { uint64_t ptr, tag; }, uncontended, 50 M iterations:
+   g++               call __atomic_compare_exchange_16 (libatomic)   9.8 ns/CAS   is_always_lock_free = 0   is_lock_free() = 0
+   g++ -mcx16        call __atomic_compare_exchange_16 (libatomic)   9.8 ns/CAS   is_always_lock_free = 0   is_lock_free() = 0   ← GCC still calls out
+   clang++           call __atomic_compare_exchange     (generic)    8.5 ns/CAS   is_always_lock_free = 0   is_lock_free() = 0
+   clang++ -mcx16    inline  lock cmpxchg16b                        10.1 ns/CAS   is_always_lock_free = 1   is_lock_free() = 0   ← the runtime query disagrees
+thread wake-up, two threads ping-pong (one-way ≈ round trip / 2):
+   busy-poll + pause                              602 ns round trip      ≈ 300 ns one-way (VM; a line transfer + hypervisor noise)
+   std::atomic<int>::wait / notify_one          6,782 ns round trip      ≈ 3.4 µs one-way  — a futex wake and a schedule, 11×
+std::atomic_ref<int64_t>(bbo.bid).load(relaxed) vs plain read:   same single mov (§33.5)
+```
+
+Three facts to carry. **GCC never inlines `cmpxchg16b`** — with or without `-mcx16` the 16-byte CAS is a call into libatomic, which *does* use `cmpxchg16b` when the CPU has it (every x86-64 since 2006), so the operation is lock-free in practice but **`is_always_lock_free` is `false`** and a `static_assert` on it fails; the 9.8 ns is the instruction plus a call, not a lock. **Clang inlines it only with `-mcx16`** (`-march=x86-64-v2` and up imply it); without the flag the generic libatomic entry point is used, which falls back to a *real lock* on a CPU without `cx16` — and even with the flag Clang 18's runtime `is_lock_free()` consults libatomic and reports `false` while the compile-time constant says `true`: trust the compile-time constant for the flags you ship, and `static_assert` it. **`wait`/`notify` is a futex**: 3.4 µs to wake a parked thread against 300 ns to notice a store while spinning — the right tool for housekeeping threads and for parking a hot thread *between sessions* (Ch. 35 §35.4 on when to block at all), never inside the tick-to-trade path.
+
 ## 33.4 Techniques
 
 ### 33.4.1 Choosing the weakest correct ordering
@@ -145,6 +161,14 @@ Two ways to express ordering — attached to an atomic op, or as a standalone fe
 - **Standalone fences (`atomic_thread_fence`).** A `release` fence before a `relaxed` store (or an `acquire` fence after a `relaxed` load) achieves similar ordering but as a separate barrier — useful when *one* barrier must order *several* atomic operations (amortize one fence over a batch), or when separating the access from the ordering aids clarity in a complex protocol. A `seq_cst` fence is the heaviest. Fences are slightly more general but easier to get subtly wrong (the fence-to-atomic pairing rules are fiddlier than ordered-atomic pairing).
 - **When fences pay.** Batching: if you do several `relaxed` writes then want to publish them all, one `release` fence + a `relaxed` flag store can be cheaper/clearer than making each write ordered. Some seqlock and reclamation patterns (Ch. 38–39) use fences deliberately. But for the common producer/consumer publication, **ordered atomics are clearer and equally fast** — reach for fences only when you have a specific reason.
 - **Don't hand-roll with `volatile` or compiler barriers.** `volatile` is **not** an atomic/ordering primitive in C++ (it prevents *compiler* optimization of the access but provides *no* inter-thread ordering or atomicity — a classic mistake from older code). Inline-asm memory clobbers (`asm volatile("":::"memory")`) are compiler-only barriers, not hardware ones. Use `std::atomic` + `memory_order`; that's what the model defines.
+
+### 33.4.3 Beyond `std::atomic<T>`: `atomic_ref`, `wait`/`notify`, and wide atomics
+
+Three C++20 additions close gaps the book's own designs walk into:
+
+- **`std::atomic_ref<T>` (C++20; libstdc++ 10, libc++ 19; `__cpp_lib_atomic_ref`) — atomic access to a plain object.** A wire struct in a receive buffer, a `Bbo` in a shared-memory segment (Ch. 57), a seqlock payload (Ch. 38) are *plain* `int64_t`s that another thread or process may write while you read: formally a data race, UB, however benign on x86. `std::atomic_ref<std::int64_t>(bbo.bid).load(std::memory_order_relaxed)` makes the access atomic *for that access* without changing the struct's type or layout — the object stays a plain `Bbo` the DMA engine or the other process can write — and compiles to the same `mov` (§33.5). Requirements: the object must be suitably aligned (`atomic_ref<T>::required_alignment`, 8 for `int64_t`, 16 for a 16-byte type) and *every* access during the `atomic_ref`'s lifetime must go through an `atomic_ref` (mixing plain and atomic access is UB again). Ch. 38 §38.4.2's seqlock reads its payload this way; use it for every field of a shm struct that a foreign writer can touch.
+- **`std::atomic<T>::wait()` / `notify_one()` / `notify_all()` (C++20; libstdc++ 11, libc++ 11; `__cpp_lib_atomic_wait`) — a futex with a type.** `flag.wait(old)` blocks until the value differs from `old` (spurious wakes allowed — loop on the predicate); `notify_one()` wakes a waiter. It replaces the condition-variable-plus-mutex idiom for one-word state, and on Linux it *is* `futex(2)` after a short spin: §33.3 measured a 3.4 µs one-way wake against 300 ns for a busy-poll. Use it where a thread should *not* burn a core — the scraper (Ch. 86), the journal writer (Ch. 93), a hot thread parked overnight — and keep the hot path on `load`/`pause` (Ch. 35). `std::atomic_flag::test()` (C++20) finally makes the flag readable without a `test_and_set`.
+- **Wide (16-byte) atomics and the libatomic trap.** A tagged pointer or a `{seq, value}` pair in one `alignas(16)` struct is the DWCAS the lock-free chapters assume (Ch. 37 §37.4). The toolchain facts from §33.3: GCC compiles it to a libatomic call whatever you pass (lock-free at runtime via `cmpxchg16b`, but `is_always_lock_free == false`); Clang inlines `lock cmpxchg16b` only with `-mcx16`/`-march=x86-64-v2+`, and otherwise calls the generic entry point that may take a lock. The discipline, for every 16-byte atomic and every atomic placed in shared memory: build with `-mcx16` (or an `-march` that implies it — Ch. 24, Ch. 25 §25.4.5 for keeping that flag uniform), `alignas(16)` the object (a 16-byte atomic at offset 8 in a shm struct is *misaligned*, and libatomic takes the lock path), and `static_assert(std::atomic<Tagged>::is_always_lock_free)` — accepting that on GCC this assertion fails and the fallback is a startup check of `is_lock_free()` on the actual object plus a documented decision. A locked 16-byte atomic in shared memory is a mutex shared with another process (Ch. 57 §57.4.2) — the one thing the design was built to avoid.
 
 ## 33.5 Verify the codegen: barriers emitted per ordering (x86 vs ARM)
 
@@ -182,6 +206,22 @@ On ARM, **acquire/release emit real instructions** (`ldar`/`stlr`) and `relaxed`
 
 The verification habits: **(1) read the asm for your atomics on *both* x86 and ARM** (Godbolt cross-compile) — confirm `seq_cst` stores emit the barrier you're paying for, and that on ARM your acquire/release became `ldar`/`stlr` (if they're plain `ldr`/`str`, your ordering is too weak and you have a latent race). **(2) Notice when `seq_cst` is costing you** a barrier (x86 `xchg`/`mfence`; on ARM a `dmb ish` appears only for a standalone `seq_cst` fence) that acquire/release would avoid — the §33.4.1 optimization, visible in the asm. **(3) Don't trust x86 testing for correctness** — the asm shows x86 emits nothing for acquire/release, so x86 *cannot* catch a too-weak-ordering bug; only the model, a weakly-ordered machine, or a model checker (Ch. 45) can.
 
+**`atomic_ref` and the 16-byte CAS (§33.4.3).** `clang++ -O2 -std=c++20`:
+
+```asm
+; int64 read_bid_plain(const Bbo&)     ; int64 read_bid_ref(const Bbo&) — atomic_ref<int64_t>(b.bid).load(relaxed)
+        mov     rax, qword ptr [rdi]   ;         mov     rax, qword ptr [rdi]        ; IDENTICAL: defined, same mov
+        ret                            ;         ret
+; write_bid_ref — atomic_ref(b.bid).store(v, release):  mov qword ptr [rdi], rsi ; ret   (TSO: release is a plain store)
+; cas16(atomic<Tagged>&, Tagged& expected, Tagged desired):
+;   clang++ -mcx16 :   mov rax,[expected]; mov rdx,[expected+8]; mov rbx,desired.lo; mov rcx,desired.hi
+;                      lock cmpxchg16b xmmword ptr [rdi]            ; INLINE — lock-free, provably
+;   clang++ (no flag): call __atomic_compare_exchange@PLT           ; generic libatomic — may LOCK
+;   g++ (either)   :   call __atomic_compare_exchange_16@PLT        ; libatomic; cmpxchg16b inside at runtime, is_always_lock_free == false
+```
+
+The check: `objdump -d hot.o | grep -c 'cmpxchg16b\|__atomic_compare_exchange'` — the first should be non-zero and the second zero on the hot path (Appendix I.12).
+
 ## 33.6 Pitfalls & anti-patterns: seq_cst by default; data races
 
 - **`seq_cst` everywhere (the over-strong default).** The default ordering is `seq_cst` — *correct* but the *most expensive* (a full barrier; ~20× a relaxed store on the store side — §33.3, §33.5). Leaving every atomic at the default pays for a total order you rarely need. Profile, then weaken to acquire/release where the algorithm allows (§33.4.1) — *after* proving correctness.
@@ -191,7 +231,9 @@ The verification habits: **(1) read the asm for your atomics on *both* x86 and A
 - **Testing only on x86.** x86-TSO emits *nothing* for acquire/release (§33.5), so it physically *cannot* expose a too-weak-ordering bug. Code that passes on Intel can fail on ARM/Graviton (Appendix A). Test on a weakly-ordered machine and/or model-check (Ch. 45) before trusting lock-free code.
 - **Ignoring contention (optimizing the wrong thing).** The dominant cost of shared atomics is **cache-line contention** (the line ping-ponging — §33.3, Ch. 7/36), not the ordering. Tuning `seq_cst`→`acquire` saves a barrier; *not sharing the line* (per-thread counters, padding — Ch. 36, sharding — Ch. 34) saves the ~8× contention collapse (and the retrograde scaling behind it). Fix contention first.
 - **False sharing of atomics (Ch. 36).** Two unrelated atomics on the same cache line contend even though they're logically independent — the line bounces. Pad hot atomics to separate cache lines (`alignas(hardware_destructive_interference_size)`).
-- **Assuming atomic = lock-free for all types.** `std::atomic<T>` for large `T` may use a hidden lock (`is_lock_free()`/`is_always_lock_free`); only suitably-sized/aligned types are truly lock-free. Check for hot-path atomics.
+- **Assuming atomic = lock-free for all types.** `std::atomic<T>` for large `T` may use a hidden lock (`is_lock_free()`/`is_always_lock_free`); only suitably-sized/aligned types are truly lock-free. The 16-byte case is the trap the book's own DWCAS designs step on: GCC always calls libatomic and reports `is_always_lock_free == false` even with `-mcx16`; Clang inlines `cmpxchg16b` only with `-mcx16` and its runtime `is_lock_free()` still answers `false` (§33.3, §33.4.3). `static_assert` the compile-time constant under the shipping flags, `alignas(16)`, and read the asm.
+- **Plain reads of a struct another thread or process writes.** A `Bbo` in shared memory or a seqlock payload read without `atomic_ref` is a data race — UB that x86 happens to forgive until the compiler hoists the load (§33.4.3). `std::atomic_ref` costs nothing and makes it defined.
+- **`atomic::wait` on the hot path.** It is a futex: 3.4 µs to wake (§33.3) against 300 ns of spinning. Park housekeeping threads with it; never the tick-to-trade thread while the market is open.
 - **Mixing fence and ordered-atomic reasoning sloppily.** Fence-to-atomic pairing rules differ from ordered-atomic pairing; combining them carelessly creates subtle gaps. Prefer ordered atomics; use fences deliberately (§33.4.2).
 
 ## 33.7 Exercises & checklist

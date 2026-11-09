@@ -215,6 +215,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 14.4.2 CRTP and static polymorphism
   - 14.4.3 `std::variant`/visitor alternatives
   - 14.4.4 Jump tables vs branch chains
+  - 14.4.5 Lighter type erasure: `function_ref`, `move_only_function`/`copyable_function`, in-place functions
 - 14.5 Verify the codegen: devirtualized call sites
 - 14.6 Pitfalls & anti-patterns: megamorphic call sites; `std::function` in the loop
 - 14.7 Exercises & checklist
@@ -279,6 +280,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 19.4.3 Policy-based design
   - 19.4.4 Strong types and units
   - 19.4.5 Type-state and compile-time state machines
+  - 19.4.6 Concepts and constrained overload sets: compile-time dispatch four ways
 - 19.5 Verify the codegen: zero-overhead confirmation
 - 19.6 Pitfalls & anti-patterns: template bloat, error-message cost
 - 19.7 Exercises & checklist
@@ -311,6 +313,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 21.4.2 `std::expected` for hot-path errors
   - 21.4.3 Disabling RTTI where unused
   - 21.4.4 Assertions, contracts and the diagnostics library on the hot path
+  - 21.4.5 Passing and returning values: categories, elision and the calling convention
+  - 21.4.6 Statics, `thread_local` and initialization: what the compiler emits
 - 21.5 Verify the codegen: unwinding tables and landing pads
 - 21.6 Pitfalls & anti-patterns: throwing on the hot path
 - 21.7 Exercises & checklist
@@ -338,7 +342,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 23.3 Measure it: codegen difference with/without `__restrict__`
 - 23.4 Techniques
   - 23.4.1 `__restrict__` to unblock the optimizer
-  - 23.4.2 `std::bit_cast` and `std::launder` for safe punning
+  - 23.4.2 `std::bit_cast`, `std::launder` and `std::start_lifetime_as`: punning and overlays
 - 23.5 Verify the codegen: vectorization gated by aliasing
 - 23.6 Pitfalls & anti-patterns: UB type punning via casts/unions
 - 23.7 Exercises & checklist
@@ -405,7 +409,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 28.4 Techniques
   - 28.4.1 Flat / open-addressing & robin-hood hashing
   - 28.4.2 `std::flat_map`/`std::flat_set` (C++23)
-  - 28.4.3 Intrusive containers and small-buffer types
+  - 28.4.3 Intrusive, fixed-capacity and small-buffer containers
   - 28.4.4 Slot maps and generational handles
   - 28.4.5 Case Study — Building the Limit Order Book
 - 28.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn
@@ -462,6 +466,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 32.4.1 Data layout for vectorization
   - 32.4.2 Intrinsics when the compiler won't
   - 32.4.3 Choosing the ISA width
+  - 32.4.4 `std::simd` and portable wrappers
 - 32.5 Verify the codegen: vector instruction selection
 - 32.6 Pitfalls & anti-patterns: AVX-512 downclocking; misaligned loads
 - 32.7 Exercises & checklist
@@ -477,6 +482,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 33.4 Techniques
   - 33.4.1 Choosing the weakest correct ordering
   - 33.4.2 Fences vs ordered atomics
+  - 33.4.3 Beyond `std::atomic<T>`: `atomic_ref`, `wait`/`notify`, and wide atomics
 - 33.5 Verify the codegen: barriers emitted per ordering (x86 vs ARM)
 - 33.6 Pitfalls & anti-patterns: seq_cst by default; data races
 - 33.7 Exercises & checklist

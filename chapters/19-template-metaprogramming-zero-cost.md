@@ -257,6 +257,52 @@ The synthesis of §19.4: encode the *varying design decision* in a type (CRTP fo
 
 ---
 
+### 19.4.6 Concepts and constrained overload sets: compile-time dispatch four ways
+
+§19.2 listed three ways to choose code by *type* with no runtime branch — tag dispatch, `if constexpr`, SFINAE — and C++20 adds the fourth, **concepts**, which is the one the book's "resolve the policy at build time" philosophy (§19.4.3) actually wants: a *named, checkable requirement* on a template parameter. One feed-handler example, written four ways: read a wire field, byte-swapping it if it is an integer and copying it verbatim if it is an 8-character symbol (`struct Sym { char c[8]; }`).
+
+```cpp
+// (1) tag dispatch — overload on a tag chosen by a trait            // (2) if constexpr — one body, dead branch discarded
+namespace tag {                                                      namespace ifc {
+  template <class T> T read_impl(const uint8_t* p, std::true_type)      template <class T> T read(const uint8_t* p) {
+  { T v; std::memcpy(&v, p, sizeof v); return std::byteswap(v); }        static_assert(std::is_integral_v<T> || is_sym_v<T>);
+  template <class T> T read_impl(const uint8_t* p, std::false_type)     T v; std::memcpy(&v, p, sizeof v);
+  { T v; std::memcpy(&v, p, sizeof v); return v; }                       if constexpr (std::is_integral_v<T>) return std::byteswap(v);
+  template <class T> T read(const uint8_t* p)                            else return v;
+  { return read_impl<T>(p, std::bool_constant<std::is_integral_v<T>>{}); } }
+}                                                                    }
+// (3) SFINAE — candidates removed by substitution failure            // (4) concepts — constrained overloads; the more constrained wins
+namespace sfinae {                                                   namespace con {
+  template <class T, std::enable_if_t<std::is_integral_v<T>, int> = 0>  template <class T> concept WireInt = std::integral<T> && sizeof(T) <= 8;
+  T read(const uint8_t* p) { … byteswap … }                              template <class T> concept WireSym = std::is_same_v<T, Sym>;
+  template <class T, std::enable_if_t<is_sym_v<T>, int> = 0>             template <WireInt T> T read(const uint8_t* p) { … byteswap … }
+  T read(const uint8_t* p) { … copy … }                                  template <WireSym T> T read(const uint8_t* p) { … copy … }
+}                                                                    }
+```
+
+All four produce **identical code** — `read<uint64_t>` is one `movbe`, `read<Sym>` one `mov`, for every mechanism, both compilers (§19.5) — and all four cost the **same build time** (400 instantiations: GCC 471–484 ms, Clang 320–344 ms; the spread is noise). They differ in what they do when *misused*, which is the whole point of choosing among them:
+
+- **Tag dispatch** (the C++98 idiom) selects an overload by a trait but **rejects nothing**: `tag::read<double>(p)` compiles — `is_integral_v<double>` is false, so the *symbol* overload runs and silently skips the byte-swap. Zero diagnostic lines, wrong code. Use it only when every type has a valid meaning in every branch.
+- **`if constexpr`** (Ch. 18) is the right tool for *one algorithm with type-dependent steps* — one body, one instantiation, no overload set to reason about. Misuse is rejected by whatever `static_assert` you wrote (7–8 lines of diagnostic here) and nothing else; without the `static_assert`, `read<double>` compiles and returns an unswapped `double`.
+- **SFINAE** (`std::enable_if`) removes candidates from the overload set, so `read<double>` is "no matching function" with each candidate's failed condition listed (10–19 lines). It works, it is what every pre-C++20 library does, and its two costs are the ones Ch. 19 §19.6 complains about: the requirement is spelled as a type-trait expression in a defaulted template parameter (unreadable, un-nameable, easy to get subtly non-exclusive), and the compiler cannot *rank* two candidates whose conditions overlap — it reports ambiguity.
+- **Concepts** state the requirement by name and let overloads be **ranked by subsumption**: if `concept Wide = WireInt<T> && sizeof(T) == 8`, then `template <Wide T> rank(T)` is *more constrained* than `template <WireInt T> rank(T)`, and `rank(uint64_t{})` picks it with no ambiguity (`mov eax, 2` — §19.5). Subsumption works only through *named* concepts: two `requires`-clauses that spell the same condition out twice are *different* atomic constraints and ambiguous. The diagnostic for `con::read<double>` is the longest (25–29 lines) and the only one that says *why*: `note: because 'double' does not satisfy 'WireInt'`. The standard library's concepts — `std::integral`, `std::invocable<F, Args…>`, `std::ranges::contiguous_range` (the one a zero-copy decoder wants for its buffer argument), `std::same_as`, `std::convertible_to` — compose into your own.
+
+Concepts also give §19.4.3's policies the static interfaces they were missing. The `OrderBook<Storage, Locking, Alloc>` template accepted *any* three types and reported a missing method as a 200-line instantiation trace from inside the host; with concept-checked parameters it reports it at the template argument:
+
+```cpp
+template <class S> concept BookStorage = requires(S s, std::int64_t px, std::int32_t q) {
+    { s.add(px, q) } -> std::same_as<void>;
+    { s.best_bid() } -> std::convertible_to<std::int64_t>;
+    { S::capacity } -> std::convertible_to<std::size_t>;          // a static member is a requirement too
+};
+template <class L> concept LockingPolicy = requires(L l) { l.lock(); l.unlock(); } && std::is_nothrow_default_constructible_v<L>;
+template <class St> concept Strategy = requires(St s, std::int64_t px, std::int32_t qty) { { s.on_tick(px, qty) } noexcept -> std::same_as<void>; };
+
+template <BookStorage Storage, LockingPolicy Locking, class Alloc> class OrderBook : Storage, Locking { /* unchanged */ };
+```
+
+A concept checks **syntax, not semantics** — `LockingPolicy` is satisfied by a type whose `lock()` does nothing, which is exactly what `NoLock` relies on; the semantic contract still lives in documentation and tests. And a concept is free: it is evaluated at instantiation, produces no code, and §19.5's asm is byte-identical with or without the constraint. Ch. 20 uses exactly this machinery — `fixed_string` NTTPs plus `if constexpr` over a `consteval` table — to generate a whole decoder.
+
 ## 19.5 Verify the codegen: zero-overhead confirmation
 
 "Zero-cost" is a codegen claim; §19.5 is how you *settle* it. The test: does the abstracted version produce **the same instructions** as the hand-written one? Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
@@ -321,9 +367,22 @@ No wrapper, no load/store through a stack slot, no extra `mov`: a trivially-copy
 - **Confirm the dispatch inlined** (no `call [rax]`, the §19.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 9).
 - **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 98).
 
+**Four dispatch mechanisms, one instruction.** The §19.4.6 `read<uint64_t>` under tag dispatch, `if constexpr`, SFINAE and concepts (`clang++ -O2 -std=c++23 -march=x86-64-v3`; GCC 13.3 identical bar `endbr64`):
+
+```asm
+; tag::read<uint64_t>   ifc::read<uint64_t>   sfinae::read<uint64_t>   con::read<uint64_t>   — ALL FOUR:
+        movbe   rax, qword ptr [rdi + 30]   ; load + byte-swap, offset folded
+        ret
+; tag::read<Sym>  and  con::read<Sym>:                 ; con::rank(uint64_t) — subsumption picked the Wide overload:
+        mov     rax, qword ptr [rdi + 22]              ;         mov     eax, 2
+        ret                                            ;         ret
+```
+
+The choice of mechanism is a *diagnostics and design* decision; the optimizer sees the same function four times. Concept checks, `enable_if` and tag parameters leave no instructions — the empty tag argument is passed in no register and the constraint is evaluated before codegen begins.
+
 ### Build-time/size caveat
 
-Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time + binary size. Verify the *other* axis too — `size`/`bloaty` on the binary, `-ftime-trace` on the build — so a runtime win doesn't hide an I-cache (Ch. 12) or build-time regression (§19.6).
+Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time + binary size. For the four dispatch mechanisms of §19.4.6 that cost is the same — 400 instantiations compiled in 471/471/478/484 ms (tag/`if constexpr`/SFINAE/concepts, GCC 13.3) and 322/320/344/326 ms (Clang 18.1) — so concepts are not a build-time tax; what differs is the *length and quality* of the error when a constraint fails (0 lines and wrong code for tag dispatch, 7–8 for `if constexpr`+`static_assert`, 10–19 for SFINAE, 25–29 with a named reason for concepts). Verify the *other* axis too — `size`/`bloaty` on the binary, `-ftime-trace` on the build — so a runtime win doesn't hide an I-cache (Ch. 12) or build-time regression (§19.6).
 
 ---
 
@@ -337,6 +396,7 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 - **Over-abstraction.** A tower of policies/CRTP layers for variation you don't actually have (YAGNI) costs build time, readability, and error-message sanity for no runtime benefit. Reach for these when there's a *real* need for compile-time variation on the hot path, not preemptively.
 - **Combinatorial instantiation explosion.** `Host<A, B, C>` with several options per axis can instantiate dozens of combinations, each a code copy — build-time and size blowup (Ch. 18). Cap the matrix to combinations you actually ship.
 - **Forgetting the abstraction must still be *correct*.** Static dispatch removes the runtime check but not the need for it; `static_cast`-based CRTP and policy composition can hide lifetime/aliasing bugs (Ch. 23) the compiler won't catch. Zero-cost ≠ zero-risk.
+- **Subsumption and ambiguity traps (§19.4.6).** Two overloads constrained by *equivalent but separately spelled* `requires`-clauses are ambiguous — subsumption only relates *named* concepts (`Wide` subsumes `WireInt` because `Wide` is defined as `WireInt<T> && …`); a concept that checks the *wrong thing* (syntax present, semantics absent) silently admits a policy that compiles and misbehaves; and tag dispatch that forgets to reject (`read<double>` taking the symbol path) produces no error at all. Constrain with named concepts, keep the semantic contract in tests, and reserve tag dispatch for sets where every branch is valid for every type.
 
 ---
 
@@ -351,6 +411,8 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 5. **Expression templates vs naïve.** Using Eigen (or a tiny hand-rolled version), compute `d = a + b + c` over large vectors naïvely vs with expression templates. Compare passes/allocations and ns/element; confirm fusion in the asm (§19.5). When does it *not* pay?
 
 **Checklist — zero-cost abstractions**
+
+- [ ] Template parameters on the hot path are **constrained by named concepts** (§19.4.6) — a bad policy type fails at the argument, not 200 lines inside the host — and the constrained and unconstrained versions produce **the same asm** (§19.5).
 
 - [ ] Hot-path polymorphism known at compile time uses **CRTP / static dispatch**, not `virtual` (Ch. 14).
 - [ ] I **verified zero-cost in the asm** (§19.5) — the abstraction's codegen **matches the hand-written** equivalent (inlined, no `call [rax]`, no extra copies).

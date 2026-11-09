@@ -123,7 +123,7 @@ SIMD's hard prerequisite is layout — the Ch. 8–9 work is what *enables* vect
 When auto-vectorization fails or is suboptimal on a kernel that matters, drop to explicit SIMD:
 
 - **When to reach for intrinsics.** The compiler won't vectorize (a blocker you can't remove, a pattern it doesn't recognize — horizontal ops, shuffles, saturating arithmetic, byte-wise compares for parsing), or it vectorizes *poorly*. Confirm the failure first (`-fopt-info-vec-missed`/asm — §32.5); often fixing layout/aliasing (§32.4.1) lets the compiler do it for free, which is preferable.
-- **Prefer a portable wrapper over raw intrinsics.** `std::simd` (C++26 `<simd>`, adopted from the Parallelism TS 2 — today available as `std::experimental::simd` in libstdc++'s `<experimental/simd>`, GCC 11+; feature-test `__cpp_lib_simd`; Appendix H), Google **Highway**, **xsimd**, **Eve** give readable, portable SIMD that compiles to the best ISA available and falls back gracefully — far more maintainable than `_mm512_*` intrinsics hand-written per ISA. Use raw intrinsics only for the last few percent or an op the wrappers lack.
+- **Prefer a portable wrapper over raw intrinsics.** `std::simd` (C++26 `<simd>`; today `std::experimental::simd` — §32.4.4 measures it), Google **Highway**, **xsimd**, **Eve** give readable, portable SIMD that compiles to the best ISA available and falls back gracefully — far more maintainable than `_mm512_*` intrinsics hand-written per ISA. Use raw intrinsics only for the last few percent or an op the wrappers lack.
 - **The common SIMD idioms.** Load (`loadu`/`load`), arithmetic (`add`/`mul`/`fmadd`), compare-to-mask + blend (predication — the SIMD form of branchless select, Ch. 13/31), horizontal reduce (sum/min/max across lanes — needed at the end of a reduction), shuffle/permute, gather/scatter (use sparingly). Market-data scanning uses byte compares + mask + `popcount`/`tzcnt` (Ch. 31) to find delimiters/matches across 32-64 bytes at once (Ch. 60). The canonical kernel, in raw intrinsics:
 
 ```cpp
@@ -161,6 +161,35 @@ Wider is *not* automatically better — the width choice is a measured trade aga
 - **Match the frequency-license reality to the box (Ch. 6).** Whether AVX-512 downclocks badly is a per-microarchitecture fact; check your CPU (and Ice Lake/newer are much better than Skylake-SP). On an isolated latency box you also control turbo/governor (Ch. 6), so measure the actual frequency behavior under your SIMD load.
 - **ARM/Graviton (Appendix A).** NEON (128-bit fixed) and SVE/SVE2 (scalable, vector-length-agnostic) are the AArch64 equivalents; SVE's length-agnostic model changes how you write portable SIMD. Covered in Appendix A.
 
+### 32.4.4 `std::simd` and portable wrappers
+
+`std::simd` (C++26 `<simd>`, P1928 — the Parallelism TS v2 `std::experimental::simd` with the rough edges filed off) is a *data-parallel type*: `simd<float, Abi>` holds `size()` lanes, supports the arithmetic operators element-wise, loads/stores from pointers with an alignment tag, reduces with `reduce()`, and masks with `simd_mask`/`where()`. Its value is that the kernel is written once and the *width* is a property of the target: `native_simd<float>::size()` is **4** under `-march=x86-64-v2` (SSE), **8** under `x86-64-v3` (AVX2) and **16** under `icelake-server` (AVX-512). Availability (Appendix H): the TS form `<experimental/simd>` ships in libstdc++ 11+ (GCC 11–13 as used here), the C++26 `<simd>` is experimental in libstdc++ 16 and absent from libc++ 18; Highway (Google), xsimd and Eve are the production-grade portable wrappers today, and Highway adds *runtime dispatch* across ISAs from one source. *VM-measured, GCC 13.3, `-O2 -march=x86-64-v3`, 4 096 floats × 100 000:*
+
+```cpp
+#include <experimental/simd>
+namespace stdx = std::experimental;
+// weighted mid-price accumulate over N instruments — the same kernel three ways
+float scalar(const float* b, const float* a, const float* w, int n) { float s = 0; for (int i = 0; i < n; ++i) s += (b[i] + a[i]) * 0.5f * w[i]; return s; }
+float with_simd(const float* b, const float* a, const float* w, int n) {
+    using V = stdx::native_simd<float>; V acc = 0; const int L = int(V::size()); int i = 0;
+    for (; i + L <= n; i += L) {                                   // the width is the target's, not the code's
+        V vb(b + i, stdx::element_aligned), va(a + i, stdx::element_aligned), vw(w + i, stdx::element_aligned);
+        acc += (vb + va) * 0.5f * vw;
+    }
+    float s = stdx::reduce(acc); for (; i < n; ++i) s += (b[i] + a[i]) * 0.5f * w[i]; return s;   // tail
+}
+float intrinsics(const float* b, const float* a, const float* w, int n) { /* _mm256_fmadd_ps over one __m256 accumulator — §32.4.2 */ }
+```
+
+```
+                      -O2 -march=x86-64-v3     -O2 … -ffast-math    -O3 … -ffast-math
+scalar                0.523 ns/elem            0.524                0.083   ← the FP reduction is reassociable only under fast-math
+std::simd (8 lanes)   0.080                    0.083                —       6.5× over scalar, with no fast-math and the same rounding order every run
+AVX2 intrinsics       0.127                    0.128                —       one accumulator = one 4-cycle FMA chain; the simd version let GCC split it
+```
+
+Two lessons. The scalar reduction *cannot* auto-vectorize without `-ffast-math` because reordering the adds changes the result (Ch. 30 §30.2 on determinism), and the §32.3 chapter discipline says you do not ship `-ffast-math` on price math; `std::simd` states the vector order *explicitly*, so the compiler vectorizes it at `-O2` with no fast-math and the result is bit-reproducible across runs and builds. And the wrapper beat the hand-written intrinsics by 1.6× — the intrinsic version serialises on a single `acc` chain, which GCC was free to split for the `simd` version. The trap is Ch. 25 §25.2.2's: `native_simd<float>` has a *different size* in a TU built `-march=icelake-server` than in one built `x86-64-v3`, so a struct holding one in a shared header is an ODR violation across those TUs — fix the width (`fixed_size_simd<float, 8>`) in any type that crosses a TU boundary, and keep `native_simd` inside kernel bodies. For AVX-512 widths, §32.6's downclocking caveat applies to the wrapper exactly as to the intrinsics.
+
 ## 32.5 Verify the codegen: vector instruction selection
 
 Whether a loop vectorized — and to what width — is visible in the asm, and it's the verification that the technique fired. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O3 -march=icelake-server` for the scalar-FMA form, plus `-ffast-math -mprefer-vector-width=512` for the `zmm` form — with plain `-O3` and no `-march` you get SSE `mulss`/`addss`, and without the width flag `ymm`).
@@ -193,6 +222,21 @@ Whether a loop vectorized — and to what width — is visible in the asm, and i
 ```
 
 The verification habits: **for a kernel you expect to vectorize, disassemble and confirm packed ops (`...ps`/`...pd`) at the width you intended (`ymm`/`zmm`)** — `...ss`/`...sd` scalar ops mean it *didn't* vectorize (check aliasing — Ch. 23, FP-reassoc — Ch. 30, layout — §32.4.1, via `-fopt-info-vec-missed`); **confirm the alignment you established reached the compiler** (`vmovaps`, or `vmovups` with no peel loop after `__builtin_assume_aligned`) where you aligned the data; and **confirm the width matches your ISA decision** (§32.4.3 — you didn't accidentally get `zmm`/AVX-512 on a core where you wanted AVX2 to avoid downclock). The vectorization report plus the asm is how you turn "I hope it vectorized" into "I confirmed it did, at the width I chose."
+
+**`std::simd` compiles to the packed instructions (§32.4.4).** GCC 13.3, `-O2 -march=x86-64-v3`, the `with_simd` inner loop:
+
+```asm
+.L8:    vmovups ymm3, YMMWORD PTR [rsi+rdx]      ; a[i..i+8)
+        vaddps  ymm0, ymm3, YMMWORD PTR [rdi+rdx] ; + b
+        vmulps  ymm0, ymm0, ymm2                  ; * 0.5
+        vmulps  ymm0, ymm0, YMMWORD PTR [r8+rdx]  ; * w
+        vaddps  ymm1, ymm1, ymm0                  ; acc +=      (8 lanes per iteration; no scalar fallback inside the loop)
+        …
+        vextractf128 xmm0, ymm1, 0x1              ; reduce(acc): 8 → 4 → 2 → 1
+        vaddps  xmm0, xmm0, xmm1
+```
+
+Eight-lane `ymm` arithmetic and a one-time horizontal reduction after the loop — the shape §32.3 wanted and the scalar version could not reach without `-ffast-math`. Under `-march=icelake-server` the same source emits `zmm` (16 lanes) with no code change; under `x86-64-v2`, `xmm`.
 
 ## 32.6 Pitfalls & anti-patterns: AVX-512 downclocking; misaligned loads
 

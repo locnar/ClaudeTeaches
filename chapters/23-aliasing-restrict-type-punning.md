@@ -47,6 +47,8 @@ This is a *win* (less reloading) — but it's also the trap: if you *deliberatel
 
 The unifying model: **the compiler optimizes aggressively only on the dependencies it can prove absent. `restrict` lets you *assert* same-type pointers don't overlap (unblocking vectorization); the strict-aliasing rule lets it *assume* different-type pointers don't overlap (which you must not secretly violate). Give it the freedom honestly, or pay for the freedom with UB.**
 
+**Object lifetime vs storage — the half the aliasing rule does not cover.** Strict aliasing says which *type* may access an object; a second rule says whether an object *exists* at all. Memory you obtain as bytes — `malloc`, `new unsigned char[]`, `mmap` (Ch. 29), a NIC's DMA ring or AF_XDP UMEM (Ch. 70), a shared-memory segment (Ch. 57) — holds no `Msg` object until something creates one, and before C++20 a `reinterpret_cast<Msg*>(buf)` dereference was undefined *twice*: by aliasing and because no `Msg` existed to access. P0593 (C++20, applied as a defect report to earlier standards) fixed half of this: certain operations **implicitly create objects** of *implicit-lifetime types* — scalars, arrays, and aggregates/trivially-constructible-and-destructible classes such as every wire struct in this book — in the storage they produce: `malloc`/`operator new`, `memcpy`/`memmove` into the storage, creating an `unsigned char`/`std::byte` array, and `std::bit_cast`. A `memcpy` of a wire message into a buffer therefore *does* create a `Msg` there (which is why §23.4.2's `memcpy` idiom is well-defined for whole structs, not just fields). What P0593 did not give you is a way to *say* "there is a `Msg` at this address" for bytes you did not copy — the DMA'd datagram sitting in the ring. C++23's `std::start_lifetime_as<Msg>(p)` (P2590) is that statement: it creates the object, returns a pointer to it, and compiles to **no instructions** (§23.5). §23.4.2 shows it with its preconditions and the C++20 polyfill; the hot-path consequence is that the "struct over the receive buffer" pattern of Ch. 60 is now expressible without UB and without a copy.
+
 ## 23.3 Measure it: codegen difference with/without `__restrict__`
 
 The cleanest demonstration is a loop that *should* vectorize, compiled with and without a `restrict` promise — the source is otherwise identical, so any difference is purely the aliasing information. (This is fundamentally a *codegen* measurement, so §23.3 and §23.5 are tightly coupled; here we time it, there we read the asm.) The kernel is chosen with care: for the textbook `out[i] += in[i] * k` both GCC 13 and Clang 18 at `-O3` *version* the loop — emit a runtime overlap check plus a vector body and a scalar fallback (§23.2, §23.5) — so with two separate arrays the plain and `restrict` builds run the same inner loop and time the same. Where versioning does **not** rescue the compiler is a reduction *through a pointer*: `*sum += in[i]` with `sum` possibly inside `in[]` forces a store to memory every iteration (GCC 13 does not version it; Clang 18 does — read the asm).
@@ -118,7 +120,7 @@ Read it the Ch. 11 / Ch. 4 way: **identical source, identical data, identical ca
 - **`char`/`std::byte` buffers are alias-pessimistic by design.** Because `char*`/`std::byte*` may alias any object (the strict-aliasing exception), code that works through byte buffers (parsers, serializers — Ch. 60) blocks optimization broadly. Where you process such a buffer numerically, load into typed locals / typed `restrict` pointers (via `memcpy`/`bit_cast` — §23.4.2) so the hot loop operates on values the compiler can reason about.
 - **`assume`/`__builtin_assume_aligned` are cousins.** Telling the compiler about *alignment* (Ch. 9) similarly unblocks aligned SIMD loads; `[[assume(expr)]]` (C++23; GCC 13+, Clang 19+) — or the vendor forms `__builtin_assume` (Clang only; GCC rejects it), `__attribute__((assume(expr)))` (GCC 13) and the portable `if (!c) __builtin_unreachable();` — feed it other invariants. Same principle: hand the optimizer provable facts it can't deduce.
 
-### 23.4.2 `std::bit_cast` and `std::launder` for safe punning
+### 23.4.2 `std::bit_cast`, `std::launder` and `std::start_lifetime_as`: punning and overlays
 
 Type punning — reinterpreting one type's bytes as another — is unavoidable in low-latency systems work (reading raw price bits, overlaying wire formats — Ch. 60), but the naive `*reinterpret_cast<int*>(&myfloat)` is **strict-aliasing UB** (§23.2). The sanctioned, zero-overhead channels:
 
@@ -129,12 +131,27 @@ Type punning — reinterpreting one type's bytes as another — is unavoidable i
   float f          = std::bit_cast<float>(raw_u32);                 // (replaces the union/cast hacks)
   ```
 
-- **`memcpy` — the pre-C++20 / variable-size workhorse.** `std::memcpy(&to, &from, n)` is *always* well-defined for copying object representations, and the compiler reliably folds a small fixed-size `memcpy` into a register move (no actual call — §23.5). It's the portable way to pun and to read a value out of a byte buffer without aliasing UB. For the *overlay* use-case — treating a receive buffer as a `Msg` without copying (Ch. 60) — the standard's sanctioned tool is C++23's `std::start_lifetime_as<Msg>(p)` (P2590), which as of 2025 ships only in libstdc++ 16 and not yet in libc++ (gate on `__cpp_lib_start_lifetime_as`); until then rely on C++20's implicit-lifetime rule (P0593: a `memcpy`/`memmove` into storage starts the lifetime of a trivially-copyable implicit-lifetime object), i.e. copy the header fields out with `memcpy`, which the compiler folds into plain loads:
+- **`memcpy` — the pre-C++20 / variable-size workhorse.** `std::memcpy(&to, &from, n)` is *always* well-defined for copying object representations, and the compiler reliably folds a small fixed-size `memcpy` into a register move (no actual call — §23.5). It's the portable way to pun and to read a value out of a byte buffer without aliasing UB — the per-field form Ch. 60's decoder and Ch. 20's generated accessors use — and, by P0593 (§23.2), a `memcpy` of a whole wire struct into storage *creates* the struct there:
 
   ```cpp
   std::uint64_t px; std::memcpy(&px, wire_ptr, sizeof px);   // pull 8 bytes out, defined, zero-cost
   ```
 
+- **`std::start_lifetime_as<T>(p)` (C++23, P2590) — the sanctioned zero-copy overlay.** For the case `memcpy` cannot cover — the message is *already* in the receive buffer and you want a `const Msg*` to it without copying a byte — `start_lifetime_as` creates a `Msg` object in the bytes at `p` (and `start_lifetime_as_array<T>(p, n)` an array of them) and returns a pointer to it, with **no instructions emitted** (§23.5): it is a statement to the abstract machine, not an operation. Preconditions, all on you: `T` must be an *implicit-lifetime type* (trivially copyable wire structs qualify; anything with a constructor that does work does not — Ch. 9's `pahole`-checked PODs are the model), `p` must be suitably aligned for `T` (a `#pragma pack(1)` struct has alignment 1 and is always fine; an unpacked one over an unaligned datagram is not), and `[p, p + sizeof(T))` must be inside the buffer. The bytes are *not* changed and no constructor runs — the object's value is whatever the bytes say. Availability: libstdc++ 16 (experimental), not in libstdc++ 13–15 or libc++ 18 (`__cpp_lib_start_lifetime_as`, Appendix H); the C++20 polyfill below is what ships today, and it, too, compiles to nothing (§23.5):
+
+  ```cpp
+  template <class T> const T* overlay(std::byte* p) {                 // precondition: T implicit-lifetime, p aligned for T, sizeof(T) bytes available
+  #ifdef __cpp_lib_start_lifetime_as
+      return std::start_lifetime_as<T>(p);
+  #else
+      // memmove into the storage implicitly creates a T there (P0593); launder yields a pointer to the object that now exists.
+      return std::launder(reinterpret_cast<const T*>(std::memmove(p, p, sizeof(T))));
+  #endif
+  }
+  const AddOrder* m = overlay<AddOrder>(ring_slot);  std::uint64_t px = std::byteswap(m->price);   // one movbe (§23.5)
+  ```
+
+  Versus the other two channels: `bit_cast` *copies* a value out (right for one field or one small struct), `launder` re-points at an object that *already exists* in reused storage (Ch. 27's pools), `start_lifetime_as` *brings an object into existence* over bytes you did not write. Ch. 60 §60.2.2 uses it for the struct overlay and keeps the per-field `memcpy` for unaligned fields; the polyfill's `memmove` on a buffer you own is legal because the buffer is not `const` — do not cast away `const` on a mapping that is genuinely read-only.
 - **`std::launder` — for *reusing storage*, not bit-punning.** A narrower tool: when you've placement-`new`'d a new object into existing storage (or need to access an object through a pointer obtained before its lifetime began), `std::launder` gives you a pointer the compiler treats as referring to the *new* object, defeating its (otherwise valid) assumption that the storage still holds the old one. Relevant to arenas/object pools (Ch. 27) and `std::variant`-like storage reuse — *not* a general "make my cast legal" tool (a common misconception).
 - **Unions for punning are UB in C++ (unlike C).** Writing one union member and reading another is *defined in C* but **UB in C++** (only the last-written member may be read). Don't port the C union-punning idiom; use `bit_cast`/`memcpy`. (Compilers often *tolerate* it, but it's not guaranteed — the kind of UB that bites at `-O2` on the next compiler, Ch. 87.)
 - **`char`/`std::byte` access is always allowed.** You may legally inspect *any* object's bytes through `char*`/`unsigned char*`/`std::byte*` — that's the sanctioned way to *view* representation. To turn those bytes back into a *typed value*, go through `bit_cast`/`memcpy` (§23.4.2), not a typed `reinterpret_cast` dereference.
@@ -198,6 +215,19 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 - **Confirm `bit_cast`/`memcpy` punning folded to a move** (no call, no spill) — it should; if a `memcpy` didn't fold, the size wasn't a constant or the types weren't trivially copyable.
 - **Treat a lost vectorization as a regression** (Ch. 98): a change that reintroduces a possible-alias (e.g. routing a hot array through a `char*` buffer or dropping a `restrict`) silently drops you back to scalar — the asm diff catches it.
 
+**`start_lifetime_as` (and its polyfill) emit nothing.** The §23.4.2 `overlay<AddOrder>` reading `price` through the overlay, against the per-field `memcpy` (`-O2 -std=c++23 -march=x86-64-v3`; GCC 13.3 and Clang 18.1 identical):
+
+```asm
+price_via_overlay(const std::byte*):     ; start_lifetime_as / memmove(p,p,38) + launder, then ->price + bswap
+        movbe   rax, qword ptr [rdi + 30]  ; the SAME single instruction as…
+        ret
+price_via_memcpy(const std::byte*):      ; memcpy(&v, p + 30, 8) + bswap
+        movbe   rax, qword ptr [rdi + 30]
+        ret
+```
+
+The `memmove` of a region onto itself folded away, `launder` is a no-op to codegen, and the packed struct's unaligned member read is the same load the explicit `memcpy` produced. The object-lifetime statement is free; what it buys is a program whose meaning the optimizer and the sanitizers (Ch. 45) agree on.
+
 ## 23.6 Pitfalls & anti-patterns: UB type punning via casts/unions
 
 - **`reinterpret_cast`-and-dereference type punning.** The classic UB: `*reinterpret_cast<int*>(&myfloat)` (or any access through a pointer to an unrelated type) violates strict aliasing (§23.2). It often "works" until `-O2` on a different compiler reorders around it. Use `std::bit_cast`/`memcpy` (§23.4.2) — same codegen, defined.
@@ -208,6 +238,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 - **`std::launder` as a "make my cast legal" spell.** `launder` is for *storage reuse* (re-pointing at a newly-constructed object in existing bytes), not for bit-punning between types. Using it to bless a `reinterpret_cast` is still UB. Different tool for a different problem (§23.4.2).
 - **Over-applying `restrict` everywhere.** Sprinkling it on every pointer adds risk (every one is a UB landmine if violated) for no gain where the loop doesn't vectorize anyway. Apply it to the hot kernels where the asm shows aliasing is the blocker.
 - **Ignoring misalignment after fixing aliasing.** Even disjoint, a loop the compiler can't prove *aligned* may use unaligned/scalar prologue-epilogue handling; pair `restrict` with alignment knowledge (Ch. 9, `__builtin_assume_aligned`) for the cleanest SIMD.
+- **`start_lifetime_as` on the wrong type or the wrong address.** It requires an *implicit-lifetime* `T` (no constructor that initialises anything, no virtuals, no non-trivial destructor) and storage aligned for `T`; applying it to a `std::string`-bearing struct, or to an unpacked struct at a datagram offset, is UB with the same quiet failure modes as the cast it replaced (§23.4.2). Check `std::is_trivially_copyable_v<T>` and the alignment in a `static_assert`, and keep per-field `memcpy` for unaligned fields.
 - **Strict-aliasing UB as a security bug (Ch. 87).** Aliasing UB doesn't just slow things down — it can make the compiler emit code that violates your intended invariants (dropped bounds checks, reordered validation), a genuine vulnerability class on untrusted-input paths (Ch. 60, 87).
 
 ## 23.7 Exercises & checklist
