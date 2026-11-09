@@ -39,6 +39,10 @@
 - **Tail latency / p99 / p99.9** — the high percentiles of the latency *distribution* (the slowest 1 % / 0.1 % of events); the quantity trading systems are judged on, because the mean hides the lost races. Always report and reason about the distribution, never the average. (Ch. 1, 3)
 - **Tick-to-trade** — the end-to-end latency from a market-data packet arriving on the wire to the resulting order leaving on the wire; the book's north-star metric. (Ch. 1, 84; Appendix J.7)
 - **Tick size** — the minimum price increment for an instrument; drives price representation (scaled integers) and book layout. (Ch. 27)
+- **Trace header / correlation ID** — a fixed 56-byte structure carried in every ring slot: the message's own identity as the join key (venue sequence number for market data, `ClOrdID` for orders), a parent ID linking an order to the tick that caused it, and a vector of raw-TSC stage stamps; the mechanism behind per-stage, per-message budget attribution across processes. (Ch. 74)
+- **`SendingTime` / `TransactTime` / `TrdRegTSTimeIn`·`Out` / `TrdRegTSTimePriority`** — venue-written UTC timestamps (CME MDP 3.0 and iLink 3; Eurex EOBI/ETI; Nasdaq ITCH/OUCH carry nanoseconds since midnight) that let a desk split a lost race into *you* (NIC-to-NIC), *the wire* (TX → gateway-in) and *them* (gateway-in → matching engine); compared to PHC stamps, never to the TSC. (Ch. 74 §74.4.5, 60; Appendix J.5)
+- **One-way feed latency** — venue `SendingTime`/`TransactTime` to your NIC's hardware RX stamp, both on PTP-disciplined UTC; flat on a co-located box, a spike on one packet with flat neighbours is the venue's or the fabric's, not yours. (Ch. 74 §74.4.5)
+
 
 ## F.2 Microarchitecture terms
 
@@ -67,6 +71,14 @@
 - **TLB** — Translation Lookaside Buffer: caches virtual→physical page translations; a TLB miss triggers a page-table walk. Huge pages reduce TLB pressure. (Ch. 15)
 - **Top-down analysis** — a PMU methodology attributing each cycle to front-end-bound / back-end-bound / bad-speculation / retiring, to find the dominant bottleneck. (Ch. 2)
 - **TSC / `rdtsc` / `rdtscp`** — Time Stamp Counter: the per-core cycle counter read by `rdtsc` (`rdtscp` additionally waits for prior instructions to complete and returns the core ID); the *invariant* TSC ticks at a constant rate regardless of frequency scaling, which makes it the cheapest hot-path clock — once calibrated against a reference. (Ch. 17; Appendix A.4 for `CNTVCT_EL0`)
+- **Uncore PMU (IMC / CHA / UPI / IIO / M2M)** — the counters outside the core: memory controller CAS counts (→ DRAM bandwidth), caching/home agent LLC lookups by source, cross-socket flits, PCIe inbound/outbound data per stack. Socket-scoped, counting-only, programmed through a housekeeping CPU — so they never touch an isolated core. (Ch. 2 §2.4.4, 16, 58, 68)
+- **IBS (Instruction-Based Sampling)** — AMD's precise sampler (Zen has no PEBS): tags one µop every *N* and records its address, data source, latency and TLB behaviour with zero skid; what `perf mem`/`perf c2c` use on Zen. (Ch. 2 §2.4.4)
+- **RAPL** — Running Average Power Limit: the energy MSRs (`power/energy-pkg/`, `-ram/`, `-cores/`) that say whether the socket is power-limited; beside the AVX frequency-licence events (`core_power.lvl*_turbo_license`) the counter form of the downclocking caveat. (Ch. 2 §2.4.4, 6, 29, 82)
+- **Intel PT (Processor Trace)** — hardware recording of every taken branch of a CPU into a per-CPU buffer at 2–15 % slowdown, frozen on a trigger (`perf record -e intel_pt//u --snapshot`) and decoded offline to the instruction; the deepest answer to "what ran during the 41 µs". (Ch. 2 §2.4.4, 81 §81.4.3)
+- **LBR (Last Branch Record)** — 32 taken branches the CPU records for free; read by `perf` at a sample (`--call-graph lbr`, `-j any,u`) as a cheap, shallow call history and as BOLT's profile input. (Ch. 2, 22, 84 §84.4.4)
+- **`rdpmc`** — user-space read of a core performance counter: `perf_event_open` once from the thread, `mmap` the event page, then a seqlock'd `rdpmc` using the page's index — ~20–40 cycles, no syscall, no IPI; the always-on per-stage counter instrument beside the TSC stamp. (Ch. 84 §84.4.4)
+- **Debug registers / hardware data breakpoint** — the four x86 debug-address registers; armed on a live PID from a sidecar via `perf_event_open(PERF_TYPE_BREAKPOINT, HW_BREAKPOINT_W)` they cost the target nothing until the write and then deliver the writer's IP — the production answer to "who corrupted this?". (Ch. 5 §5.4.5)
+
 
 ## F.3 Memory & OS terms
 
@@ -94,6 +106,15 @@
 - **THP** — Transparent Huge Pages: kernel-managed automatic huge pages; convenient, but fault-time 2 MiB allocation (with the direct compaction the `defrag` setting may allow) and the background `khugepaged` collapse of 4 KiB pages are jitter sources — often disabled in favor of explicit huge pages. (Ch. 15, Appendix C)
 - **Tick dependency** — the reason a `nohz_full` CPU's periodic tick cannot stop, named by the `timer:tick_stop` tracepoint: a second runnable task (`SCHED`), an attached perf event (`PERF_EVENTS`), a POSIX interval timer, an unstable clocksource, an expedited RCU grace period. (Ch. 45 §45.5, 46 §46.4.3)
 - **TLB shootdown** — the IPI that flushes another core's TLB when a page mapping in a shared address space changes (`munmap`, `mprotect`, `madvise(DONTNEED)`, THP split, compaction, KSM); the most common self-inflicted intrusion on an isolated core, caused by the hot process's own housekeeping threads. (Ch. 26, 46 §46.4.3)
+- **Async-signal-safe** — the property of a function that may be called from a signal handler (POSIX `signal-safety(7)`): syscall wrappers with no library state — `write`, `sigaction`, `_exit`… — and *not* `malloc`, `printf`, mutexes, `exit`, `dlopen`, or glibc's `backtrace()` on its first call. (Ch. 79 §79.2.2)
+- **`sigaltstack`** — a per-thread alternate signal stack, so a `SIGSEGV` from a stack overflow is still handled; needs `SA_ONSTACK` on the `sigaction` and a call in *every* thread. (Ch. 79 §79.4.1)
+- **`coredump_filter` / `MADV_DONTDUMP`** — the per-process bitmask (`/proc/PID/coredump_filter`) and the per-range `madvise` flag that decide which mappings a core dump includes; excluding the hugepage-backed book and rings turns a 40 GB, tens-of-seconds dump into a 60 MB, sub-second one. (Ch. 79 §79.4.4)
+- **`core_pattern` pipe handler** — `kernel.core_pattern = |/path/handler %P %s …`: the kernel pipes the core to a program; `RLIMIT_CORE` is ignored for pipes, so the handler bounds itself (`taskset` to housekeeping cores, `nice`/`ionice`, `timeout`, a separate disk); `core_pipe_limit` caps concurrent handlers. (Ch. 79 §79.4.4)
+- **Minidump** — Breakpad/Crashpad's small crash file (thread registers and stack tops, module list with build IDs) written by an out-of-process handler; the fleet default, insufficient when the question is heap corruption. (Ch. 79 §79.4.4)
+- **`process_vm_readv`** — copy another process's memory without stopping any of its threads; with a seqlock-versioned snapshot the reader rejects torn copies and the hot thread never knows it was read. (Ch. 5 §5.4.4)
+- **`ptrace_scope` (Yama)** — `kernel.yama.ptrace_scope`: who may `ptrace` whom (0 same uid, 1 descendants or `CAP_SYS_PTRACE`, 2 admin only, 3 never); set to 2 on a trading host and run inspection as a capability-holding sidecar. (Ch. 5 §5.4.4)
+- **Guard page** — a `PROT_NONE` page after a pool slab so an overflow faults at the write (`SEGV_ACCERR`) instead of corrupting the neighbour; costs address range, TLB reach and one VMA per guard. (Ch. 5 §5.4.5)
+
 
 ## F.4 Concurrency terms
 
@@ -154,6 +175,13 @@
 - **Split debug info** — keeping `-g` debug info in a separate file (`-gsplit-dwarf` / `objcopy`) so a stripped production binary's cores and profiles stay symbolizable offline. (Ch. 5, Appendix D)
 - **Structured concurrency** — async work with scope-bound lifetime and propagating cancellation (stop tokens) — RAII applied to concurrency; no dangling continuations. (Ch. 39)
 - **Zero-cost abstraction** — an abstraction (templates, RAII, iterators) that compiles to the same code you'd write by hand — no runtime penalty for the abstraction. (Ch. 19, 20)
+- **Frame-pointer walk / DWARF CFI / SFrame** — the three ways to recover a call stack: follow the saved-`rbp` chain (2–4 cycles per frame, no library, async-signal-safe; leaves and tail calls leave no frame), interpret `.eh_frame` (~200 cycles per frame; `_Unwind_Backtrace`, libunwind, `backtrace()`), or walk the compact `.sframe` table (binutils ≥ 2.41) the kernel's deferred user unwinder consumes. (Ch. 22 §22.4.4, 79 §79.4.2)
+- **Non-stop mode (gdb)** — `set non-stop on` before `attach`: only the thread you interrupt stops, the rest run; the sanctioned way to look at a housekeeping thread of a live trading process. An all-stop `gdb -p` stops every thread for the session (254 ms measured). (Ch. 5 §5.4.4)
+- **Build ID** — the `NT_GNU_BUILD_ID` note (`readelf -n`) that keys a stripped binary to its archived debug info and a crash record or core to the right symbols; `debuginfod` serves by it. (Ch. 5 §5.4.1, 79 §79.4.5, Appendix N.2)
+- **`std::source_location` / `std::stacktrace` / `<debugging>`** — C++20 zero-cost call-site metadata (one `lea` of a static), C++23 stack capture (~4k cycles) with separate symbolisation (~40k), and C++26 `std::breakpoint`/`is_debugger_present`; the first is hot-path safe, the others belong on the terminate/assert path. (Ch. 20 §20.4.4; Appendix H.2)
+- **Contracts (C++26)** — `pre`/`post`/`contract_assert` with evaluation semantics *ignore*/*observe*/*enforce*/*quick_enforce* (GCC 15 experimental); the standard form of "a check is a predictable compare, a report is a cold path". (Ch. 20 §20.4.4; Appendix H.3)
+- **Hardened library mode** — `_GLIBCXX_ASSERTIONS` / `_LIBCPP_HARDENING_MODE`: the standard library's preconditions as predictable compare-and-trap, +3–8 % measured on a decode loop; the shippable middle between nothing and ASan. (Ch. 5 §5.4.5, 20 §20.4.4, 76 §76.3)
+
 
 ## F.6 Networking, I/O & Transport terms
 
@@ -249,6 +277,13 @@
 - **Telemetry segment** — the versioned shared-memory layout in which each hot thread owns cache lines of monotonic counters, a seqlock-guarded gauge set, high-water marks and per-stage log-linear histograms, written with plain stores and never read by the thread's own peers; the substrate for metrics, heartbeats, progress sequences and the readiness word. (Ch. 75 §75.4.1)
 - **UB (Undefined Behavior)** — behavior the standard leaves undefined; in low-latency C++ it is simultaneously a correctness bug, a security vulnerability, and a source of nondeterminism (and the optimizer may delete your checks around it). (Ch. 21, 76)
 - **WAL (Write-Ahead Log)** — append-only journaling: persist the event durably *before* acting on it; the capture-journal and replay model. (Ch. 80)
+- **Flight recorder** — an always-on, per-thread ring of fixed-size binary records (the last ~65k things the thread did, TSC-stamped) that is *frozen* on a trigger by swapping the ring pointer so the hot thread keeps writing while a housekeeping core drains the frozen copy; dumped raw by the crash handler on a fault. (Ch. 81 §81.4.2, 79 §79.4.3)
+- **Always-on / targeted-live / offline-on-replay** — the three observation tiers: stores and `rdpmc` the hot thread pays for; bounded, trigger-frozen tools a housekeeping core arms per investigation (`perf --overwrite`, LBR/PT snapshots, hardware breakpoints, non-stop gdb); and the heavy tools on a deterministic replay. (Ch. 84 §84.2, §84.4.4)
+- **Spike forensics** — the method from one over-budget trace record to a mechanism: localise the TSC window, convert every evidence stream into it, test each suspect against its fingerprint in the frozen rings, confirm with a knob or a replay. (Ch. 81)
+- **State digest / divergence forensics** — an incremental crc32c of each mutation chained per event (+0.1 cycles), journaled beside the output, so a replay that disagrees with production is localised to the *first diverging event* by a digest diff or checkpoint bisection; with a determinism lint for the usual causes. (Ch. 78 §78.4.6)
+- **Incident bundle** — the alignable (clock anchors), attributable (build IDs, flags, configuration hash, host fingerprint) and checkable (raw rings and sample windows with a manifest) collection a bounded script gathers on a housekeeping core after a spike, crash or drop. (Appendix N, Ch. 81 §81.4.5)
+- **Kill-switch handoff** — the crash handler's first act: eight bytes to a pre-opened `eventfd` the gateway blocks on, so the dead shard's orders are being cancelled ~20 µs after the fault rather than after a core dump finishes. (Ch. 79 §79.4.3, 78 §78.4.4)
+
 
 ## F.9 References
 

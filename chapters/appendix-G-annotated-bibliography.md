@@ -49,6 +49,12 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Linux kernel documentation: `kernel-per-CPU-kthreads.rst`, `osnoise-tracer.rst`/`timerlat-tracer.rst`/`hwlat_detector.rst`, `tools/rtla/`, `ftrace.rst`; `snmp_counter.rst`, `statistics.rst`, `scaling.rst`, `dropreason-core.h`; `proc.rst`, `psi.rst`, `ras.rst`, `pcieaer-howto.rst`.** The noise catalog and tracers of **Ch. 46**, the network counter semantics of **Ch. 83**, and the host-health signals of **Ch. 82**.
 - **Prometheus documentation (histograms, exposition format, `histogram_quantile`, native histograms) and the OpenTelemetry exponential-histogram specification.** Why the unit of export is bucket counts and never a percentile — **Ch. 75 §75.4.3**.
 - **SEC Rule 15c3-5 (Market Access) and ESMA MiFID II RTS 6.** Pre-trade controls, kill functionality, real-time monitoring and the annual self-assessment that a readiness gate and kill-switch test satisfy — **Appendix M**, Appendix K.4.
+- **Exchange timestamp and protocol references: CME *MDP 3.0* and *iLink 3* documentation, Deutsche Börse *T7 EOBI* and *ETI* manuals, Nasdaq *TotalView-ITCH 5.0*, *OUCH 5.0* and *MoldUDP64* specifications.** The field definitions (`SendingTime`, `TransactTime`, `TrdRegTS*`, ITCH timestamps) behind the you/wire/matching-engine attribution of **Ch. 74 §74.4.5** and the table in Appendix J.5; also the decoders of Ch. 54.
+- **Commission Delegated Regulation (EU) 2017/574 (MiFID II RTS 25).** The clock-accuracy tolerances (100 µs / 1 µs granularity for HFT-class activity) that bound how far a venue's timestamp can be trusted — **Ch. 74 §74.4.5, Ch. 60**; the record-keeping horizon of Appendix N.7 comes from RTS 6 / RTS 25.
+- **Linux man pages for the crash and signal path: `signal-safety(7)`, `sigaction(2)`, `sigaltstack(2)`, `core(5)`, `madvise(2)`, `prctl(2)`, `backtrace(3)`; `fs/coredump.c` and `arch/x86/kernel/signal.c`.** The async-signal-safe function list, the `core_pattern`/`coredump_filter` semantics (including the pipe-ignores-`RLIMIT_CORE` rule) and the sigframe path — **Ch. 79, Ch. 41 §41.4.3**.
+- **Intel SDM, Vol. 1 Ch. 13 (XSAVE) and Vol. 3 Ch. 33 (Processor Trace).** Why a signal frame is full-size even with clean vector state (**Ch. 79 §79.3**), and the packet/ToPA/PTWRITE mechanics behind Intel PT snapshots (**Ch. 2 §2.4.4, Ch. 81 §81.4.3**).
+- **`perf-record(1)`, `perf-intel-pt(1)`, `perf-script(1)` and `Documentation/trace/ftrace.rst`.** Overwrite/snapshot/`--switch-output`/`--control` modes, `-k CLOCK_MONOTONIC`, `trace_clock x86-tsc`, per-CPU rings — the always-on-frozen-on-trigger recipes of **Ch. 81 §81.4.3** and the uncore/IBS/RAPL/`msr` event syntax of **Ch. 2 §2.4.4**; `perf_event_open(2)`'s mmap page for `rdpmc` (**Ch. 84 §84.4.4**).
+
 
 ## G.3 Books
 
@@ -65,6 +71,8 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Larry Harris, *Trading and Exchanges: Market Microstructure for Practitioners*.** The standard market-structure text — matching, order types, maker/taker, the participants' roles — behind **Appendix J** (J.1–J.3) and the trading framing of Ch. 25, 54 and the case studies; the FIX Trading Community specifications (G.2) cover the wire side.
 - **Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering* (2016) and *The Site Reliability Workbook* (2018).** SLOs, error budgets and multi-window burn-rate alerting — adapted to session phases in **Ch. 75 §75.4.4**; the production-readiness-review idea behind **Appendix M**.
 - **Beau Williamson, *Developing IP Multicast Networks* (Cisco Press).** PIM, RPF and rendezvous points — the routed-multicast background of the venue distribution tree in **Ch. 56 §56.2.3**.
+- **Raj Jain, *The Art of Computer Systems Performance Analysis* (1991).** Ch. 2's catalogue of measurement mistakes — comparing unconverted or mis-aligned measurements chief among them — is the methodological footing of the one-timeline rule in **Ch. 81 §81.2.2**.
+
 
 ## G.4 Influential talks & blogs
 
@@ -80,6 +88,10 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Scott Meyers, "CPU Caches and Why You Care" (talk).** An accessible bridge from the cache hierarchy (Ch. 7) to layout decisions — **Ch. 8**.
 - **Cliff Click (and others) on JVM internals, JIT and GC behaviour.** Why managed runtimes' tails look the way they do and what HFT Java shops do about it — **Appendix B** (B.3–B.4); cited there, not by a C++ chapter.
 - **Brendan Gregg's blog** (flame graphs, eBPF, latency heatmaps) — the practical companion to his books (G.3) for **Ch. 2, 63, 84**.
+- **Josh Poimboeuf and others, LWN coverage of SFrame and deferred user-space unwinding (2023–2025).** Where stack capture without frame pointers or DWARF is heading in the kernel — **Ch. 22 §22.4.4, Ch. 79 §79.4.2**.
+- **Steven Rostedt, "Finding Origins of Latencies Using Ftrace" (Linux Plumbers / ELC).** The stop-on-threshold technique that Ch. 46's recipe and **Ch. 81**'s frozen kernel ring build on.
+- **Brendan Gregg, "Linux Performance Analysis in 60,000 Milliseconds" (Netflix TechBlog).** The triage-order idea behind Appendix N.6's ten-minute first look and **Ch. 81 §81.4.4**'s cheap-exonerations-first table.
+
 
 ## G.5 Tooling documentation
 
@@ -96,6 +108,11 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **`cyclictest` / `rt-tests` and the `hwlat` detector.** Jitter measurement and the verification pass of **Ch. 45** and **Appendix C.5**.
 - **`rtla` (`osnoise`, `timerlat`, `hwnoise`), `trace-cmd` and KernelShark (Steven Rostedt), `perf sched`.** The stop-on-threshold noise hunt of **Ch. 46** and the one-liners of Appendix I.6.
 - **`turbostat`, `numastat`, `rasdaemon`/`ras-mc-ctl`, `dmidecode`; `ethtool` (`-S`, `-m`, `--show-fec`), `nstat`, `ss -ti`, `dropwatch`; the driver statistics sources (`ixgbe`/`ice`/`mlx5`/`sfc` `*ethtool*.c`).** The host- and network-health samplers of **Ch. 82–83** and the readiness attestation of **Appendix M**.
+- **Google Breakpad and Chromium Crashpad documentation; `systemd-coredump(8)`, `coredumpctl(1)`; elfutils `eu-stack(1)`/`eu-unstrip(1)`; libunwind.** Minidumps and out-of-process crash handlers, systemd's core store and its size limits, stack extraction from cores without gdb, and the local unwinder's signal-handler caveats — **Ch. 79 §79.4.2–§79.4.5**.
+- **The GDB manual — *Non-Stop Mode*, *Debugging Programs with Multiple Threads*, the *Python API* (pretty-printers) — and `gdbserver`.** Looking at one housekeeping thread of a live process without stopping the hot one — **Ch. 5 §5.4.4**.
+- **Jane Street's *magic-trace* and Andi Kleen's *simple-pt*.** Application-triggered Intel PT snapshot tracing and practical PT recipes — the open-source relatives of **Ch. 81 §81.4.3**.
+- **`tshark(1)` and the pcapng specification (`if_tsresol`).** The tap-side half of the per-packet ledger — **Ch. 74 §74.4.6**.
+
 
 ## G.6 How this maps to the Parts
 
@@ -112,7 +129,7 @@ For quick navigation, the heaviest sources per Part:
 - **Part IX (Market Data, NIC & Fabric):** the exchange protocol specs, NIC-vendor and DDIO material, `rte_flow`/flow-steering docs, the PTP/IEEE-1588 references, the IGMP/snooping/SSM RFCs, and low-latency switch/fabric guides (Ch. 54–62).
 - **Part X (Kernel Bypass, RDMA & Transport):** bpftrace/XDP, DPDK, the Solarflare/ef_vi SDKs, the InfiniBand/RoCE and DCQCN references, and Aeron/eRPC/Homa (Ch. 63–67).
 - **Part XI (Heterogeneous/Accelerators):** the PCIe spec, CUDA/MPI docs, the FPGA toolchain and HFT-FPGA literature, the BlueField/DOCA/P4 docs (Ch. 68–72).
-- **Part XII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, Tene/HdrHistogram and the Prometheus histogram docs, the SRE books (SLOs and alerting), the kernel's counter and tracer documentation, the regulatory record-keeping and market-access rules (Ch. 73–84, Appendix M).
+- **Part XII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, Tene/HdrHistogram and the Prometheus histogram docs, the SRE books (SLOs and alerting), the kernel's counter and tracer documentation, the regulatory record-keeping and market-access rules; the venue timestamp specifications and RTS 25 (Ch. 74), the signal/core-dump man pages, the SDM's XSAVE chapter and Breakpad/Crashpad (Ch. 79), the ftrace/`perf` PT documentation, Rostedt and magic-trace (Ch. 81), the gdb non-stop/Python manual (Ch. 5 §5.4.4) (Ch. 73–84, Appendices M–N).
 - **Appendices:** the Arm ARM and Graviton guides (A), the Rust/Zig/JVM references (B), the kernel/vendor tuning guides (C), the GCC/Clang/BOLT docs (D), the latency-measurement tools (E), cppreference/the protocol specs (F), the libstdc++/libc++ status tables and cppreference compiler-support pages (H), the `perf`/`bpftrace`/`ethtool` man pages and tool docs (I), Harris and the exchange specs (J), exchange colocation/connectivity documentation (K), and the Google Benchmark / HdrHistogram docs (L).
 
 ## G.7 A short shelf
