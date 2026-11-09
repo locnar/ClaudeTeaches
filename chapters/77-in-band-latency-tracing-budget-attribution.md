@@ -1,22 +1,22 @@
 # Part XIII — Observability & Operations in Production
 
-# Chapter 76 — In-Band Latency Tracing & Budget Attribution
+# Chapter 77 — In-Band Latency Tracing & Budget Attribution
 
-> **Prerequisites:** Ch. 17 (the TSC as the stamp: `rdtscp`, cross-core comparability, TSC→ns calibration), Ch. 1 §1.2.3 (the tick-to-trade budget this chapter attributes), Ch. 34 and Ch. 37 (the SPSC ring and the Disruptor slot the trace header rides in), Ch. 51 (shared-memory rings between processes), Ch. 75 (the binary log that receives the finished trace record), Ch. 60 (PTP, the PHC and `PTP_SYS_OFFSET_PRECISE` — the bridge from your TSC to the venue's clock), Ch. 54 (the decoders that see the venue timestamp fields first), Ch. 3 and Ch. 77 §77.2.2 (percentiles are not additive).
+> **Prerequisites:** Ch. 17 (the TSC as the stamp: `rdtscp`, cross-core comparability, TSC→ns calibration), Ch. 1 §1.2.3 (the tick-to-trade budget this chapter attributes), Ch. 34 and Ch. 37 (the SPSC ring and the Disruptor slot the trace header rides in), Ch. 51 (shared-memory rings between processes), Ch. 76 (the binary log that receives the finished trace record), Ch. 60 (PTP, the PHC and `PTP_SYS_OFFSET_PRECISE` — the bridge from your TSC to the venue's clock), Ch. 54 (the decoders that see the venue timestamp fields first), Ch. 3 and Ch. 78 §78.2.2 (percentiles are not additive).
 >
-> **Leads into:** Ch. 77 (the per-stage histograms this chapter's stamps feed, the shm telemetry segment and the scraper), Ch. 83 (spike forensics starts from one trace record whose stage delta is over budget), Ch. 86 (the capstone's tick-to-trade decomposition is this chapter's output, read as a table), Appendix J.5 (the venue timestamp fields, tabulated). Ch. 75 made the hot path *record* instead of *format*; this chapter makes every message carry its own stopwatch — a correlation ID plus a vector of stage stamps — through every ring and process it crosses, so that the budget can be attributed per stage, per message, in production, and then split three ways between you, the wire and the matching engine using the timestamps the venue itself puts on the wire.
+> **Leads into:** Ch. 78 (the per-stage histograms this chapter's stamps feed, the shm telemetry segment and the scraper), Ch. 84 (spike forensics starts from one trace record whose stage delta is over budget), Ch. 87 (the capstone's tick-to-trade decomposition is this chapter's output, read as a table), Appendix J.5 (the venue timestamp fields, tabulated). Ch. 76 made the hot path *record* instead of *format*; this chapter makes every message carry its own stopwatch — a correlation ID plus a vector of stage stamps — through every ring and process it crosses, so that the budget can be attributed per stage, per message, in production, and then split three ways between you, the wire and the matching engine using the timestamps the venue itself puts on the wire.
 
 ---
 
-## 76.1 Why it matters: the budget you cannot attribute
+## 77.1 Why it matters: the budget you cannot attribute
 
-Ch. 1 §1.2.3 handed you a table: wire→host 0.5–1 µs, decode 100–400 ns, strategy 50–300 ns, risk and encode 50–200 ns, host→wire 0.4–0.8 µs. Every chapter since has optimised one row of it. Ch. 86 will close the book by measuring the whole thing wire-to-wire with NIC hardware timestamps (Ch. 60 §60.4.2). Between those two there is a hole the book has so far papered over with an assertion: *"instrument every stage boundary with a TSC stamp and keep a histogram per stage."* That sentence hides three engineering problems. First, the stages do not live in one function, or even one process — Ch. 80 split them into a feed handler, a strategy and a gateway talking through shared-memory rings — so a stamp taken in the feed handler has to *travel* to the gateway before anyone can subtract it from anything. Second, the stamps have to be joinable: the gateway must know *which* tick's decode stamp belongs to *this* order, which is a correlation problem, not a timing one. Third, the stamps are only half the picture: when a race is lost, the question the desk asks is not "where did our 1.8 µs go" but "were we slow, was the wire slow, or did the exchange's engine take 40 µs on that packet" — and the only clock that can answer that is the venue's, carried in fields (`SendingTime`, `TransactTime`, `TrdRegTSTimeIn`, the ITCH nanoseconds-since-midnight) that the decoders of Ch. 54 have been skipping over.
+Ch. 1 §1.2.3 handed you a table: wire→host 0.5–1 µs, decode 100–400 ns, strategy 50–300 ns, risk and encode 50–200 ns, host→wire 0.4–0.8 µs. Every chapter since has optimised one row of it. Ch. 87 will close the book by measuring the whole thing wire-to-wire with NIC hardware timestamps (Ch. 60 §60.4.2). Between those two there is a hole the book has so far papered over with an assertion: *"instrument every stage boundary with a TSC stamp and keep a histogram per stage."* That sentence hides three engineering problems. First, the stages do not live in one function, or even one process — Ch. 81 split them into a feed handler, a strategy and a gateway talking through shared-memory rings — so a stamp taken in the feed handler has to *travel* to the gateway before anyone can subtract it from anything. Second, the stamps have to be joinable: the gateway must know *which* tick's decode stamp belongs to *this* order, which is a correlation problem, not a timing one. Third, the stamps are only half the picture: when a race is lost, the question the desk asks is not "where did our 1.8 µs go" but "were we slow, was the wire slow, or did the exchange's engine take 40 µs on that packet" — and the only clock that can answer that is the venue's, carried in fields (`SendingTime`, `TransactTime`, `TrdRegTSTimeIn`, the ITCH nanoseconds-since-midnight) that the decoders of Ch. 54 have been skipping over.
 
-The consequence of the hole is an operational one. Without per-message attribution you have a wire-to-wire histogram (Ch. 60) whose p99.9 moved from 2.1 to 2.9 µs this morning and no way to say which stage moved it; you have Ch. 77's per-stage histograms, each recorded by the thread that owns the stage, but their percentiles cannot be added back into an end-to-end number (§77.2.2) and they cannot tell you whether *the same* messages were slow in two stages or different ones; and you have the venue's fill reports with their timestamps, which nobody compares to the host's because the clocks are in different domains. This chapter fixes all three with one small structure: a **trace header** — a correlation ID and a fixed vector of raw TSC stamps — written into the message's ring slot at the first touch and appended to at every stage boundary, so that the gateway, at TX enqueue, holds the complete timeline of that message from NIC to NIC in 48 bytes and hands it to the binary log (Ch. 75) and the histogram aggregator (Ch. 77) in one record. §76.2 defines the header and the three carriage options; §76.3 measures what it costs the hot thread and the ring (the answer is "one `rdtscp` and one extra cache line per message, measured"); §76.4 builds it, carries it across rings and processes, assigns contention-free IDs, aggregates off-path, and then opens the venue's timestamps: which fields exist on CME, Eurex and Nasdaq, what each one measures, and how to read gateway-in against matching-engine-in to separate your latency from the wire and from them. §76.4.6 adds the per-packet ledger that joins a fabric tap's capture to the host's stamps for the days when the two disagree.
+The consequence of the hole is an operational one. Without per-message attribution you have a wire-to-wire histogram (Ch. 60) whose p99.9 moved from 2.1 to 2.9 µs this morning and no way to say which stage moved it; you have Ch. 78's per-stage histograms, each recorded by the thread that owns the stage, but their percentiles cannot be added back into an end-to-end number (§78.2.2) and they cannot tell you whether *the same* messages were slow in two stages or different ones; and you have the venue's fill reports with their timestamps, which nobody compares to the host's because the clocks are in different domains. This chapter fixes all three with one small structure: a **trace header** — a correlation ID and a fixed vector of raw TSC stamps — written into the message's ring slot at the first touch and appended to at every stage boundary, so that the gateway, at TX enqueue, holds the complete timeline of that message from NIC to NIC in 48 bytes and hands it to the binary log (Ch. 76) and the histogram aggregator (Ch. 78) in one record. §77.2 defines the header and the three carriage options; §77.3 measures what it costs the hot thread and the ring (the answer is "one `rdtscp` and one extra cache line per message, measured"); §77.4 builds it, carries it across rings and processes, assigns contention-free IDs, aggregates off-path, and then opens the venue's timestamps: which fields exist on CME, Eurex and Nasdaq, what each one measures, and how to read gateway-in against matching-engine-in to separate your latency from the wire and from them. §77.4.6 adds the per-packet ledger that joins a fabric tap's capture to the host's stamps for the days when the two disagree.
 
-## 76.2 Mental model
+## 77.2 Mental model
 
-### 76.2.1 The trace header: a correlation ID and a vector of stage stamps
+### 77.2.1 The trace header: a correlation ID and a vector of stage stamps
 
 ```
    struct TraceHdr {              // 48 bytes, trivially copyable, lives in the ring slot beside the payload
@@ -30,23 +30,23 @@ The consequence of the hole is an operational one. Without per-message attributi
      └─ Ch. 60 ─┘                                                 └─ Ch. 60 ─┘
 ```
 
-Three design decisions are baked into those two lines. **The stamps are raw TSC ticks**, not nanoseconds: converting costs a multiply and a shift per stamp and, more importantly, the conversion factor belongs to the *reader* (Ch. 17 §17.4.1 — "stamp, don't format"). On one host the invariant TSC is synchronised across cores at boot (Ch. 17 §17.2.2; the kernel refuses to use `tsc` as the clocksource otherwise), so a stamp taken on the feed handler's core is directly subtractable from one taken on the gateway's core — *no* conversion happens on the hot path at all, in any process. **The vector is fixed-size** with a stage index decided at design time, not a growable list of (name, time) pairs: the header's size is a compile-time constant, the slot layout is fixed (Ch. 9), and a stage that does not run (a rejected order never reaches `t[4]`) leaves a zero the aggregator treats as "not reached". **The correlation ID is the message's own identity**, not a generated trace ID: for market data it is the venue's sequence number (unique per session per feed, already decoded in Ch. 55's gap detector), and for an order it is the `ClOrdID` you were going to generate anyway (§76.4.3). Nothing is allocated, nothing is looked up, nothing is hashed on the hot path.
+Three design decisions are baked into those two lines. **The stamps are raw TSC ticks**, not nanoseconds: converting costs a multiply and a shift per stamp and, more importantly, the conversion factor belongs to the *reader* (Ch. 17 §17.4.1 — "stamp, don't format"). On one host the invariant TSC is synchronised across cores at boot (Ch. 17 §17.2.2; the kernel refuses to use `tsc` as the clocksource otherwise), so a stamp taken on the feed handler's core is directly subtractable from one taken on the gateway's core — *no* conversion happens on the hot path at all, in any process. **The vector is fixed-size** with a stage index decided at design time, not a growable list of (name, time) pairs: the header's size is a compile-time constant, the slot layout is fixed (Ch. 9), and a stage that does not run (a rejected order never reaches `t[4]`) leaves a zero the aggregator treats as "not reached". **The correlation ID is the message's own identity**, not a generated trace ID: for market data it is the venue's sequence number (unique per session per feed, already decoded in Ch. 55's gap detector), and for an order it is the `ClOrdID` you were going to generate anyway (§77.4.3). Nothing is allocated, nothing is looked up, nothing is hashed on the hot path.
 
-### 76.2.2 In-band vs out-of-band carriage
+### 77.2.2 In-band vs out-of-band carriage
 
 The header has to get from the feed handler's core to the gateway's core. There are three ways, and the choice is a cache-line budget (Ch. 7, 33):
 
-- **In-band:** the header is a field of the ring slot (Ch. 34 §34.4.1's `Slot`, Ch. 37's event), written by the producer next to the payload and read by the consumer in the same pass. A 40-byte book delta plus a 48-byte header no longer fits one 64-byte line — the slot becomes 128 bytes — so the producer writes and the consumer reads *two* adjacent lines per message instead of one. The adjacent-line prefetcher (Ch. 10) fetches the pair together, and the hardware does exactly the same amount of coherence work it would for any 128-byte slot. This is the design the chapter recommends, and §76.3 shows the second line is the whole cost.
+- **In-band:** the header is a field of the ring slot (Ch. 34 §34.4.1's `Slot`, Ch. 37's event), written by the producer next to the payload and read by the consumer in the same pass. A 40-byte book delta plus a 48-byte header no longer fits one 64-byte line — the slot becomes 128 bytes — so the producer writes and the consumer reads *two* adjacent lines per message instead of one. The adjacent-line prefetcher (Ch. 10) fetches the pair together, and the hardware does exactly the same amount of coherence work it would for any 128-byte slot. This is the design the chapter recommends, and §77.3 shows the second line is the whole cost.
 - **Out-of-band side table:** the slot stays 64 bytes and carries a 4-byte index into a separate array of `TraceHdr`. Same two lines of traffic per message — but the second one is in a *different* region with its own cache set and its own TLB entry, and a consumer that is more than a few messages behind finds the side-table line already evicted from the producer's L2 and has to pay a core-to-core transfer for it separately from the slot (Ch. 7 §7.2.3, Appendix E). It saves nothing and adds a dependent load; use it only when you cannot change the slot layout (a vendor-defined ring, Ch. 64's ef_vi descriptors).
-- **Out-of-band per-stage logging:** no header at all; every stage writes `(corr, stage, tsc)` into its own thread's binary log (Ch. 75) and the join happens offline. Zero bytes on the ring, but *every stage* now does a log reserve-and-publish per message (~5–20 ns each — Ch. 75 §75.3) instead of one store, the join is an offline sort-merge over gigabytes, and nothing is attributable *live*. It is the right design for a stage you cannot touch (a third-party library) and the wrong one for the pipeline you own.
+- **Out-of-band per-stage logging:** no header at all; every stage writes `(corr, stage, tsc)` into its own thread's binary log (Ch. 76) and the join happens offline. Zero bytes on the ring, but *every stage* now does a log reserve-and-publish per message (~5–20 ns each — Ch. 76 §76.3) instead of one store, the join is an offline sort-merge over gigabytes, and nothing is attributable *live*. It is the right design for a stage you cannot touch (a third-party library) and the wrong one for the pipeline you own.
 
 The header is written by exactly one thread at a time — the producer of the ring it currently sits in — so there is no false sharing on it (Ch. 33); it changes hands with the slot's publish/acquire pair (Ch. 34) and needs no additional ordering.
 
-### 76.2.3 Causality across processes: tick → decision → order
+### 77.2.3 Causality across processes: tick → decision → order
 
 Market data and orders are two message streams with two different correlation IDs, and the question "how long from *this* tick to *that* order" needs a link between them. The link is a **parent ID**: when the strategy decides on an order in response to a tick, the order's trace header is initialised with `t[0..2]` *copied from the tick's header* and the tick's `corr` stored beside the order's own `ClOrdID`. From the gateway's point of view the order record then contains the complete causal chain: the venue sequence number that triggered it, the first-touch stamp of that packet, and every stage until TX. A decision that consumes *several* ticks (a book rebuild, a signal over a window) names the *last* one — the message whose arrival made the decision fire — because tick-to-trade is defined from the triggering tick (Ch. 1 §1.2.3). Orders with no parent (a timer-driven cancel, an operator command) carry `parent = 0` and are attributed from `t[2]` only.
 
-### 76.2.4 Three clocks on one message
+### 77.2.4 Three clocks on one message
 
 A message's life is stamped by three clocks that must be reconciled off-path, never on it:
 
@@ -55,7 +55,7 @@ A message's life is stamped by three clocks that must be reconciled off-path, ne
    ─────────────── ─────────────────────────────────── ────────────────────────── ───────────────────────────────────────────
    venue clock     SendingTime, TransactTime,          1 ns fields; venue PTP to   venue egress → your NIC (one-way feed latency);
                    TrdRegTSTimeIn/Out, ITCH ns-since-  UTC (MiFID II RTS 25:      gateway-in → engine → gateway-out (their time);
-                   midnight (§76.4.5)                   ≤ 100 µs divergence,       your TX → gateway-in (the wire, order side)
+                   midnight (§77.4.5)                   ≤ 100 µs divergence,       your TX → gateway-in (the wire, order side)
                                                         1 µs granularity for HFT)
    NIC PHC         hardware RX/TX timestamps (Ch. 57,   ~10 ns; PTP to the same    wire-to-wire tick-to-trade; the bridge to the
                    60)                                  UTC via the grandmaster    venue clock (both are UTC)
@@ -64,9 +64,9 @@ A message's life is stamped by three clocks that must be reconciled off-path, ne
                                                         PTP_SYS_OFFSET_PRECISE     PTP_SYS_OFFSET_PRECISE (Ch. 60 §60.4.1)
 ```
 
-Inside the host, TSC stamps are compared to TSC stamps. At the edges, the NIC's hardware stamps are compared to each other (Ch. 60 §60.4.2). The venue's timestamps are compared to the NIC's — both UTC, both PTP-disciplined — and never to the TSC directly. The reader (the §76.4.4 aggregator) converts TSC→PHC once per record using the cross-timestamp the host publishes (Ch. 60 §60.4.1), with the error bound that cross-timestamp carries. §76.4.5's attribution method falls straight out of this table.
+Inside the host, TSC stamps are compared to TSC stamps. At the edges, the NIC's hardware stamps are compared to each other (Ch. 60 §60.4.2). The venue's timestamps are compared to the NIC's — both UTC, both PTP-disciplined — and never to the TSC directly. The reader (the §77.4.4 aggregator) converts TSC→PHC once per record using the cross-timestamp the host publishes (Ch. 60 §60.4.1), with the error bound that cross-timestamp carries. §77.4.5's attribution method falls straight out of this table.
 
-## 76.3 Measure it: what the stamp and the header cost
+## 77.3 Measure it: what the stamp and the header cost
 
 *Toolchain and machine: Appendix L.3. The numbers below were produced by the listing on a 4-vCPU Intel Xeon VM (TSC 2.70 GHz, no PMU exposed) with GCC 13.3, `-O2 -std=c++20 -march=native`, Linux 6.18; they are the hot thread's own CPU cost, which the VM measures reliably. Cross-core transfer costs are the reference machine's (Appendix E) and are labelled representative.*
 
@@ -118,16 +118,16 @@ int main() {
    B − A: the header's marginal cost                                                      ≈ 47 cycles ≈ 1 rdtscp
 ```
 
-Read it with the stamp cost in hand. On this VM an `rdtscp` is ~46 cycles (17 ns at 2.7 GHz — the virtualised TSC read is slower than the 25–35 cycles Ch. 17 §17.3 measures on the bare reference machine; representative there: 10–13 ns), and *the entire marginal cost of the in-band header is one extra stamp*: the three extra stores (`corr`, `t[0]`, `t[1]`) and the second cache line are free in the shadow of the `rdtscp`, because the stores retire asynchronously through the store buffer (Ch. 11) and the line is L2-resident and written in full. The out-of-band table costs the same on the producer and, as §76.2.2 argued, more on the consumer, which has to fetch two unrelated lines. The honest conclusion: **a stage boundary costs one `rdtscp`, and the header costs nothing beyond its stamps**, so a five-stage header is ~5 × 10–17 ns ≈ 50–85 ns of a 2 µs tick-to-trade — 3–4 %, all of it in the counter reads. Use the unfenced `rdtsc` for the *intermediate* stamps if that 3 % matters (Ch. 17 §17.2.1: the reordering window is a few instructions, far below the stage granularity you are attributing) and keep `rdtscp` at the two edges.
+Read it with the stamp cost in hand. On this VM an `rdtscp` is ~46 cycles (17 ns at 2.7 GHz — the virtualised TSC read is slower than the 25–35 cycles Ch. 17 §17.3 measures on the bare reference machine; representative there: 10–13 ns), and *the entire marginal cost of the in-band header is one extra stamp*: the three extra stores (`corr`, `t[0]`, `t[1]`) and the second cache line are free in the shadow of the `rdtscp`, because the stores retire asynchronously through the store buffer (Ch. 11) and the line is L2-resident and written in full. The out-of-band table costs the same on the producer and, as §77.2.2 argued, more on the consumer, which has to fetch two unrelated lines. The honest conclusion: **a stage boundary costs one `rdtscp`, and the header costs nothing beyond its stamps**, so a five-stage header is ~5 × 10–17 ns ≈ 50–85 ns of a 2 µs tick-to-trade — 3–4 %, all of it in the counter reads. Use the unfenced `rdtsc` for the *intermediate* stamps if that 3 % matters (Ch. 17 §17.2.1: the reordering window is a few instructions, far below the stage granularity you are attributing) and keep `rdtscp` at the two edges.
 
-What the VM cannot measure is the consumer's side when the ring crosses cores: the 128-byte slot moves two lines core-to-core instead of one. On the reference machine a line that was just written by another core costs ~70–100 ns to pull (Appendix E, "cache-line transfer between cores"), the adjacent-line prefetcher fetches the pair on the first touch, and the pair is consumed together, so the representative added latency at the consumer is one overlapped line transfer, ~20–40 ns — the same cost a 128-byte payload would have, and smaller than a single `rdtscp`. §77.3's measurement of the telemetry histogram record (a few stores) is the analogous number on the aggregation side.
+What the VM cannot measure is the consumer's side when the ring crosses cores: the 128-byte slot moves two lines core-to-core instead of one. On the reference machine a line that was just written by another core costs ~70–100 ns to pull (Appendix E, "cache-line transfer between cores"), the adjacent-line prefetcher fetches the pair on the first touch, and the pair is consumed together, so the representative added latency at the consumer is one overlapped line transfer, ~20–40 ns — the same cost a 128-byte payload would have, and smaller than a single `rdtscp`. §78.3's measurement of the telemetry histogram record (a few stores) is the analogous number on the aggregation side.
 
-## 76.4 Techniques
+## 77.4 Techniques
 
-### 76.4.1 The trace header and the stamping points
+### 77.4.1 The trace header and the stamping points
 
 ```cpp
-// trace.hpp — the in-band trace header and its stamping points; shared by every process in the pipeline (Ch. 80).
+// trace.hpp — the in-band trace header and its stamping points; shared by every process in the pipeline (Ch. 81).
 #pragma once
 #include <cstdint>
 #include <x86intrin.h>
@@ -149,15 +149,15 @@ inline void begin(Hdr& h, std::uint64_t corr, std::uint64_t t0) { h.corr = corr;
                                                                    for (int i = 1; i < kStages; ++i) h.t[i] = 0; }
 template <Stage S> inline void mark(Hdr& h) { static_assert(S > FirstTouch && S < TxEnqueued); h.t[S] = inner_stamp(); }
 inline void end(Hdr& h) { h.t[TxEnqueued] = edge_stamp(); }
-inline void derive(Hdr& order, const Hdr& tick, std::uint64_t cl_ord_id) {    // §76.2.3: the causal link
+inline void derive(Hdr& order, const Hdr& tick, std::uint64_t cl_ord_id) {    // §77.2.3: the causal link
     order = tick; order.parent = tick.corr; order.corr = cl_ord_id;              // t[0..2] inherited, t[3..4] still 0
 }
 }  // namespace trace
 ```
 
-The stamping discipline: `begin` runs where the packet is first touched — in the feed handler's poll loop, *after* the NIC descriptor says the frame is complete and *before* the decoder runs, which is the earliest software point and the one the hardware RX stamp (Ch. 57 §57.4.2) is compared against to measure DMA-to-first-touch (Ch. 58, 68). `mark<Decoded>` follows the Ch. 54 decoder, `mark<Decided>` the strategy's decision, `mark<RiskOk>` the pre-trade checks (Ch. 78); `end` is taken by the gateway immediately after the order frame is handed to the NIC TX ring (Ch. 57, 61, 64), so that `t_hw_tx − t[4]` is the NIC's own egress latency and nothing else. Stamps that would land inside a stage (inside the book update, say) are not stage stamps; if you need them, they are Ch. 83's flight-recorder records, not header fields.
+The stamping discipline: `begin` runs where the packet is first touched — in the feed handler's poll loop, *after* the NIC descriptor says the frame is complete and *before* the decoder runs, which is the earliest software point and the one the hardware RX stamp (Ch. 57 §57.4.2) is compared against to measure DMA-to-first-touch (Ch. 58, 68). `mark<Decoded>` follows the Ch. 54 decoder, `mark<Decided>` the strategy's decision, `mark<RiskOk>` the pre-trade checks (Ch. 79); `end` is taken by the gateway immediately after the order frame is handed to the NIC TX ring (Ch. 57, 61, 64), so that `t_hw_tx − t[4]` is the NIC's own egress latency and nothing else. Stamps that would land inside a stage (inside the book update, say) are not stage stamps; if you need them, they are Ch. 84's flight-recorder records, not header fields.
 
-### 76.4.2 Carrying the header through rings, Disruptor slots and shm segments
+### 77.4.2 Carrying the header through rings, Disruptor slots and shm segments
 
 The header travels in the slot. For Ch. 34's SPSC ring and Ch. 51's cross-process ring the slot type simply gains a `trace::Hdr` member and pads to 128 bytes:
 
@@ -175,35 +175,35 @@ struct alignas(128) OrderSlot {         // strategy -> gateway
 static_assert(sizeof(MdSlot) == 128 && sizeof(OrderSlot) == 128);
 ```
 
-Three details make this work across *processes* (Ch. 80) rather than threads. The header holds **no pointers** (Ch. 80 §80.5: raw pointers in shared memory are garbage in the other process) — it is six integers. The stamps are **raw TSC**, valid in any process on the host because it is one counter (§76.2.1); a pipeline that spans two hosts (a remote risk check, Ch. 65) converts at the boundary using each host's PHC cross-timestamp (Ch. 60 §60.4.1) and carries *nanoseconds UTC* from there — the header's integers are then UTC ns, and the stage that crosses the host boundary is attributed in UTC. And the header is **copied, not shared**, at every ring hop: the strategy reads the `MdSlot`, derives the `OrderSlot` header from it and publishes the new slot — the Disruptor's multi-stage-on-one-ring design (Ch. 37 §37.4.1) is the exception, where the stages append to the *same* slot's header in sequence-barrier order and the header's single-writer-at-a-time property comes from the barrier.
+Three details make this work across *processes* (Ch. 81) rather than threads. The header holds **no pointers** (Ch. 81 §81.5: raw pointers in shared memory are garbage in the other process) — it is six integers. The stamps are **raw TSC**, valid in any process on the host because it is one counter (§77.2.1); a pipeline that spans two hosts (a remote risk check, Ch. 65) converts at the boundary using each host's PHC cross-timestamp (Ch. 60 §60.4.1) and carries *nanoseconds UTC* from there — the header's integers are then UTC ns, and the stage that crosses the host boundary is attributed in UTC. And the header is **copied, not shared**, at every ring hop: the strategy reads the `MdSlot`, derives the `OrderSlot` header from it and publishes the new slot — the Disruptor's multi-stage-on-one-ring design (Ch. 37 §37.4.1) is the exception, where the stages append to the *same* slot's header in sequence-barrier order and the header's single-writer-at-a-time property comes from the barrier.
 
 The message's ID across hops is the `corr` field, so the *feed handler* decides the market-data correlation ID — the venue sequence number straight from the packet header (MoldUDP64, EOBI, MDP 3.0 — Appendix J.5), which Ch. 55's gap detector has already parsed. No hash, no map, no counter.
 
-### 76.4.3 Contention-free correlation IDs and the tick → order link
+### 77.4.3 Contention-free correlation IDs and the tick → order link
 
 Orders need an ID you generate: the `ClOrdID` the venue echoes back on every acknowledgement, fill and reject. Make it do double duty as the trace ID:
 
 ```cpp
 struct ClOrdIdGen {                                 // one per strategy *process*; never shared, never atomic
-    std::uint64_t next;                             // high 16 bits: shard id (Ch. 80 §80.4.5); low 48: per-process counter
+    std::uint64_t next;                             // high 16 bits: shard id (Ch. 81 §81.4.5); low 48: per-process counter
     explicit ClOrdIdGen(std::uint16_t shard, std::uint64_t restart_epoch)
         : next((std::uint64_t(shard) << 48) | (restart_epoch << 32)) {}    // epoch keeps IDs unique across restarts
     std::uint64_t operator()() { return next++; }   // one add; the venue requires uniqueness per session, this gives it per fleet
 };
 ```
 
-A shared atomic counter across strategy processes would put a contended line on the order path (Ch. 33 — a ~70–100 ns transfer per order on the reference machine); a per-process counter with a shard prefix is one register increment and still unique fleet-wide. The restart epoch (the supervisor's restart count for this shard — Ch. 80 §80.4.3) keeps a restarted process from re-issuing IDs the venue has seen. For venues whose `ClOrdID` is a string (FIX tag 11) encode the integer as fixed-width hex; for iLink 3's `ClOrdID` (20-char) and OUCH's `Order Token` (14 bytes) the same. The gateway logs `(ClOrdID, parent seq, t[0..4], t_hw_tx)` once per order; when the venue's acknowledgement arrives, the gateway logs `(ClOrdID, venue fields..., t_hw_rx_ack)` as a second record with the same `corr` — and the two join offline on `corr` without any state kept on the hot path.
+A shared atomic counter across strategy processes would put a contended line on the order path (Ch. 33 — a ~70–100 ns transfer per order on the reference machine); a per-process counter with a shard prefix is one register increment and still unique fleet-wide. The restart epoch (the supervisor's restart count for this shard — Ch. 81 §81.4.3) keeps a restarted process from re-issuing IDs the venue has seen. For venues whose `ClOrdID` is a string (FIX tag 11) encode the integer as fixed-width hex; for iLink 3's `ClOrdID` (20-char) and OUCH's `Order Token` (14 bytes) the same. The gateway logs `(ClOrdID, parent seq, t[0..4], t_hw_tx)` once per order; when the venue's acknowledgement arrives, the gateway logs `(ClOrdID, venue fields..., t_hw_rx_ack)` as a second record with the same `corr` — and the two join offline on `corr` without any state kept on the hot path.
 
-### 76.4.4 Off-path aggregation: from stamps to per-stage histograms
+### 77.4.4 Off-path aggregation: from stamps to per-stage histograms
 
 The gateway, at `end()`, hands the finished header to two consumers, both off the hot path:
 
-- **The binary log (Ch. 75)** receives the raw record — `{corr, parent, t[0..4], t_hw_rx, t_hw_tx}` — as one 80-byte log entry at the site-ID cost Ch. 75 §75.3 measured (~5–20 ns). This is the *evidence*: every message's complete timeline, decoded offline, joinable to the capture (Ch. 82) by `corr` and to the venue's fills by `ClOrdID`. It is what Ch. 83 reads when one message's stage delta is over budget.
-- **The histogram aggregator (Ch. 77)** receives *deltas*: `t[i+1] − t[i]` for each adjacent pair that was reached, plus `t[4] − t[0]` end-to-end, each recorded into its own HdrHistogram in the shm telemetry segment (Ch. 77 §77.4.1). Keep the end-to-end histogram as its own series — per-stage percentiles do not sum to the end-to-end percentile (Ch. 77 §77.2.2), and the gap between Σ p99.9(stage) and p99.9(end-to-end) is itself a diagnostic: a large gap means the slow messages are slow in *different* stages (independent noise); a small gap means one mechanism stretches every stage (a frequency drop, an SMI — Ch. 84).
+- **The binary log (Ch. 76)** receives the raw record — `{corr, parent, t[0..4], t_hw_rx, t_hw_tx}` — as one 80-byte log entry at the site-ID cost Ch. 76 §76.3 measured (~5–20 ns). This is the *evidence*: every message's complete timeline, decoded offline, joinable to the capture (Ch. 83) by `corr` and to the venue's fills by `ClOrdID`. It is what Ch. 84 reads when one message's stage delta is over budget.
+- **The histogram aggregator (Ch. 78)** receives *deltas*: `t[i+1] − t[i]` for each adjacent pair that was reached, plus `t[4] − t[0]` end-to-end, each recorded into its own HdrHistogram in the shm telemetry segment (Ch. 78 §78.4.1). Keep the end-to-end histogram as its own series — per-stage percentiles do not sum to the end-to-end percentile (Ch. 78 §78.2.2), and the gap between Σ p99.9(stage) and p99.9(end-to-end) is itself a diagnostic: a large gap means the slow messages are slow in *different* stages (independent noise); a small gap means one mechanism stretches every stage (a frequency drop, an SMI — Ch. 85).
 
-Where to do the subtraction matters: the gateway thread does the six subtractions and six histogram `record` calls (each a few stores, Ch. 77 §77.3) — ~30–60 ns — or it logs the raw record and a housekeeping thread subtracts. Choose the former only if the gateway's budget has room; the latter costs one log entry and moves everything else off-core.
+Where to do the subtraction matters: the gateway thread does the six subtractions and six histogram `record` calls (each a few stores, Ch. 78 §78.3) — ~30–60 ns — or it logs the raw record and a housekeeping thread subtracts. Choose the former only if the gateway's budget has room; the latter costs one log entry and moves everything else off-core.
 
-### 76.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
+### 77.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
 
 Every major venue timestamps what it sends you. The fields below are the ones that matter; Appendix J.5 tabulates them per protocol with offsets.
 
@@ -235,15 +235,15 @@ With your NIC's hardware RX/TX stamps on the same UTC (Ch. 60) the attribution i
 
 The caveats are not footnotes. **Both sides must be disciplined to the same UTC**: MiFID II RTS 25 requires HFT-class participants and venues to stay within 100 µs of UTC with 1 µs granularity, and most venues do far better — but 100 µs is the *guarantee*, and a one-way feed latency computed against a venue clock that is 30 µs off is a 30 µs lie. Verify by *symmetry*: with the venue's `TrdRegTSTimeIn` and `TrdRegTSTimeOut` and your own `t_hw_tx`/`t_hw_rx` you have four stamps on two clocks, and `(TimeIn − t_tx) − (t_rx_ack − TimeOut)` should be near zero on a symmetric path; a persistent offset is clock error, not asymmetry (the same argument PTP makes about its own path — Ch. 60 §60.5). **Resolution ≠ accuracy**: a nanosecond field written by a software gateway from `clock_gettime` is good to the gateway host's PTP (~hundreds of ns to a few µs), not to the nanosecond. **Egress ≠ wire**: `SendingTime` is taken when the feed component *handed the packet to its stack*, not when the first bit left the venue's switch port; the venue's own egress jitter is inside your "one-way feed latency". And **per-gateway, per-partition**: the venue's stamps come from the machine that handled *your* session or *your* products' partition; compare like with like.
 
-### 76.4.6 The per-packet ledger: joining a tap capture to the host's stamps
+### 77.4.6 The per-packet ledger: joining a tap capture to the host's stamps
 
-When the host's numbers and the venue's disagree, the arbiter is a fabric tap (Ch. 62 §62.4.3, Ch. 82 §82.4.1) that timestamps every frame on its own PTP-disciplined clock as it passes. Join it to the trace record with one script per side:
+When the host's numbers and the venue's disagree, the arbiter is a fabric tap (Ch. 62 §62.4.3, Ch. 83 §83.4.1) that timestamps every frame on its own PTP-disciplined clock as it passes. Join it to the trace record with one script per side:
 
 ```bash
 # tap side: one line per frame — tap timestamp, MoldUDP64 sequence number (bytes 10–17 of the UDP payload), length
 tshark -r tap.pcapng -Y 'udp.port==26477' -T fields -e frame.time_epoch -e data.data -e frame.len \
   | awk '{ seq = strtonum("0x" substr($2, 21, 16)); printf "%s %d %s\n", $1, seq, $3 }' > tap.ledger
-# host side: the gateway's trace records, decoded from the Ch. 75 binary log, one line per order:
+# host side: the gateway's trace records, decoded from the Ch. 76 binary log, one line per order:
 #   corr parent t_hw_rx(UTC ns) t0..t4 (TSC) t_hw_tx(UTC ns)  — with TSC converted by the Ch. 60 §60.4.1 cross-timestamp
 blogdecode trace.blog --tsc2utc=cross.json > host.ledger
 # join on the venue sequence number (the tick) and on ClOrdID (the order), then difference adjacent columns:
@@ -253,7 +253,7 @@ join -1 2 -2 2 <(sort -k2 tap.ledger) <(sort -k2 host.ledger) | awk '{ printf "s
 
 `pcapng` carries each interface's timestamp resolution (`if_tsresol`) and the capture hardware's PTP state in its interface block; `tshark -T fields -e frame.time_epoch` emits them at the stored resolution. The join key is the venue sequence number for market data (it is in both the frame and the header) and the `ClOrdID` for orders (it is in the frame's payload and in the header). The resulting ledger has one row per message with up to eight stamps on it — tap-in, NIC-RX, first touch, decoded, decided, risk, TX-enqueued, NIC-TX, tap-out — and the differences between adjacent columns *are* the attribution: tap-in→NIC-RX is the last switch hop plus your NIC's ingress (Ch. 57 §57.3 measures the NIC alone, Ch. 62 the hop), NIC-RX→first-touch is DMA, DDIO and the poll loop's reaction (Ch. 58, 68), the middle columns are the header's stages, NIC-TX→tap-out is your egress hop. For an FPGA stage on the path (Ch. 71) the fabric's own stage stamps, exported in a trailer the host strips, slot into the same row; Ch. 71 §71.4 notes the trailer, this ledger is where it is read.
 
-## 76.5 Verify the codegen: a stage boundary is a counter read and a store
+## 77.5 Verify the codegen: a stage boundary is a counter read and a store
 
 ```
    $ g++ -O2 -std=c++20 -march=icelake-server -c trace_use.cpp && objdump -d --no-show-raw-insn -C trace_use.o
@@ -269,30 +269,30 @@ join -1 2 -2 2 <(sort -k2 tap.ledger) <(sort -k2 host.ledger) | awk '{ printf "s
       mov    %rax,0x30(%rdi)             # hdr.t[TxEnqueued]
 ```
 
-Three instructions and a store per stage, exactly as §76.3 predicted (GCC 13.3 and Clang 18.1, `-O2 -march=icelake-server`, checked with `objdump`); `trace::derive` is two 32-byte `vmovdqu` copies plus two scalar stores (56 bytes copied, `parent` and `corr` overwritten) in both compilers. Two things to watch in *your* build: GCC wraps the `rdtscp` out-parameter in a stack-protector canary load/compare (`%fs:0x28`) unless the TU is built `-fno-stack-protector` — the same artefact Ch. 75 §75.5 noted on the logger — and the `rdtscp` form is what makes `end()` ordered after the TX ring's doorbell store only if an `mfence`/release precedes it (Ch. 17 §17.2.1: `rdtscp` waits for prior *loads*, not stores). The one thing to check in *your* build is that `Hdr` sits at offset 0 of a 128-byte-aligned slot (`static_assert(offsetof(MdSlot, tr) == 0)`), so the six stamps and the correlation ID share the slot's first line and the payload the second: a header that straddles the line boundary doubles the consumer's dependent loads for no reason (Ch. 9 §9.4).
+Three instructions and a store per stage, exactly as §77.3 predicted (GCC 13.3 and Clang 18.1, `-O2 -march=icelake-server`, checked with `objdump`); `trace::derive` is two 32-byte `vmovdqu` copies plus two scalar stores (56 bytes copied, `parent` and `corr` overwritten) in both compilers. Two things to watch in *your* build: GCC wraps the `rdtscp` out-parameter in a stack-protector canary load/compare (`%fs:0x28`) unless the TU is built `-fno-stack-protector` — the same artefact Ch. 76 §76.5 noted on the logger — and the `rdtscp` form is what makes `end()` ordered after the TX ring's doorbell store only if an `mfence`/release precedes it (Ch. 17 §17.2.1: `rdtscp` waits for prior *loads*, not stores). The one thing to check in *your* build is that `Hdr` sits at offset 0 of a 128-byte-aligned slot (`static_assert(offsetof(MdSlot, tr) == 0)`), so the six stamps and the correlation ID share the slot's first line and the payload the second: a header that straddles the line boundary doubles the consumer's dependent loads for no reason (Ch. 9 §9.4).
 
-## 76.6 Pitfalls & anti-patterns
+## 77.6 Pitfalls & anti-patterns
 
 - **Converting to nanoseconds on the hot path.** A multiply-shift per stamp is cheap, but it bakes the TSC frequency into the record and makes a recalibration (Ch. 17 §17.4.2) silently wrong for everything already logged. Stamp raw ticks; convert in the reader with the calibration that was current *at that time* (Ch. 17's `tsc_mult`/`tsc_shift` from the vDSO data, or the PTP cross-timestamp).
 - **Comparing TSC to the venue's clock.** The TSC is not UTC. Compare venue stamps to NIC hardware stamps (both UTC); bridge TSC→PHC once per record with `PTP_SYS_OFFSET_PRECISE` (Ch. 60 §60.4.1) and carry its error bound. A "feed latency" of −2 µs is this bug, not time travel.
-- **A generated trace ID.** A UUID, a hash of the payload, or a shared atomic counter — all of them cost more than the stamps and none is needed: the venue sequence number and the `ClOrdID` already identify the message. If you must synthesise an ID, make it per-process (§76.4.3).
-- **A growable list of (name, time) pairs.** Variable-size headers break the fixed slot layout (Ch. 9), need a length field and a bounds check per append, and tempt every stage to add "just one more" stamp until the header is a log. Fixed vector, design-time stage enum; everything else is Ch. 83's flight recorder.
+- **A generated trace ID.** A UUID, a hash of the payload, or a shared atomic counter — all of them cost more than the stamps and none is needed: the venue sequence number and the `ClOrdID` already identify the message. If you must synthesise an ID, make it per-process (§77.4.3).
+- **A growable list of (name, time) pairs.** Variable-size headers break the fixed slot layout (Ch. 9), need a length field and a bounds check per append, and tempt every stage to add "just one more" stamp until the header is a log. Fixed vector, design-time stage enum; everything else is Ch. 84's flight recorder.
 - **Stamping inside a stage.** A stamp around the book update's inner loop is not a stage boundary; it inflates the header and, taken with `rdtscp`, serialises a loop that Ch. 11 taught you to keep in flight. Stage stamps belong at ring hops and at the two NIC edges.
-- **Adding per-stage percentiles into an end-to-end number.** Ch. 77 §77.2.2: percentiles are not additive. Record the end-to-end delta as its own histogram and read the Σ-vs-end-to-end gap as a signal (§76.4.4).
-- **Trusting a venue timestamp's resolution as its accuracy.** A nanosecond field from a software gateway is a microsecond-class number; a `SendingTime` is an egress-to-stack time, not a wire time; the venue's clock may be anywhere inside its stated tolerance (§76.4.5). Verify with the symmetry check before you report a one-way number to anyone.
-- **The header as the only evidence.** Five stamps say *where* the time went, not *why*. The why is Ch. 83: the flight recorder frozen on the over-budget record, the kernel trace, the host counters — all keyed by the same `corr`.
+- **Adding per-stage percentiles into an end-to-end number.** Ch. 78 §78.2.2: percentiles are not additive. Record the end-to-end delta as its own histogram and read the Σ-vs-end-to-end gap as a signal (§77.4.4).
+- **Trusting a venue timestamp's resolution as its accuracy.** A nanosecond field from a software gateway is a microsecond-class number; a `SendingTime` is an egress-to-stack time, not a wire time; the venue's clock may be anywhere inside its stated tolerance (§77.4.5). Verify with the symmetry check before you report a one-way number to anyone.
+- **The header as the only evidence.** Five stamps say *where* the time went, not *why*. The why is Ch. 84: the flight recorder frozen on the over-budget record, the kernel trace, the host counters — all keyed by the same `corr`.
 - **Letting the header leak onto the wire.** The trace header is host-internal; the encoder (Ch. 54) must not copy it into the order frame (one venue's message-length check rejects it, another's silently accepts 56 bytes of your timing as padding). The slot layout keeps it separate from the payload; the encoder takes `&slot.o`, never `&slot`.
 
-## 76.7 Exercises & checklist
+## 77.7 Exercises & checklist
 
 **Exercises**
 
 1. Rebuild `tracehdr1.cpp` with `rdtsc` for the intermediate stamps and `rdtscp` only at the edges; measure the delta. Then move `TraceHdr` to the *end* of the 128-byte slot and measure a two-thread version (producer on one core, consumer on another, ring wrapping) with the Ch. 3 harness: does the consumer's dequeue cost change when the header and the payload straddle the line boundary?
-2. Add `trace::Hdr` to Ch. 34's SPSC ring and Ch. 51's cross-process ring, with `static_assert`s on size and offset. Run the Ch. 80 three-process pipeline and verify, from the gateway's log alone, that `t[0] < t[1] < t[2] < t[3] < t[4]` for every order and that `parent` names a sequence number that the feed handler logged.
-3. Build the aggregator: six HdrHistograms (five stage deltas + end-to-end) in the Ch. 77 segment, fed by the gateway. Replay a captured microburst (Ch. 82) and report Σ p99.9(stage) against p99.9(end-to-end). Explain the gap.
+2. Add `trace::Hdr` to Ch. 34's SPSC ring and Ch. 51's cross-process ring, with `static_assert`s on size and offset. Run the Ch. 81 three-process pipeline and verify, from the gateway's log alone, that `t[0] < t[1] < t[2] < t[3] < t[4]` for every order and that `parent` names a sequence number that the feed handler logged.
+3. Build the aggregator: six HdrHistograms (five stage deltas + end-to-end) in the Ch. 78 segment, fed by the gateway. Replay a captured microburst (Ch. 83) and report Σ p99.9(stage) against p99.9(end-to-end). Explain the gap.
 4. Decode `SendingTime`/`TransactTime` (CME MDP 3.0) or `TransactTime` (EOBI) in your Ch. 54 decoder and plot `t_hw_rx − SendingTime` for one session. Identify the three regimes you see (pre-open, open, continuous) and the spikes; for each spike, check whether the neighbouring packets moved too (your side) or not (theirs).
-5. With an order-entry simulator that echoes `TrdRegTSTimeIn`/`TimeOut` (or a venue test environment), implement the symmetry check of §76.4.5 and inject a 20 µs offset into the simulated venue clock. Show that the check detects it and the raw one-way numbers do not.
-6. Build the §76.4.6 ledger from a `pcapng` taken on a mirror port (or a software `tcpdump -j adapter_unsynced` on a second host as a stand-in) and the gateway's log. Sort by tap→NIC delta; what is the floor, and is it the switch hop Ch. 62 measured?
+5. With an order-entry simulator that echoes `TrdRegTSTimeIn`/`TimeOut` (or a venue test environment), implement the symmetry check of §77.4.5 and inject a 20 µs offset into the simulated venue clock. Show that the check detects it and the raw one-way numbers do not.
+6. Build the §77.4.6 ledger from a `pcapng` taken on a mirror port (or a software `tcpdump -j adapter_unsynced` on a second host as a stand-in) and the gateway's log. Sort by tap→NIC delta; what is the floor, and is it the switch hop Ch. 62 measured?
 
 **Checklist**
 
@@ -300,13 +300,13 @@ Three instructions and a store per stage, exactly as §76.3 predicted (GCC 13.3 
 - [ ] Stamping points: first touch (edge, `rdtscp`), decoded, decided, risk-ok (inner, `rdtsc`), TX-enqueued (edge); nothing inside a stage.
 - [ ] Slot is 128 bytes, header at offset 0, `static_assert`ed; the encoder never sees the header.
 - [ ] `ClOrdID` = shard ‖ restart-epoch ‖ per-process counter; no shared atomics on the order path.
-- [ ] Gateway logs the raw record (Ch. 75) *and* feeds six histograms (Ch. 77); end-to-end kept as its own series.
+- [ ] Gateway logs the raw record (Ch. 76) *and* feeds six histograms (Ch. 78); end-to-end kept as its own series.
 - [ ] TSC→UTC conversion only in the reader, via the published cross-timestamp with its error bound (Ch. 60 §60.4.1).
 - [ ] Venue fields decoded and stored: `SendingTime`/`TransactTime`, `TrdRegTS*`, ITCH/OUCH timestamps (Appendix J.5); one-way feed latency and wire-out plotted per line and per session.
-- [ ] Symmetry check running on the order path; a persistent offset is a clock alarm (Ch. 60, 84).
+- [ ] Symmetry check running on the order path; a persistent offset is a clock alarm (Ch. 60, 85).
 - [ ] A tap ledger script exists and has been run once against a real capture, so the day you need it is not the day you write it.
 
-## 76.8 References
+## 77.8 References
 
 1. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, Sec. 18.17 "Time-Stamp Counter" (invariant TSC, `RDTSCP`).
 2. CME Group. *MDP 3.0 Market Data — Binary Packet Header and Message Header* (`SendingTime`, `TransactTime`, `MsgSeqNum`); *iLink 3 Binary Order Entry — Message Header and Business Layer* (`SendingTimeEpoch`, `RequestTime`, `TransactTime`). CME Client Systems Wiki.
@@ -317,7 +317,7 @@ Three instructions and a store per stage, exactly as §76.3 predicted (GCC 13.3 
 7. Linux man pages: `tshark(1)`, `join(1)`; *PCAP Next Generation (pcapng) Capture File Format*, IETF draft-ietf-opsawg-pcapng (interface description block, `if_tsresol`).
 8. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — Ch. 4 "Observability Tools" (tracing vs sampling, the cost of instrumentation).
 
-## 76.9 Additional Reading
+## 77.9 Additional Reading
 
 - OpenTelemetry Specification, *Trace Context (W3C)* — the general-purpose shape of correlation and span propagation; useful as a contrast to the fixed-header design here (why the hot path cannot afford it).
 - Cook, C. "When a Microsecond Is an Eternity: High Performance Trading Systems in C++", CppCon 2017 — measurement discipline on the order path.
@@ -327,4 +327,4 @@ Three instructions and a store per stage, exactly as §76.3 predicted (GCC 13.3 
 
 ---
 
-*Next: Ch. 77 — Zero-Overhead Application Telemetry, the metrics sibling of this chapter and of Ch. 75: how the stage deltas this chapter produces become counters, gauges and per-stage latency histograms that leave a pinned busy-poll process without a syscall, why percentiles must be merged and never averaged, and the shared-memory segment and off-core scraper that turn them into SLOs, alerts and triggers.*
+*Next: Ch. 78 — Zero-Overhead Application Telemetry, the metrics sibling of this chapter and of Ch. 76: how the stage deltas this chapter produces become counters, gauges and per-stage latency histograms that leave a pinned busy-poll process without a syscall, why percentiles must be merged and never averaged, and the shared-memory segment and off-core scraper that turn them into SLOs, alerts and triggers.*

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 52 (sockets, multicast), Ch. 54 (SBE and message encoding — the payload these transports carry), Ch. 65 (RDMA — a transport some of these ride), Ch. 55 (reliable multicast — the recovery ideas generalize here), Ch. 53 (TCP internals — the baseline these improve on), Ch. 37 (the Disruptor / mechanical sympathy — Aeron's lineage).
 >
-> **Leads into:** Ch. 68 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 70 (MPI — collective messaging over the same fabrics), Ch. 80 (process topology — Aeron IPC as the data plane), Ch. 86 (the end-to-end path). Ties back to Ch. 59 (flow steering — getting these transports' packets to the right core) and Ch. 66 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
+> **Leads into:** Ch. 68 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 70 (MPI — collective messaging over the same fabrics), Ch. 81 (process topology — Aeron IPC as the data plane), Ch. 87 (the end-to-end path). Ties back to Ch. 59 (flow steering — getting these transports' packets to the right core) and Ch. 66 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
 
 ---
 
@@ -62,8 +62,8 @@ The lessons: purpose-built transports over fast substrates hit microsecond RPCs 
 
 - **Reliable UDP, message-oriented, no HOL blocking across streams.** Aeron provides reliable, ordered delivery *within a stream* over UDP (unicast **or multicast**) and over shared-memory IPC — with a design tuned end-to-end for low latency and mechanical sympathy (Ch. 37). It reliably delivers messages with NAK-based retransmission (like Ch. 55's recovery, generalized), flow control, and congestion control, without TCP's stream-wide HOL blocking.
 - **Log/term-buffer architecture (Disruptor lineage).** Aeron publishes into a **log** made of term buffers — a lock-free, memory-mapped ring (Ch. 26, 34, 37) — that subscribers read. The same mechanical-sympathy design as the Disruptor (Ch. 37): pre-allocated, lock-free, cache-friendly, zero-allocation on the hot path (Ch. 23–24). Publication and subscription are the API; the media driver moves bytes over UDP/IPC.
-- **Unified IPC and network.** The *same* API and log mechanism carries messages between processes on one host (shared memory — Ch. 51/80) and across the network (UDP) — so the process-topology data plane (Ch. 80) and the network transport are one system. This is a major operational simplification: one messaging layer for intra-host and inter-host.
-- **Pairs with SBE (Ch. 54) and Aeron Cluster.** Aeron is typically used with **SBE** (Simple Binary Encoding — Ch. 54) for the message payloads (zero-copy, fixed-layout), and **Aeron Cluster** provides Raft-based fault-tolerant replicated state machines (Ch. 80's deterministic state machine, replicated) for consensus/failover. Together they're a full low-latency messaging + clustering stack used in production trading.
+- **Unified IPC and network.** The *same* API and log mechanism carries messages between processes on one host (shared memory — Ch. 51/81) and across the network (UDP) — so the process-topology data plane (Ch. 81) and the network transport are one system. This is a major operational simplification: one messaging layer for intra-host and inter-host.
+- **Pairs with SBE (Ch. 54) and Aeron Cluster.** Aeron is typically used with **SBE** (Simple Binary Encoding — Ch. 54) for the message payloads (zero-copy, fixed-layout), and **Aeron Cluster** provides Raft-based fault-tolerant replicated state machines (Ch. 81's deterministic state machine, replicated) for consensus/failover. Together they're a full low-latency messaging + clustering stack used in production trading.
 
 ### 67.4.2 eRPC: microsecond RPC on commodity hardware
 
@@ -131,7 +131,7 @@ Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRP
 
 ## 67.8 Additional Reading
 
-- Talks on Aeron in production trading systems, and the Aeron Cluster / Raft consensus material (external — the Aeron docs; Ch. 80 covers the single-process deterministic state machine that Aeron Cluster replicates) — the full messaging + clustering stack (§67.4.1).
+- Talks on Aeron in production trading systems, and the Aeron Cluster / Raft consensus material (external — the Aeron docs; Ch. 81 covers the single-process deterministic state machine that Aeron Cluster replicates) — the full messaging + clustering stack (§67.4.1).
 - The datacenter-transport research line (Homa, NDP, pFabric, DCTCP — Ch. 66) — receiver-driven flow, priorities, and incast (§67.4.3).
 - **Appendix B** (*Beyond C++*) — Chronicle (off-heap Java messaging) and cross-language transports; Ch. 59 (*Flow Steering*) — getting these transports' packets to the right core; Ch. 66 (*Lossless Ethernet*) — the fabric under RDMA-based transports; **Appendix F** — HOL-blocking / receiver-driven / reliable-UDP glossary; **Appendix G** — the eRPC/Homa/Aeron bibliography.
 
