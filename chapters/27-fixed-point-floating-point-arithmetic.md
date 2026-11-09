@@ -2,7 +2,7 @@
 
 # Chapter 27 — Fixed-Point & Floating-Point Arithmetic
 
-> **Prerequisites:** Ch. 11 (FP op latency & dependency chains — `div`/`sqrt` on the critical path), Ch. 22 (`-ffast-math`/`-Ofast` — the flags that change FP semantics), Ch. 6 (MXCSR/CPU state at startup), Ch. 4 (reading asm — §27.5), Ch. 1 (tail latency — denormals are a tail event).
+> **Prerequisites:** Ch. 11 (FP op latency & dependency chains — `div`/`sqrt` on the critical path), Ch. 22 (`-ffast-math`/`-Ofast` — the flags that change FP semantics), Appendix D.3 (FTZ/DAZ — the MXCSR bits, and how `-ffast-math` sets them at startup), Ch. 4 (reading asm — §27.5), Ch. 1 (tail latency — denormals are a tail event).
 >
 > **Leads into:** Ch. 28 (bit/integer tricks — the integer math scaled prices use), Ch. 29 (SIMD — FP vectorization and downclocking), Ch. 53 (decoding prices off the wire), Ch. 72 (integer overflow in price/qty math as a security concern), Ch. 75 (deterministic replay needs bit-exact FP). Opens **Part V**.
 

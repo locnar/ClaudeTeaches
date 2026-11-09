@@ -215,7 +215,7 @@ Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.ro
 - B. Saks / CppCon talks on `constexpr` everything, and "constexpr all the things" — the reach and limits of compile-time evaluation in modern C++.
 - D. Vandevoorde, N. Josuttis, D. Gregor, *C++ Templates: The Complete Guide* — the definitive treatment of the template instantiation/cost model underlying §18.2 and Ch. 19.
 - Ch. 19 (*Template Metaprogramming & Zero-Cost Abstractions*) — CRTP, policy-based design and expression templates built on this foundation; Ch. 13–14 (*Branches / Dispatch*) — the lookup and dispatch this chapter generates; Ch. 27–28 (*Numerics / Bit Tricks*) — compile-time numeric and bit tables; Ch. 22 (*Build Toolchain*) — managing build time, LTO and instantiation.
-- **Appendix B** — how compile-time programming differs in Rust/Zig (`const fn`, `comptime`), for the cross-language reader.
+- **Appendix B** (B.1–B.2) — how compile-time programming differs in Rust/Zig (`const fn`/const generics, `comptime`), for the cross-language reader.
 
 ---
 

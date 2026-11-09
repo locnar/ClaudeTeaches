@@ -92,6 +92,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 6.4.1 BIOS/firmware tuning for determinism
   - 6.4.2 Topology discovery (`lscpu`, `hwloc`)
   - 6.4.3 Building a quiet machine; selectively disabling mitigations on isolated boxes
+  - 6.4.4 Clocksource and SMIs
 - 6.5 Pitfalls & anti-patterns: turbo-induced variance, noisy neighbors
 - 6.6 Exercises & checklist
 

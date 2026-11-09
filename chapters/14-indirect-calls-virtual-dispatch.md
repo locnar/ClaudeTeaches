@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 13 (branch *direction* prediction — this chapter is the harder *target* prediction problem for indirect branches), Ch. 12 (the front-end the indirect branch resteers, and the I-cache footprint of many call targets), Ch. 11 (the back-end work squashed on a target mispredict), Ch. 7 (the vtable load is a cache access), Ch. 3–4 (benchmarking, reading asm — §14.3, §14.5).
 >
-> **Leads into:** Ch. 19 (template metaprogramming & zero-cost abstractions — CRTP and policy-based design in full), Ch. 20 (the cost of abstractions — `std::function`, RTTI, type erasure), Ch. 25 (cache-friendly containers — `std::function` in node-based structures). The `switch`/jump-table thread continues from Ch. 13's lookup tables.
+> **Leads into:** Ch. 19 (template metaprogramming & zero-cost abstractions — CRTP and policy-based design in full), Ch. 20 (the cost of abstractions — exceptions, `noexcept`, RTTI), Ch. 25 (cache-friendly containers — `std::function` in node-based structures). The `switch`/jump-table thread continues from Ch. 13's lookup tables.
 
 ---
 
@@ -308,7 +308,7 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 
 - CppCon talks on "the cost of `virtual`," type erasure, and "inheritance is the base class of evil" — design-level treatments of replacing runtime polymorphism on the hot path.
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — indirect-branch mispredict analysis and devirtualization with `perf`/LTO/PGO.
-- Ch. 19 (*Template Metaprogramming & Zero-Cost Abstractions*) — CRTP, policy-based design and static dispatch in full; Ch. 20 (*The Cost of Abstractions*) — `std::function`, RTTI and type-erasure costs in depth; Ch. 25 (*Cache-Friendly Containers*) — why `vector<unique_ptr<Base>>` is a cache anti-pattern; Ch. 22 (*Build Toolchain*) — LTO/PGO devirtualization.
+- Ch. 19 (*Template Metaprogramming & Zero-Cost Abstractions*) — CRTP, policy-based design and static dispatch in full; Ch. 20 (*The Cost of Abstractions*) — exception-unwinding, `noexcept` and RTTI costs in depth; Ch. 25 (*Cache-Friendly Containers*) — `std::function` among the hot-path-hostile STL types (§25.2), and why `vector<unique_ptr<Base>>` is a cache anti-pattern; Ch. 22 (*Build Toolchain*) — LTO/PGO devirtualization.
 - **Appendix E** — the indirect-branch-mispredict penalty that frames "megamorphic dispatch."
 
 ---

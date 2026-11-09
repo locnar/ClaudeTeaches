@@ -69,7 +69,7 @@ The functions the process-topology chapter (Ch. 74) maps onto separate processes
 - **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — outside this book's scope, but the thing everything else serves).
 - **Order gateway / OMS** — encodes and sends orders (J.3), tracks their state machine, handles acks/fills/cancels.
 - **Pre-trade risk** — enforces limits on the order path (J.3) before anything reaches the wire.
-- **Sequencer** — in some designs, a single process that stamps a total order on events for deterministic replay (Ch. 74, 75).
+- **Sequencer** — in some designs, a single process that stamps a total order on every input (ticks, acks, timers, commands) so that deterministic consumers (Ch. 74) can be replayed exactly from the journal (Ch. 75); this book's reference topology (Ch. 74 §74.4.1) uses point-to-point shared-memory rings and does not build one.
 
 ## J.7 The tick-to-trade path, end to end
 

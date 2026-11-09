@@ -102,6 +102,37 @@ item P1-6), `19:237` "inlining (Ch. 11)" (ambiguous — Ch. 11 is used consisten
 boundaries), Appendix H:58 `std::jthread` (Ch. 30) (neither Ch. 30 nor 31 mentions it), and the no-space `Ch.NN`
 spelling inside fenced ASCII diagrams and tables, where inserting a space would break column alignment.
 
+**Status (2026-11-09): fixed** (work-queue item P1-6, branch `work/item-11-chapter-chain`) — the chain/teaser and
+dangling-forward-promise rows of §1 row 12, §2 (nits) and §8, plus G30 in §10. **The Ch. 6 content gap is closed rather
+than re-pointed:** new `06:133` §6.4.4 *Clocksource and SMIs* (clocksource selection `tsc` vs `hpet`/`acpi_pm`,
+`current_clocksource`/`available_clocksource`, `constant_tsc nonstop_tsc`, the clocksource watchdog and its `dmesg`
+demotion line, `tsc=reliable`/`tsc=nowatchdog` vs `clocksource=`; SMIs — what SMM hides from the OS, the firmware
+sources, counting with `turbostat --show SMI`/`MSR_SMI_COUNT` and the `hwlat` tracer with its monopolise-a-core
+caveat), a `06:193` checklist line, a `06:204` reference line and the `6.4.4` README sub-bullet (`README.md:95`) —
+so Ch. 17's six "Ch. 6" pointers (`17:7/29/54/137/170/192`), Ch. 45's five SMI pointers (`45:75/86/106/121/129`)
+and Appendix C:69 now resolve to real content; only the Ch. 17 header (`17:7`) was tightened to "§6.4.4" (Ch. 17's
+§17.3 is being edited concurrently by item 6 and its body pointers are correct as they stand). **`std::function`
+promise re-pointed, not written:** Ch. 20 has no natural slot (its sections are unwinding/`noexcept`/`expected`/RTTI)
+and the cost is already treated in Ch. 14 §14.2.3/§14.6 and listed in Ch. 25 §25.2, so `14:7` → "exceptions,
+`noexcept`, RTTI", `14:311` → Ch. 20 for unwinding/RTTI + Ch. 25 (§25.2) for `std::function`, `19:7` → exceptions,
+RTTI, `std::expected` with "`std::function`'s cost was Ch. 14 §14.2.3", `19:271` teaser → "exception unwinding, RTTI,
+`dynamic_cast`". Other rows: `04:7` Verify-the-codegen list → Ch. 9–14, 19–21, 27–30, 39, 53, 71 (the real `## N.5`
+set); `21:7` "Closes Part III" → "Ch. 22 … closes Part III"; `27:5` "Ch. 6 (MXCSR …)" → Appendix D.3 — the queue
+description said Ch. 46/Appendix C, but neither contains MXCSR/FTZ (grep: 0 hits) so that would have created a new
+dangling pointer; the finding row's D.3 wins, and a per-process **FTZ/DAZ in every hot thread** item was added to
+Appendix C.4 (`appendix-C:62`) so Ch. 27's `:140` "(Ch. 46, Appendix C)" checklist pointer is honoured too;
+`appendix-J:72` Sequencer → states that Ch. 74 (deterministic consumers) / Ch. 75 (journal) are what a sequencer
+serves and that the book's reference topology (§74.4.1, point-to-point rings) does not build one — neither chapter
+contains the word. **Already fixed before this item** (verified, untouched): `30:7` Leads-into (P0-1), `28:7`
+companion → Ch. 13 & 27, `31:5`/`32:5` → 33-preview, `57:7` → Ch. 60, Ch. 60's colocation pointers → Appendix K
+(all P0-1), Ch. 5 "Connects forward to" → "Leads into" (2026-11-01), Appendix F Drop-copy → Ch. 52, 72 (P1-5);
+Appendix F has no Sequencer entry. **G30** — see the note under §10.3. Checks: `tools/review/sweep.py` output
+identical to main (teaser chain 1→76 intact; no section renumbered); `stale_crossrefs.py` STALE count unchanged
+(161 → 161, one pre-existing Appendix F row shifted by the four new glossary lines). **Left:** Ch. 45's "Ch. 6"
+SMI pointers and Appendix C:69 are correct now and were not reworded; the Ch. 38 `:188` Appendix E "coroutine-resume
+row" promise was narrowed to the context-switch cost (no new Appendix E row — numbers are P1-3's); Ch. 76's missing
+`*Next:*` line and the Ch. 9 machine note (§2) are unchanged, as before.
+
 ---
 
 ## 4. Systemic issue: numbers that disagree with each other
@@ -246,6 +277,54 @@ recur elsewhere (TLB reach, 24 MiB L3) were checked against Appendices E/F (no o
 remains P1-3. **Hedged:** the Sunny Cove STLB 2 MB cap is written as "≤ ~1024" (the finding's figure) pending the
 Phase-4 hardware check; the pre/post-6.17 uprobe cost is stated qualitatively ("roughly halves") rather than in ns.
 
+**Status (2026-11-09): fixed** (work-queue item P1-4, branch `work/item-9-appendix-hdc`) — Appendix H's version cells and the Appendix D/C facts that P0-3/P0-4 left: Appendix H `:27` `std::mdspan` → GCC 16 / libstdc++ 16 (no `<mdspan>` in 13–15), Clang/libc++ 18; `:28` `flat_map`/`flat_set` → libc++ 20 / 21 (the §H.2 "libc++ trails" prose at `:32` rewritten, pointer Ch. 24–25 → 25); `:30` `std::format` libc++ 14 with `__cpp_lib_format` defined only from 19 and an `__has_include` gate; `:40` `consteval` GCC 10 (complete 11) / Clang partial from 11, complete 17, `constinit` Clang 10; `:42` coroutines GCC 10 needs `-fcoroutines` (default with `-std=c++20` from 11), Clang 8 `-fcoroutines-ts` still "Partial" on the status page, `<coroutine>` header libc++ 14, `__cpp_lib_coroutine` added to the macro cell; `:47` P2128 Clang 15; `:58` `std::jthread` libc++ 20 (18–19 only with `-fexperimental-library`) and pointer Ch. 30 → 31; `:59` `barrier`/`latch` libc++ 11; new `:60` row `std::hardware_destructive_interference_size` (libstdc++ 12 / libc++ 19, `__cpp_lib_hardware_interference_size`, `alignas(64)`-style fallback, Appendix A.3); `:75` `std::endian` libc++ 7; `:76` `add_sat` libc++ 18, paper marked C++26; `:77` `to_chars`/`from_chars` libstdc++ 8 (int) / 11 (FP), libc++ 7 / 14 / 20 with the note that libc++ never defines `__cpp_lib_to_chars`, and the `:79` "branch-free" claim corrected to locale-independent/non-throwing/allocation-free; `:5` preamble re-dated to the November-2026 status pages; `:13/:14` "landed in libstdc++ 15" and the "always predefined" language-macro gloss; pointers `:3/:26` `std::span` → Ch. 4, 72, `atomic_ref` → Ch. 35 (`:3/:57`), `:109` chapter list → Ch. 4, 8, 12, 18–21, 25, 27–33, 35, 38–39, 53, 71–72; `:102/:113` the dangling "D.2" → D.4, where Appendix D now has a `-std=c++23`/`-std=c++26`/`-stdlib=libc++` entry (`appendix-D:49`); Appendix D `:115` sanitizers/fuzzing pointer Ch. 60 → 72; Appendix C `:16` NUMA/snoop item rewritten — Skylake-SP and later (incl. the Ice Lake-SP reference box) have directory-based coherence and no snoop-mode selector, the knob is SNC on/off (+ XPT/UPI prefetch), and Home/Early Snoop vs Cluster-on-Die is Haswell/Broadwell-EP only. No section title changed, so `chapters/README.md` is untouched. **Verified online (2026-11-09):** every libstdc++ cell against gcc.gnu.org/onlinedocs/libstdc++/manual/status.html (C++17/20/23 tables: mdspan 16.1, expected 12.1, flat_map/flat_set 15.1, print 14.1, format 13.1, byteswap 12.1, jthread 10.1, atomic_ref 10.1, barrier/latch 11.1, span 10.1, bit_cast 11.1, `<bit>` 9.1, interference size 12.1, to_chars 8.1 int / 11.1 FP, start_lifetime_as 16.1); every libc++ cell against libcxx.llvm.org Status/Cxx17, Cxx20, Cxx23 and Cxx26 (mdspan 18, flat_map 20, flat_set 21, print 18, expected 16, format 14 + macro-from-19 note, jthread 20 + `-fexperimental-library` note, P1135 11, atomic_ref 19, span 7, bit_cast 14, bitops 9, endian 7, interference size 19, saturation 18, to_chars 7/14/20); every language cell against clang.llvm.org/cxx_status.html and gcc.gnu.org/projects/cxx-status.html (consteval, constinit, P2128, coroutines incl. GCC's "10 (requires -fcoroutines)" cell, likely, assume, if consteval, deducing this, concepts); the `-Ofast` composition and `-freorder-blocks-and-partition` ("x86 at -O2, -O3, -Os") against gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html. **From memory, not re-verified online:** the libstdc++ C++26 table did not come through the fetch, so the unchanged `add_sat` libstdc++ 14 cell rests on the GCC 14 release notes as remembered; the `<coroutine>` header landing in libc++ 14; the first GCC/Clang releases accepting `-std=c++23`/`c++2b`/`c++26`/`c++2c` in the new D.4 entry; the SNC-vs-snoop-mode firmware facts (vendor BIOS tuning guides). **Deliberately left:** the brief's "`-Ofast` deprecated in GCC 14+" — refuted by the finding row and by the GCC manual (no deprecation note; it is Clang 19 that deprecates it, which D.1 already says), so D.1 is unchanged; the chapter pointers the brief lists (27→28, 40→39, 59→71, 37→38, 60→72) were already remapped by commit 4fbca5c; Appendix D `:3` "Ch. 17 (timing/FP)", the hardening-flag category, `-mprefer-vector-width`, the "CLAUDE.md" leaks (`appendix-H:3/100`, shared with Appendix L), the H retitle to "C++20/23/26" and the proposed extra rows (`assume_aligned`, `start_lifetime_as`, `unreachable`, `std::simd`, `inplace_vector`) — new content / book-wide items rather than version corrections; the `std::hive` and `std::execution` rows (neither library lists them as shipped); and the pre-existing heuristic STALE hits at Appendix H `:41` "Concepts (Ch. 19)" and Appendix D `:45/:64`.
+
+**Status (2026-11-09): fixed** (work-queue item P1-5, branch `work/item-10-appendix-gf`) — the Appendix G and F rows above
+(and the confirmed per-line rows behind them in the part-4 findings), as in-line edits to the two appendices only; every new
+bibliography entry was checked against the chapter §N.7/§N.8 lists that cite it, every new or re-pointed glossary entry
+against a grep for where the term is actually defined. **Appendix G:** `G:55` Pikus → *The Art of Writing Efficient
+Programs* (Packt, 2021) and *Hands-On Design Patterns with C++* (2nd ed., 2023), annotated as a general companion since no
+chapter cites him; `G:60` "Mark Newman" removed — the entry is now Harris, *Trading and Exchanges: Market Microstructure for
+Practitioners* (the only microstructure text a chapter/appendix cites, J.8), pointed at Appendix J; `G:19` Cliff Click
+dropped from the Ch. 34 lock-free entry (Ch. 34's sources are Michael & Scott, Herlihy & Shavit, Vyukov, Preshing) — the line
+is now Michael & Scott (PODC 1996) and Click is re-homed at `G:74` as the JVM/GC note Appendix B.7 cites; `G:16` Lamport
+re-pointed to Ch. 40 (TLA+), the only chapter that cites him, with the paper's full title; `G:14` Disruptor's "capture (Ch. 75)
+/ process topology (Ch. 74)" → IPC rings (Ch. 50) and Aeron (Ch. 65) (0 Disruptor hits in 74/75); `G:50–51` Part II = Ch. 7–17
+(+ "6th ed., 2017" as Ch. 1 cites), Part VI = Ch. 30–40; `G:66` the `constexpr` talks are Deane & Turner ("constexpr ALL the
+Things!") and Dusíková, Doumler listed under hardware-aware C++; `G:67` Carl Cook removed from the Godbolt line. **Added**
+(G.1 `:13, 19–25`; G.2 `:38–46`; G.3 `:52, 54`; G.4 `:70–74`; G.5 `:88`): Dean & Barroso *Tail at Scale* (Ch. 1); Boehm & Adve
+PLDI 2008 (Ch. 30) + Boehm's seqlock paper (Ch. 35); Michael, Hazard Pointers TPDS 2004 + Fraser, *Practical Lock-Freedom*
+(Ch. 36); Anderson 1990 + Mellor-Crummey & Scott 1991 (Ch. 32); Goldberg 1991 (Ch. 27); NanoLog ATC'18 (Ch. 71); DCQCN /
+eRPC / Homa (Ch. 64–65); Intel Intrinsics Guide (Ch. 10, 28, 29); IEEE 1588-2019 (Ch. 58); rdma-core/verbs + RDMA Aware
+Networks manual (Ch. 63); CUDA Programming/Best Practices guides (Ch. 67); MPI Standard + Open MPI/MPICH/UCX (Ch. 68);
+Vivado/Vitis HLS/Quartus (Ch. 69); DOCA + P4 (Ch. 70); Intel RDT/`resctrl` + `pqos` (Ch. 44); SEC 15c3-5 / MiFID II RTS 25
+(Ch. 58, 74, 75); ★ Herlihy & Shavit (Ch. 34, 36); Vandevoorde/Josuttis/Gregor + Alexandrescu (Ch. 18–19, 24); Sutter
+"atomic<> Weapons" (Ch. 30, 40); Preshing (Ch. 30, 34, 35); Vyukov/1024cores + Relacy (Ch. 34, 37, 50, 40); Meyers' "CPU
+Caches" talk (Ch. 8); `linuxptp` (Ch. 58) — so every source F.9 sends readers to G for now has an annotated entry; `G:36`
+protocol specs also point at J.5; `G:107` the appendix map extended to H–L. **Appendix F re-pointed:** `F:18` Maker/Taker →
+J.1; `F:21` NBBO → J.2 (+ Ch. 25 for the data structure); `F:38` LFB and `F:41` MLP → Ch. 10 (Ch. 7 never names either) with
+MLP's duplicated "(Ch. 7, 10)" and `F:51` TLB's duplicated "(Ch. 15)" removed; `F:109` RAII → Ch. 39 / Ch. 24 / Appendix B
+(Ch. 23 has 0 hits); `F:114` `std::span`/`mdspan` → Ch. 72, 4, Appendix H (Ch. 49/53 have 0 hits); `F:12` Drop-copy → Ch. 52,
+72 (the only chapters that use it; none develops it — see *left* below); `F:11` Colocation → K.1 / Ch. 60; `F:19` Matching
+engine → J.1; `F:67` `rcu_nocbs` → Ch. 45 + Appendix C (Ch. 36 never mentions it); the other F.1 entries (`F:9–28`) gained
+their Appendix J.2/J.4–J.7 pointers; `F:78` EBR no longer called "bounded" (Ch. 36 §36.4.3 teaches unbounded deferral —
+hazard pointers are the bounded scheme); `F:112` sanitizer cost = ASan ~2×, TSan ~5–15× per Ch. 40:23, MSan pointed at Ch. 72;
+the redundant "µop cache — see DSB" line deleted (the headword at `F:34` is already "DSB / µop cache"). **Appendix F added**
+(F.2 `:36, 39, 42, 44, 47, 49, 53`; F.3 `:58, 61, 68`; F.4 `:76, 81–83, 87, 89–90, 93`; F.6 `:133, 139`): ILP, LLC, MPKI, PMU,
+SIMD/SSE/AVX/AVX-512, STLB, TSC/`rdtsc`/`rdtscp`; Context switch, IRQ affinity/`irqbalance`, Shared memory; CAS, Lock convoy,
+Lock-free/wait-free, MCS/CLH, Shared-nothing, SMR, Spinlock/TTAS/backoff, USL/Amdahl; `epoll`/readiness vs completion and
+IPC (inter-process) — with a see-also on `F:37` IPC (instructions per cycle). **Deliberately left:** `G:30` "Parts IX" was
+already "Part XI" (fixed by the P0-1 remap); the layer-1 "sub-ns" (`F:124`), RTL "gate-level" (`F:169`) and `khugepaged`
+"compaction" (`F:70`) wordings mirror what Ch. 60:34, Ch. 69:17 and Ch. 15:136 themselves say, so correcting the glossary
+alone would create a contradiction — they belong with those chapters' prose (P1-3 reconciliation); no drop-copy sentence was
+added to Appendix J.3/J.6 or §74.2 (outside the two appendices; gap item G33); the uncited Meyers *Effective Modern C++* /
+Core Guidelines, Love and trading-blog lines, and Appendix H's `std::span` row (Ch. 8, 29) are untouched (H is item P1-4);
+the book-wide "ROB → Ch. 11, 43", `F:43` µop and `F:153` RSS heuristic STALE rows are unchanged (pre-existing; not in the
+P1-5 rows). **Bibliographic hedges:** Herlihy & Shavit is given as "2nd ed., with Luchangco & Spear" without a year; Boehm's
+seqlock paper is given without venue/year; Harris without publisher/year — each omitted rather than guessed. Checks:
+`tools/review/sweep.py` output identical to `main`; `stale_crossrefs.py` one STALE row fewer than `main` (the `F:92` RAII row is gone,
+none added — three new entries were worded so the keyword heuristic does not misfire).
+
 ---
 
 ## 8. Duplication and placement
@@ -264,6 +343,9 @@ Phase-4 hardware check; the pre/post-6.17 uprobe cost is stated qualitatively ("
 | Ch. 44 before Ch. 45 | Ch. 44 lists Ch. 45 and Appendix C as prerequisites that come *later* | swap 44 ↔ 45 |
 | Ch. 5 in Part I | 115 lines, no code, no measurement; built on Part X/XII machinery | either make it self-contained (gdb on `-O2`, `rr`, split DWARF, with measured costs) or move it |
 | Ch. 21 and Ch. 22 | both claim to "close Part III" | delete the sentence in 21 |
+
+**Status (2026-11-09):** the Ch. 21/22 row is fixed (work-queue item P1-6 — `21:7` now reads "Ch. 22 … closes
+**Part III**"; see the P1-6 note at the end of §3). The duplication rows above are content work and remain open.
 
 ---
 
@@ -363,6 +445,19 @@ Appendix B (2,514 words) is the whole treatment today: prose only, no code, no a
 | G29 | **Research-to-production and columnar tick storage**: one C++ decoder/book bound into Python via pybind11/nanobind (no reimplementation drift), NumPy views via the buffer protocol, Arrow interchange; journal → Parquet/Arrow datasets, kdb+/ClickHouse/QuestDB tier | New §75.4.6/§75.4.7 (or appendix); B.5 trimmed to a pointer | Python appears only in Appendix B; zero hits for Parquet/Arrow/kdb/ClickHouse | medium | ✅ missing |
 | G30 | **Appendix B consistency fix**: honour or re-point the forward references at Ch. 18:218, 19:267, 20:244, 21:232, 38:188, 39:7/142 and Appendix H:113 that promise `const fn`/`comptime`/traits/`Result`/`transmute`/`async` comparisons; add the GC/JIT/FFI/borrow-checker glossary entries B.7 claims Appendix F has; correct "FFM Java 21+" and `std::simd` "portable" | Editorial pass on B/F/G and six chapters | — | high (small) | ✅ missing |
 | G31 | **HLS C++ as a dialect**: `ap_int`/`ap_fixed`, `hls::stream`, `PIPELINE II=1`/`UNROLL`/`DATAFLOW`, a synthesized ITCH parser with its synthesis report as the "verify the codegen" step | Expand Ch. 69 §69.2 | Ch. 69 exercise 2 asks the reader to write an HLS parser without showing one | low | ◐ partial |
+
+**Status (2026-11-09): G30 fixed** (work-queue item P1-6, branch `work/item-11-chapter-chain`) — the promises were
+*honoured* in Appendix B rather than softened: `appendix-B:16` new bullet (Rust `const fn`/const generics vs
+`constexpr`, monomorphized generics vs `dyn Trait` fat-pointer vtables, `Result`/`?` as `std::expected`, `&mut` as
+checked `noalias`), `:17` new bullet (`async`/`await` state machines vs C++20 coroutines, library runtimes — Tokio,
+`tokio-uring`/`glommio`/`monoio` — vs C++26 schedulers, goroutines/virtual threads as the stackful alternative),
+`:18` `transmute` vs `from_ne_bytes`/`from_bits`/`bytemuck` appended to the `unsafe` bullet, `:26` Zig `comptime`
+vs `constexpr`/`consteval`/`if constexpr`/templates and error unions as Zig's `std::expected`; the two factual slips —
+`:19` `std::simd` "portable" → nightly-only/unstable, `:44` FFM "Java 21+" → final in Java 22 (JEP 454), preview in
+21; and the four glossary entries B.7 claimed (`appendix-F:98` Borrow checker / `unsafe`, `:104` FFI, `:106` GC pause,
+`:108` JIT vs AOT). The seven references were then tightened to the sub-section that now holds the content: `18:218`,
+`19:267`, `20:244`, `21:232`, `38:188` (its Appendix E clause narrowed to the context-switch cost), `39:7/142`,
+`appendix-H:114`. Not done here: Appendix G entries of B's own (P1-5 owns G), and the G26–G28 expansion.
 
 ### 10.4 Theme D — Design patterns & architecture (9 items; author-requested)
 

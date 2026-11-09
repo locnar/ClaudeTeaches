@@ -130,6 +130,33 @@ With firmware set and topology known, the OS-level knobs that build a quiet core
 
 The end state is a core that does one thing, at a constant clock, never sleeps, never gets interrupted, never gets migrated, and never faults — a deterministic substrate on which the rest of the book's code can hit its tail-latency targets. Verify it with `cyclictest` (§6.3) before declaring victory.
 
+### 6.4.4 Clocksource and SMIs
+
+Two more things the box can get wrong that no later chapter can fix in code. Both hide *below* the OS's own view of time and interrupts, so neither shows up in `perf`, `/proc/interrupts` or your own counters — you have to go looking.
+
+**The clocksource.** Every `clock_gettime(CLOCK_MONOTONIC)` and `std::chrono::steady_clock` read on the box goes through the kernel's selected **clocksource**. On a healthy x86 box that is `tsc` — the invariant time-stamp counter (`constant_tsc nonstop_tsc` in `/proc/cpuinfo`), read in user space through the vDSO with no syscall (~20 ns). If the kernel has selected `hpet` or `acpi_pm` instead, every timestamp becomes a slow MMIO/port read of hundreds of nanoseconds (often a real syscall), with jitter, and nothing in your code will tell you why your timing is off (Ch. 17 §17.2.2 and §17.3 measure the difference). The usual cause of the fallback is the **clocksource watchdog**: the kernel periodically compares the TSC against `hpet`/`acpi_pm` and, if they drift apart beyond its threshold, logs `clocksource: timekeeping watchdog ... Marking clocksource 'tsc' as unstable` and switches. The watchdog's reference clocks are themselves noisy — an SMI storm (next item), virtualisation and some firmware produce false positives. Check it, and read `dmesg`:
+
+```bash
+cat /sys/devices/system/clocksource/clocksource0/current_clocksource    # must be: tsc
+cat /sys/devices/system/clocksource/clocksource0/available_clocksource  # e.g.: tsc hpet acpi_pm
+grep -o 'constant_tsc\|nonstop_tsc' /proc/cpuinfo | sort -u               # both must appear
+dmesg | grep -i -E 'clocksource|tsc'                                      # look for "unstable" / "switched to"
+```
+
+If `tsc` was demoted, fix the *cause* first (an SMI storm, a VM, bad firmware TSC synchronisation across sockets). On a box whose TSC you have verified invariant, boot with `tsc=reliable` (disables the boot-time and runtime stability checks) or `tsc=nowatchdog` (keeps the boot check, drops the periodic watchdog — which is itself a timer that fires on your cores); `clocksource=tsc` alone only sets the initial choice and the watchdog can still demote it. Recent kernels skip the watchdog on their own for Intel parts with an invariant TSC and a small socket count — `dmesg` tells you which case you are in.
+
+**SMIs.** A **System Management Interrupt** drops the core into firmware's System Management Mode: the OS is suspended, sees no interrupt, logs nothing, and resumes tens to hundreds of microseconds later (milliseconds on bad firmware) with nothing in `/proc/interrupts` to show for it. The sources are firmware policy — thermal and power-capping events, legacy USB keyboard/mouse emulation, BMC/IPMI polling, ECC/machine-check reporting in "firmware-first" mode, periodic housekeeping SMIs — and they are disabled or minimised in the BIOS (Appendix C.1), not from Linux. What you *can* do from Linux is count them, which is how you find out they own your tail:
+
+```bash
+sudo turbostat --quiet --show CPU,SMI --interval 10   # SMI column: SMIs per interval, per core — want 0
+sudo rdmsr -a 0x34                                    # MSR_SMI_COUNT (Intel): cumulative since reset (msr-tools)
+# hwlat tracer: spins with interrupts off and reports gaps the OS did not cause (SMIs, hardware stalls).
+# It monopolises a core while it runs — a setup/qualification tool, not something to leave on in production.
+echo hwlat > /sys/kernel/tracing/current_tracer; sleep 60; tail /sys/kernel/tracing/trace
+```
+
+A non-zero SMI rate on an isolated core — or `hwlat` reporting multi-µs gaps on a box whose `cyclictest` max (§6.3) looks fine — means firmware owns part of your tail. Run the SMI count alongside `cyclictest` during every tuning pass: a `cyclictest` spike that coincides with an SMI-count increment is *attributed*, and the fix is in the BIOS. Ch. 45 chases the remaining kernel-side noise sources; Ch. 17 is the timekeeping chapter this clocksource check serves.
+
 ---
 
 ## 6.5 Pitfalls & anti-patterns: turbo-induced variance, noisy neighbors
@@ -163,6 +190,7 @@ The end state is a core that does one thing, at a constant clock, never sleeps, 
 - [ ] **Isolation:** `isolcpus`/`nohz_full`/`rcu_nocbs` on hot cores; `irqbalance` off and IRQs steered away (Ch. 42, 45).
 - [ ] **Memory:** THP off (explicit huge pages instead — Ch. 15), `mlockall` (Ch. 23).
 - [ ] **Mitigations:** reviewed, **measured**, and the on/off decision **documented** with its security rationale (Ch. 72) — never a reflex.
+- [ ] **Clock & firmware interrupts:** `current_clocksource` is `tsc` with `constant_tsc nonstop_tsc` and no watchdog demotion in `dmesg`; the SMI count (`turbostat --show SMI`) stays flat on the hot cores (§6.4.4).
 - [ ] **Verified** with `cyclictest` (max, not avg) **before/after**, one knob at a time.
 - [ ] Remembered this is the **substrate**: the process must still be pinned (Ch. 42), memory-locked (Ch. 23), and warmed (Ch. 46).
 
@@ -173,6 +201,7 @@ The end state is a core that does one thing, at a constant clock, never sleeps, 
 - *Red Hat Enterprise Linux — Optimizing RHEL for Low Latency* / *Tuning Guide*, and the `tuned` `latency-performance`/`network-latency` profiles — a vendor-maintained codification of most knobs in §6.4.
 - The Linux kernel documentation: `admin-guide/kernel-parameters.txt` (`isolcpus`, `nohz_full`, `rcu_nocbs`, `intel_idle.max_cstate`, `mitigations=`), `admin-guide/pm/cpuidle` and `cpufreq`, and `Documentation/admin-guide/hw-vuln/` (the speculative-execution mitigations and their controls).
 - `cyclictest` / `rt-tests` documentation and the OSADL QA latency-plot methodology — the basis for §6.3's measurement.
+- The Linux kernel documentation on `tsc=` / `clocksource=` (`admin-guide/kernel-parameters.txt`) and the clocksource watchdog, `Documentation/trace/hwlat_detector.rst`, and `turbostat(8)` with Intel *SDM* Vol. 4 (`MSR_SMI_COUNT`) — the clocksource and SMI checks of §6.4.4.
 - Intel, *64 and IA-32 Architectures Software Developer's Manual*, Vol. 3 & 4 — C-states, P-states, Turbo Boost, RAPL, and PMU; and the Intel/AMD security advisories for the specific Spectre/Meltdown/MDS/Retbleed mitigations.
 - `hwloc`/`lstopo` documentation — topology discovery used in §6.4.2 and throughout Ch. 16, 42–43.
 
