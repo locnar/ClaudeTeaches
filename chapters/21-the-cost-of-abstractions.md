@@ -279,4 +279,4 @@ The verification habits:
 
 ---
 
-*Next: Ch. 22 — The Cost of Modern Idioms & Strings Without Allocation.*
+*Next: Ch. 22 — The Cost of Modern Idioms & Strings Without Allocation: lambdas, `std::ranges` pipelines, `std::function`, `std::apply`/`tuple`, `string_view`/`optional`/`expected` by value, measured on one book loop — which of them the optimizer collapses, where a `views::filter` takes the vectorizer away, and why a symbol on the hot path is a `uint64_t`, not a `std::string`.*

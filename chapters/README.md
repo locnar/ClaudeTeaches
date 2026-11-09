@@ -316,13 +316,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 21.7 Exercises & checklist
 
 ### [22. The Cost of Modern Idioms & Strings Without Allocation](22-cost-of-modern-idioms-strings-without-allocation.md)
-- 22.1 Why it matters: TODO
-- 22.2 Mental model: TODO
-- 22.3 Measure it: TODO
+- 22.1 Why it matters: idiomatic C++ is not free by default, only by inspection
+- 22.2 Mental model
+  - 22.2.1 A lambda is a class; a `std::function` is a pointer to one
+  - 22.2.2 Iterators, sentinels and views: what a pipeline compiles to
+  - 22.2.3 Small values by value: `string_view`, `optional`, `expected` and the ABI
+  - 22.2.4 Where strings hide the allocation
+- 22.3 Measure it: one book loop, one symbol table
 - 22.4 Techniques
-  - 22.4.1 TODO
-- 22.5 Pitfalls & anti-patterns: TODO
-- 22.6 Exercises & checklist
+  - 22.4.1 Callables: the template parameter first, the pointer second, erasure last
+  - 22.4.2 Ranges and views: algorithms freely, `filter` with the asm open
+  - 22.4.3 `std::invoke`, `std::apply` and `std::tuple`: free in the call, not always in the layout
+  - 22.4.4 Strings without allocation: symbols as integers, views over the buffer, fixed capacity, interning
+- 22.5 Verify the codegen: what collapsed, what did not
+- 22.6 Pitfalls & anti-patterns: idioms that leave a shape the optimizer cannot cross
+- 22.7 Exercises & checklist
 
 ### [23. Aliasing, `restrict` & Type Punning](23-aliasing-restrict-type-punning.md)
 - 23.1 Why it matters: aliasing assumptions gate optimization
