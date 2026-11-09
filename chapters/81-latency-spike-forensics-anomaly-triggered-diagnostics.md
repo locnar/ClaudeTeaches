@@ -329,7 +329,7 @@ A spike that has been attributed is still not finished. Two hand-offs close it:
 
 1. Linux kernel documentation: `Documentation/trace/ftrace.rst` (`trace_clock`, `tracing_on`, `trace_marker`, per-CPU buffers, `tracing_cpumask`), `Documentation/trace/events.rst`, `Documentation/tools/rtla/` (Ch. 46).
 2. `perf-record(1)` — `--overwrite`, `--switch-output`, `--snapshot`, `--control=fifo`, `-k`/`--clockid`, `--aux-sample`; `perf-intel-pt(1)` — snapshot mode, `cyc`/`mtc` packets, PTWRITE, `--itrace` decoding options; `perf-script(1)` (`--time`, `--ns`).
-3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, Ch. 33 "Intel® Processor Trace" (packets, ToPA, PTWRITE); Vol. 3 §18.17 (invariant TSC).
+3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, Ch. 33 "Intel® Processor Trace" (packets, ToPA, PTWRITE); Vol. 3 Sec. 18.17 (invariant TSC).
 4. Linux man pages: `clock_gettime(2)` (`CLOCK_MONOTONIC`, `CLOCK_BOOTTIME`, `CLOCK_REALTIME`), `dmesg(1)` (`--time-format`), `journalctl(1)` (`-o short-monotonic`, `--since=@`), `proc(5)` (`/proc/interrupts`, `/proc/softirqs`, `/proc/vmstat`).
 5. Linux `Documentation/driver-api/ptp.rst` — `PTP_SYS_OFFSET_PRECISE` and cross-timestamping (Ch. 60).
 6. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — Ch. 2 "Methodologies" (the USE and drill-down methods this chapter's loop specialises), Ch. 13–14 (`perf`, ftrace).

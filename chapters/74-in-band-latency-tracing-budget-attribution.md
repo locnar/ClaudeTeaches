@@ -308,7 +308,7 @@ Three instructions and a store per stage, exactly as §74.3 predicted (GCC 13.3 
 
 ## 74.8 References
 
-1. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, §18.17 "Time-Stamp Counter" (invariant TSC, `RDTSCP`).
+1. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, Sec. 18.17 "Time-Stamp Counter" (invariant TSC, `RDTSCP`).
 2. CME Group. *MDP 3.0 Market Data — Binary Packet Header and Message Header* (`SendingTime`, `TransactTime`, `MsgSeqNum`); *iLink 3 Binary Order Entry — Message Header and Business Layer* (`SendingTimeEpoch`, `RequestTime`, `TransactTime`). CME Client Systems Wiki.
 3. Deutsche Börse / Eurex. *T7 Enhanced Order Book Interface (EOBI) Manual* (`TransactTime`, `TrdRegTSTimePriority`); *T7 Enhanced Trading Interface (ETI) Manual* (`TrdRegTSTimeIn`, `TrdRegTSTimeOut`, `TrdRegTSEntryTime`, `TrdRegTSExecutionTime`, `RequestTime`).
 4. Nasdaq. *TotalView-ITCH 5.0 Specification* (Timestamp: nanoseconds since midnight); *OUCH 5.0 Specification*; *MoldUDP64 Protocol Specification*.
