@@ -441,15 +441,15 @@ Code & content guidelines:
   - **IV — Memory Management** (23–26).
   - **V — Numerics & Data Parallelism** (27–29).
   - **VI — Concurrency** (30–40): …coroutines, `std::execution`, correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (41–46): …SMT, cache allocation (RDT), RT scheduling, warming.
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (47–52): native I/O, io_uring, zero-copy fast path,
+  - **VII — OS, Scheduling & Isolation** (41–47): …SMT, cache allocation (RDT), RT scheduling, warming.
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (48–53): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
-  - **IX — Market Data, NIC & Fabric** (53–60): decoding, reliable multicast, NIC, DDIO, flow
+  - **IX — Market Data, NIC & Fabric** (54–62): decoding, reliable multicast, NIC, DDIO, flow
     steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (61–65): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (63–67): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (66–70): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Observability & Operations in Production** (71–76): logging, security, hot reload,
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XII — Observability & Operations in Production** (73–81): logging, security, hot reload,
     process topology, capture/replay, end-to-end case study (the capstone, now genuinely last).
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved

@@ -30,6 +30,11 @@ def phase3(n):
 # tools/review/insert_chapter.py appends a step here on every insertion — keep the marker line.
 STEPS = [
     ("phase3", None),
+    ("insert", 45),  # Ch. 46 hunting-residual-noise-isolated-cores
+    ("insert", 55),  # Ch. 56 multicast-group-management-dark-feed
+    ("insert", 73),  # Ch. 74 zero-overhead-application-telemetry
+    ("insert", 78),  # Ch. 79 host-health-telemetry
+    ("insert", 79),  # Ch. 80 network-health-telemetry-drop-forensics
     # INSERT_STEPS_END
 ]
 def old2new(n):

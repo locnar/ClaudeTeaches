@@ -1,6 +1,6 @@
 # Appendix I — Tooling Command Cookbook
 
-> **Consolidates:** the commands used throughout the book, scattered across chapters — `perf` and the PMU (Ch. 2), micro-benchmarking (Ch. 3), reading asm / codegen (Ch. 4), debugging optimized builds (Ch. 5), `bpftrace`/eBPF (Ch. 61), plus the topology/pinning tools introduced operationally in Appendix C (`numactl`, `taskset`, `chrt`, `ethtool`, `cyclictest`) and `pahole` from Ch. 9. The *concepts* live in those chapters; this appendix is the **second-monitor cheat sheet** — the exact invocations, in one place.
+> **Consolidates:** the commands used throughout the book, scattered across chapters — `perf` and the PMU (Ch. 2), micro-benchmarking (Ch. 3), reading asm / codegen (Ch. 4), debugging optimized builds (Ch. 5), `bpftrace`/eBPF (Ch. 63), plus the topology/pinning tools introduced operationally in Appendix C (`numactl`, `taskset`, `chrt`, `ethtool`, `cyclictest`) and `pahole` from Ch. 9. The *concepts* live in those chapters; this appendix is the **second-monitor cheat sheet** — the exact invocations, in one place.
 
 **How to use this:** grouped by tool/purpose (I.1–I.9). Each entry is a command plus a one-line note on what it measures and which chapter derives the interpretation. Two rules from the methodology chapters govern all of it: **a number is only meaningful against a baseline** (Ch. 3) — always measure before/after, not once; and **profile, don't guess** (Ch. 2) — let the counters tell you where the time goes before you optimize. Commands assume a recent Linux `perf` (matching your kernel), GCC/Clang, and either root or the capabilities the PMU/eBPF need (`CAP_PERFMON`/`CAP_BPF`, or `sysctl kernel.perf_event_paranoid=-1` on a lab box — Ch. 2). Adapt core numbers (`2`, `2-7`) to your topology (I.6).
 
@@ -69,7 +69,7 @@ When you want the GUI top-down tree and memory-access modeling (Ch. 2).
 
 ## I.5 `bpftrace` / eBPF one-liners
 
-Low-overhead, production-safe tracing (Ch. 61) — attach to a running process without restarting it.
+Low-overhead, production-safe tracing (Ch. 63) — attach to a running process without restarting it.
 
 ```
    bpftrace -e 'tracepoint:syscalls:sys_enter_* { @[probe] = count(); }'   # which syscalls, by count
@@ -90,7 +90,7 @@ Low-overhead, production-safe tracing (Ch. 61) — attach to a running process w
    #   C++ symbols are mangled: use the `cpp` qualifier (or the mangled name, or `*on_message*`); the function must not be inlined
 ```
 
-**Interpreting (Ch. 61):** eBPF is the right tool for *production* latency questions the PMU can't answer directly — run-queue latency, off-CPU time, syscall counts under real load — at overhead low enough to leave running. Keep the probes off the hot core's critical section; measure the tracing overhead itself (Ch. 61) before trusting production numbers.
+**Interpreting (Ch. 63):** eBPF is the right tool for *production* latency questions the PMU can't answer directly — run-queue latency, off-CPU time, syscall counts under real load — at overhead low enough to leave running. Keep the probes off the hot core's critical section; measure the tracing overhead itself (Ch. 63) before trusting production numbers.
 
 ## I.6 Topology, pinning & scheduling
 
@@ -129,26 +129,26 @@ Seeing struct layout and memory behavior (Ch. 9, 15).
 
 ## I.8 Network & NIC
 
-Inspecting and tuning the RX/TX path (Ch. 51, 53, 55, 56).
+Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
 
 ```
-   ethtool -g eth0                              # current vs max RX/TX ring sizes (Ch. 53, 55)
-   ethtool -G eth0 rx 4096                       # enlarge RX ring to absorb microbursts (Ch. 53)
-   ethtool -c eth0                              # interrupt coalescing settings (Ch. 55)
-   ethtool -C eth0 rx-usecs 0 adaptive-rx off    # disable coalescing for lowest latency (Ch. 55)
-   ethtool -S eth0 | grep -iE 'drop|miss|err|fifo'   # hardware drops — RX overruns at the open (Ch. 53)
-   ethtool -T eth0                              # hardware-timestamping capabilities (Ch. 58)
-   ss -tim                                       # per-socket TCP info: rtt, cwnd, retrans (Ch. 51)
+   ethtool -g eth0                              # current vs max RX/TX ring sizes (Ch. 54, 57)
+   ethtool -G eth0 rx 4096                       # enlarge RX ring to absorb microbursts (Ch. 54)
+   ethtool -c eth0                              # interrupt coalescing settings (Ch. 57)
+   ethtool -C eth0 rx-usecs 0 adaptive-rx off    # disable coalescing for lowest latency (Ch. 57)
+   ethtool -S eth0 | grep -iE 'drop|miss|err|fifo'   # hardware drops — RX overruns at the open (Ch. 54)
+   ethtool -T eth0                              # hardware-timestamping capabilities (Ch. 60)
+   ss -tim                                       # per-socket TCP info: rtt, cwnd, retrans (Ch. 52)
    tcpdump -i eth0 -nn -ttt 'udp port 12345'     # inter-packet deltas on a market-data feed
-   ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 58)
-   phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 58)
+   ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 60)
+   phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 60)
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 53) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 58, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 
-Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 72).
+Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 75).
 
 ```
    objdump -d -M intel --no-show-raw-insn ./app          # disassemble (Intel syntax; Ch. 4)
@@ -164,10 +164,10 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
    # sanitizers — TEST/CI builds only, never production (App D.7):
    g++ -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined x.cpp && ./a.out
    g++ -O1 -g -fsanitize=thread x.cpp && ./a.out          # data races (Ch. 30-33, 40)
-   clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 72)
+   clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 75)
 ```
 
-**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 72), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
+**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 75), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
 
 ## I.10 References
 
@@ -181,7 +181,7 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
 - **Appendix C** (System Tuning Checklist) — where many of these commands are applied as *configuration* (IRQ pinning, ring sizing, governor) rather than one-off *observation*.
 - **Appendix D** (Compiler Flag Reference) — the build flags behind I.9 (`-fno-omit-frame-pointer`, LTO/PGO/BOLT, sanitizers).
 - **Appendix E** (Latency Numbers) — the reference costs these tools let you measure against; **Appendix L** (Benchmark Harness) — how to wrap a measurement so `perf stat` and the histogram agree.
-- Gregg, *Systems Performance* and *BPF Performance Tools* (Ch. 2, 61) — the book-length treatment of everything here.
+- Gregg, *Systems Performance* and *BPF Performance Tools* (Ch. 2, 63) — the book-length treatment of everything here.
 
 ---
 

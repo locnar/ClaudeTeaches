@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution, not the mean. Solid C++ and Linux command-line fluency. For the hands-on parts you want a Linux box with `perf` installed (`linux-tools-$(uname -r)` on Ubuntu, `linux-perf` on Debian, the `perf` package on RHEL/Fedora) and permission to read counters (`/proc/sys/kernel/perf_event_paranoid` ≤ 2, or run under `sudo`).
 >
-> **Leads into:** Ch. 3 (*Micro-benchmarking Done Right*) makes the measurement statistically honest; Ch. 4 (*Reading the Machine*) explains the asm that these counters point you at. The top-down method introduced here (§2.2.2) is the lens for all of Part II, and the cache/branch/front-end counters reappear in Ch. 7–14. Live production tracing with eBPF/`bpftrace` is Ch. 61.
+> **Leads into:** Ch. 3 (*Micro-benchmarking Done Right*) makes the measurement statistically honest; Ch. 4 (*Reading the Machine*) explains the asm that these counters point you at. The top-down method introduced here (§2.2.2) is the lens for all of Part II, and the cache/branch/front-end counters reappear in Ch. 7–14. Live production tracing with eBPF/`bpftrace` is Ch. 63.
 
 ---
 
@@ -244,7 +244,7 @@ Two notes that matter for low-latency work specifically:
 - Build with **`-fno-omit-frame-pointer`** (or rely on DWARF/LBR unwinding) or the stacks will be truncated and the graph useless. This is a profiling build concern — Ch. 22.
 - You can flame-graph **any** event, not just cycles. An *LLC-miss* flame graph shows exactly which call paths are paying for DRAM — often more actionable on a trading hot path than a time-based one, because it points straight at the data-structure choices of Part IV.
 
-For the *off-CPU* side of the tail — time spent **not** running because you blocked on a lock, a syscall, or the scheduler (Ch. 31–46) — cycles-based sampling is blind by construction (a sleeping thread burns no cycles). That is the domain of **off-CPU flame graphs** and `bpftrace`/eBPF scheduler tracing (Ch. 61). Remember the boundary: on-CPU profiling finds where you burn cycles; off-CPU tracing finds where you *wait*. The tail of Ch. 1 lives in both.
+For the *off-CPU* side of the tail — time spent **not** running because you blocked on a lock, a syscall, or the scheduler (Ch. 31–47) — cycles-based sampling is blind by construction (a sleeping thread burns no cycles). That is the domain of **off-CPU flame graphs** and `bpftrace`/eBPF scheduler tracing (Ch. 63). Remember the boundary: on-CPU profiling finds where you burn cycles; off-CPU tracing finds where you *wait*. The tail of Ch. 1 lives in both.
 
 ### 2.4.3 VTune for microarchitectural drill-down
 
@@ -259,7 +259,7 @@ When to reach for it: when `perf stat --topdown` has told you the *category* but
 - **Profiling the wrong build.** The single most common and most embarrassing mistake: profiling a debug (`-O0`) or unoptimized build, or one without LTO/`-march`, then optimizing code the release compiler would have deleted or vectorized. **Always profile the build you ship**, with its real flags (Ch. 22). A flame graph of a `-O0` binary is fiction.
 - **Counter multiplexing.** Ask for more events than the core has programmable counters and `perf` time-slices them and scales up — the output looks complete but is estimated. `perf stat` prints a trailing `(NN.NN%)` enabled-percentage on a multiplexed counter's line; if it's below 100%, your counts are extrapolations. Fix: request fewer events per run (group only what fits), or split across multiple runs. On a short or bursty hot path, multiplexing error can be large.
 - **Skid.** In sampling mode the recorded instruction pointer can lag the instruction that truly caused the event by several instructions, because the pipeline is deep and out-of-order — so the "hot line" in `perf report` may sit a few lines past the real culprit. Use **precise (PEBS) events** (`:pp`/`:ppp` suffix) to pin the architectural state to the right instruction. Trusting non-precise skid blindly sends you optimizing the wrong line.
-- **Frequency scaling and warm-up contamination.** Turbo, C-states, and DVFS (Ch. 6) mean the same code runs at different clocks depending on thermal/idle history, so `cycles` and wall-time wobble run-to-run. Pin frequency, pin the thread (Ch. 42), warm the path (Ch. 46), and prefer counting *instructions/misses* (frequency-independent) over raw time when you can. This is Ch. 3's whole subject — don't trust a single noisy run.
+- **Frequency scaling and warm-up contamination.** Turbo, C-states, and DVFS (Ch. 6) mean the same code runs at different clocks depending on thermal/idle history, so `cycles` and wall-time wobble run-to-run. Pin frequency, pin the thread (Ch. 42), warm the path (Ch. 47), and prefer counting *instructions/misses* (frequency-independent) over raw time when you can. This is Ch. 3's whole subject — don't trust a single noisy run.
 - **The observer effect.** Sampling at very high frequency, heavy `-g` DWARF unwinding, or attaching tracers perturbs the very latency you're measuring. Keep sampling rates sane (≤ a few kHz), prefer LBR/frame-pointer unwinding over DWARF on the hot path, and remember that the lowest-overhead observation is a hardware counter *count*, not a stack sample.
 - **Optimizing without re-measuring.** A change that improves IPC can still *regress the p99.9* (Ch. 1) — e.g. by adding a branch that's usually free but occasionally mispredicts under real data. Close the loop: measure, change, **re-measure the distribution**, keep or revert. Never declare victory on a single mean.
 - **`perf_event_paranoid` and permissions.** If counters read as zero or `perf` refuses to run, you likely need `kernel.perf_event_paranoid` lowered (`sysctl`) or appropriate capabilities; in containers you may need `--cap-add=PERFMON`/`SYS_ADMIN`. A silent zero is a permissions problem, not a fast program.
@@ -284,7 +284,7 @@ When to reach for it: when `perf stat --topdown` has told you the *category* but
 - [ ] My counts aren't **multiplexed** (enabled % = 100), or I split the events across runs.
 - [ ] I normalized counters (IPC, MPKI, miss-rate), not raw totals, against a **baseline**.
 - [ ] I used **precise (PEBS)** events for sampling so skid didn't mislocate the hot line.
-- [ ] I controlled frequency/affinity/warm-up so cycles and time are trustworthy (→ Ch. 3, 6, 42, 46).
+- [ ] I controlled frequency/affinity/warm-up so cycles and time are trustworthy (→ Ch. 3, 6, 42, 47).
 - [ ] After the change I **re-measured the distribution** (p99/p99.9), not just the mean or IPC.
 
 ---

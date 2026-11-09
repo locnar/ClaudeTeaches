@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 41 (context switching — preemption/interrupts are the jitter this eliminates), Ch. 42 (pinning — isolation makes the pin effective), Ch. 43 (SMT — isolate the sibling too), Ch. 44 (cache partitioning — the shared-L3 half of isolation, which this chapter's kernel knobs complete), Ch. 6 (BIOS/firmware tuning — the layer below the kernel), Ch. 1 (jitter/tail — the metric).
 >
-> **Leads into:** Ch. 46 (warming — once the core is quiet, keep it warm), Ch. 55–57, 61, 62 (NIC / DDIO / flow steering / bypass — the I/O on the isolated cores), Appendix C (the consolidated checklist this chapter feeds). This is the kernel configuration that delivers the "quiet core" Ch. 42–44 assumed.
+> **Leads into:** Ch. 47 (warming — once the core is quiet, keep it warm), Ch. 57–59, 63, 64 (NIC / DDIO / flow steering / bypass — the I/O on the isolated cores), Appendix C (the consolidated checklist this chapter feeds). This is the kernel configuration that delivers the "quiet core" Ch. 42–44 assumed.
 
 ---
 
@@ -99,7 +99,7 @@ Building the quiet core — the boot-time and runtime isolation (the bulk of App
 
 Ensuring the hot thread is never preempted — and doing it *safely*:
 
-- **Run the hot thread `SCHED_FIFO` at high priority.** `sched_setscheduler(0, SCHED_FIFO, &param)` (or `chrt -f 80`) so the hot thread runs ahead of all normal tasks and isn't preempted by timeslices or `SCHED_OTHER` work. On an isolated core there's little to preempt it, but RT priority guarantees correctness if *anything* (a kernel thread, a stray task) becomes runnable, and orders *multiple* RT threads deterministically. Set it in thread startup (with affinity — Ch. 42, FTZ/DAZ — Ch. 27, warming — Ch. 46).
+- **Run the hot thread `SCHED_FIFO` at high priority.** `sched_setscheduler(0, SCHED_FIFO, &param)` (or `chrt -f 80`) so the hot thread runs ahead of all normal tasks and isn't preempted by timeslices or `SCHED_OTHER` work. On an isolated core there's little to preempt it, but RT priority guarantees correctness if *anything* (a kernel thread, a stray task) becomes runnable, and orders *multiple* RT threads deterministically. Set it in thread startup (with affinity — Ch. 42, FTZ/DAZ — Ch. 27, warming — Ch. 47).
 - **Choose priorities deliberately.** Higher RT priority = runs first. Order your RT threads by latency-criticality (the tick-to-trade thread above the journaling thread, etc.), and know what a 100%-busy `SCHED_FIFO` thread *can* starve on its CPU: the `SCHED_OTHER` per-CPU kthreads (`ksoftirqd/N`, `kworker/N:*`), lower-priority RT kthreads such as `watchdog/N`, and on PREEMPT_RT the threaded `irq/*` handlers and `rcuc/N` — which is why those belong on housekeeping cores and why the throttle exists (§45.5). (`migration/N` runs in the *stop* class, above every RT priority, and cannot be starved.) Document the priority map.
 - **`SCHED_FIFO` vs `SCHED_RR`.** FIFO runs until the thread yields/blocks/is preempted by higher priority (no timeslicing among equal priority — right for a single dominant hot thread). RR adds round-robin timeslicing among equal-priority threads (use if you have several equal RT threads that must share). For a busy-polling hot thread that runs continuously, **FIFO** is the norm.
 - **Beware RT throttling (§45.5).** On kernels before 6.12 (or with `CONFIG_RT_GROUP_SCHED=y`) the RT throttle (`sched_rt_runtime_us`/`sched_rt_period_us`, default 950,000 of every 1,000,000 µs) *caps* RT-thread CPU to prevent a runaway RT thread from locking up the system — but a **busy-polling `SCHED_FIFO` thread runs 100%**, so the throttle *forcibly deschedules it* for the remaining ~50 ms of every second (a periodic, tens-of-milliseconds latency spike!). On a dedicated isolated core you typically **disable RT throttling** (`sched_rt_runtime_us = -1`) — *carefully*, because that removes the safety net (a buggy RT thread can then hang the box). From Linux 6.12 the throttle is replaced by the **fair deadline server** (`/sys/kernel/debug/sched/fair_server/cpuN/{runtime,period,defer}`), which preempts the RT thread only when fair-class tasks are actually runnable on that CPU — so a lone RT thread on a properly isolated core is no longer stalled at all, and the knob to check is that nothing `SCHED_OTHER` lands there. This is the key RT-tuning subtlety for busy-polling HFT.
@@ -115,7 +115,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 - **Forgetting `mlockall` on RT threads (Ch. 23, 26).** RT priority guarantees scheduling, not memory residency — a page fault (Ch. 23) still spikes. `mlockall` + pre-fault (Ch. 26) is mandatory RT setup.
 - **Over-tuning / breaking the system.** Isolating *too many* cores (leaving too few for housekeeping), disabling RT throttling without understanding it, setting a 100%-busy RT thread above the per-CPU kthreads it can starve (`ksoftirqd/N`, `kworker/N:*`, `watchdog/N`, threaded `irq/*` on PREEMPT_RT → softlockups and stalled I/O), or applying a `tuned` profile blindly — all can make the box *unstable* or *slower*. Tune deliberately, measure each change (`cyclictest`), and keep enough housekeeping capacity.
 - **`isolcpus` deprecation / wrong interface.** `isolcpus` works but is semi-deprecated in favor of cgroup v2 `cpuset` isolated partitions on newer kernels; using the wrong/old interface (or both inconsistently) can give surprising behavior. Know your kernel's preferred isolation mechanism.
-- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail continuously (Ch. 76).
+- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail continuously (Ch. 81).
 - **RT priority on a shared/general core without isolation.** Giving a thread `SCHED_FIFO` on a *non*-isolated core can *starve* the rest of the system (it preempts everything, including things the box needs) — RT priority belongs with isolation. Don't RT-prioritize on a general-purpose core casually.
 
 ## 45.6 Exercises & checklist
@@ -137,7 +137,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 - [ ] The **BIOS/firmware layer** (Ch. 6) is tuned *under* the kernel: deep **C-states off**, **P-states/turbo** fixed, **SMIs** minimized, **HT** handled (Ch. 43).
 - [ ] I **measured jitter with `cyclictest`** before/after each change (max latency = the tail — Ch. 1), drove the max down to single-digit µs under realistic load, and chased remaining spikes to their source.
 - [ ] Everything-not-hot is **confined to housekeeping cores** (cgroups/`cpuset`), with **enough housekeeping capacity**; I didn't over-isolate or over-tune into instability.
-- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail is **monitored continuously** (Ch. 76).
+- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail is **monitored continuously** (Ch. 81).
 
 ## 45.7 References
 
@@ -151,10 +151,10 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 
 - The OSADL real-time wiki and `cyclictest` latency plots — extensive measured jitter data and methodology.
 - Jon Masters' real-time Linux talks and the `nohz_full` design papers (Frederic Weisbecker) — full dynticks internals.
-- Ch. 41 (*Context Switching*) — the preemption/interrupt jitter this eliminates; Ch. 42 (*Pinning*) — affinity/IRQ routing that pairs with isolation; Ch. 43 (*SMT*) — isolating the sibling; Ch. 6 (*System Setup*) — the BIOS layer below; Ch. 46 (*Warming*) — keeping the now-quiet core warm; Ch. 23/26 (*Memory/mmap*) — `mlockall` for RT.
+- Ch. 41 (*Context Switching*) — the preemption/interrupt jitter this eliminates; Ch. 42 (*Pinning*) — affinity/IRQ routing that pairs with isolation; Ch. 43 (*SMT*) — isolating the sibling; Ch. 6 (*System Setup*) — the BIOS layer below; Ch. 47 (*Warming*) — keeping the now-quiet core warm; Ch. 23/26 (*Memory/mmap*) — `mlockall` for RT.
 - Ch. 44 (*Cache Allocation Technology & Intel RDT*) — the next step after pinning: partitioning the shared L3 so a neighbor can't evict the hot working set even when the core is isolated.
 - **Appendix C** (System Tuning Checklist) — the full `isolcpus`/`nohz_full`/RT/IRQ/BIOS recipe consolidated; **Appendix E** — the context-switch cost this tuning avoids (the `cyclictest` figures themselves are §45.3's).
 
 ---
 
-*Next: Ch. 46 — Keeping the Hot Path Warm, the final piece of the isolation story: once you've built a quiet, pinned, cache-partitioned, isolated core (Ch. 41–45), the remaining enemy is *coldness* — the first real message after a quiet spell hits cold caches, TLBs, and predictors. How to keep the hot path warm with shadow traffic, pre-touching, and warm-up so the message that matters is never the cold one.*
+*Next: Ch. 46 — Hunting Residual Noise on Isolated Cores.*

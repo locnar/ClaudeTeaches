@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution and care about p99/p99.9, not the mean. Ch. 2 (*Measure First*) — you can read PMU counters and know whether a workload is memory- or compute-bound. For the hands-on parts: a Linux box, a C++20 compiler, [Google Benchmark](https://github.com/google/benchmark) and [HdrHistogram_c](https://github.com/HdrHistogram/HdrHistogram_c) (or the C++ port).
 >
-> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 76. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
+> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 81. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
 
 ---
 
@@ -204,7 +204,7 @@ The environment is a variable you must nail down, or run-to-run noise will swamp
 
 - **Pin the thread to an isolated core.** `taskset -c <cpu>` (or `sched_setaffinity`, Ch. 42) stops the scheduler from migrating your benchmark across cores mid-run, which trashes caches and confuses frequency. Ideally that core is `isolcpus`/`nohz_full` (Ch. 45) so nothing else runs on it.
 - **Fix the CPU frequency.** Set the governor to `performance` and, for the tightest results, disable turbo (`/sys/devices/system/cpu/intel_pstate/no_turbo`) so the clock is *constant* rather than ramping with load and temperature (Ch. 6). A benchmark whose result depends on whether turbo kicked in is measuring the thermal state, not your code.
-- **Warm up.** Discard the first iterations: the first calls pay cold I-cache/D-cache, cold branch predictor, cold TLB, and first-touch page faults (Ch. 23, 46). Google Benchmark's auto-iteration absorbs much of this, but for hand-rolled latency loops, explicitly run a warm-up phase before you start recording. **But** — and this ties back to §3.2.1 — warming up measures the *warm* path; if production runs cold (the first message after a quiet period), you must *also* measure the cold case deliberately. Both numbers are real; they answer different questions.
+- **Warm up.** Discard the first iterations: the first calls pay cold I-cache/D-cache, cold branch predictor, cold TLB, and first-touch page faults (Ch. 23, 47). Google Benchmark's auto-iteration absorbs much of this, but for hand-rolled latency loops, explicitly run a warm-up phase before you start recording. **But** — and this ties back to §3.2.1 — warming up measures the *warm* path; if production runs cold (the first message after a quiet period), you must *also* measure the cold case deliberately. Both numbers are real; they answer different questions.
 - **Quiesce the machine.** Close other load, disable `irqbalance` and steer IRQs off your core (Ch. 42), and prefer a tuned box (Appendix C). Noisy neighbors are a tail source.
 
 A frequency-independent cross-check: measure in **core cycles** (the PMU `cycles` event — `perf stat -e cycles`, or `rdpmc`; Ch. 17) as well as nanoseconds (`clock_gettime`/`rdtscp` — the TSC is a constant-rate clock, *not* a core-cycle counter, so it can only ever serve as the ns side of this check). If two runs disagree in ns but agree in cycles, the difference was frequency, not your code.
@@ -267,7 +267,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - **Enough samples for the percentile you quote.** You cannot honestly state p99.9 from 1,000 samples — that's *one* event in the tail (Ch. 1). For p99.9 you want ≫ 10⁵ samples; for p99.99, ≫ 10⁶. State your sample count alongside the percentile.
 - **Compare, don't just measure.** The question is almost always "is B faster than A?", which is a *difference of distributions*, not of means. Tools like Google Benchmark's `compare.py` apply a U-test (Mann–Whitney) to tell you whether the difference is statistically significant or noise. A 2% "improvement" inside 5% run-to-run noise is nothing.
 - **Watch for multimodality.** A bimodal histogram (two humps) usually means two regimes — e.g. cache-hit vs cache-miss, or turbo vs non-turbo — and a single percentile summary hides it. Look at the histogram shape (Ch. 1's picture), not just the quantiles.
-- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 76.
+- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 81.
 
 ---
 
@@ -304,7 +304,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - [ ] I have **enough samples** for the percentile I quote (≫10⁵ for p99.9).
 - [ ] I ran **repetitions**, report the **spread**, and used a **significance test** before claiming a win.
 - [ ] I can **explain *why*** the winner won via PMU counters (Ch. 2) — the result generalizes only if I understand it.
-- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 76).
+- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 81).
 
 ---
 

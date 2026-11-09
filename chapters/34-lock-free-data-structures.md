@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 30 (atomics & memory ordering — the acquire/release this is built on), Ch. 31 (shared-nothing — lock-free queues are the *channels* between shared-nothing stages), Ch. 32 (spinlocks — the alternative; CAS loops spin), Ch. 33 (false sharing — head/tail must be padded), Ch. 7 (coherence — the cost of contended CAS), Ch. 23–24 (no hot-path allocation — the ring is pre-allocated).
 >
-> **Leads into:** Ch. 35 (seqlocks — single-writer publication), Ch. 36 (safe reclamation — the hard part of *dynamic* lock-free structures), Ch. 37 (the Disruptor — the productionized ring buffer), Ch. 50 (IPC — these queues in shared memory — Ch. 26). The SPSC ring is the single most important structure in the low-latency data plane.
+> **Leads into:** Ch. 35 (seqlocks — single-writer publication), Ch. 36 (safe reclamation — the hard part of *dynamic* lock-free structures), Ch. 37 (the Disruptor — the productionized ring buffer), Ch. 51 (IPC — these queues in shared memory — Ch. 26). The SPSC ring is the single most important structure in the low-latency data plane.
 
 ---
 
@@ -133,7 +133,7 @@ Read it: the padded SPSC ring *sustains* ~7-12 ns per message of **throughput** 
 The queue family, simplest to hardest — and the strong advice to stay as simple as your design allows:
 
 - **SPSC (single-producer, single-consumer) — the default.** One producer, one consumer, a fixed-size ring. Needs **no CAS** (each index has exactly one writer — single-writer, Ch. 31), no ABA, no reclamation — just two acquire/release atomic indices (§34.3). Fast, simple, **wait-free**, easy to verify. **If you can structure the handoff as SPSC (and shared-nothing pipelines usually can — Ch. 31, 37), do.** This is the right answer for the vast majority of hot-path queues.
-- **MPSC (multi-producer, single-consumer).** Many producers, one consumer (e.g. many threads logging to one I/O thread — Ch. 71, or feeding one aggregator). Producers contend on the head index via CAS (or a per-producer slot scheme); the consumer is single. More complex than SPSC (the producer side needs CAS + careful ordering) but avoids full MPMC. Common for fan-in.
+- **MPSC (multi-producer, single-consumer).** Many producers, one consumer (e.g. many threads logging to one I/O thread — Ch. 73, or feeding one aggregator). Producers contend on the head index via CAS (or a per-producer slot scheme); the consumer is single. More complex than SPSC (the producer side needs CAS + careful ordering) but avoids full MPMC. Common for fan-in.
 - **SPMC (single-producer, multi-consumer).** One producer, many consumers (broadcast/work-distribution — the Disruptor's model, Ch. 37). Consumers contend on the tail.
 - **MPMC (multi-producer, multi-consumer) — use sparingly.** The general case: CAS on both ends, the hardest to make correct and fast (bounded MPMC rings like Vyukov's, or Michael-Scott unbounded queues). Real contention (Ch. 32), ABA risk, and (if unbounded/dynamic) reclamation (Ch. 36). **Reach for MPMC only when the design genuinely needs many-to-many** — often a sign you should re-shard to SPSC/MPSC (Ch. 31). Use a vetted library (moodycamel, boost.lockfree, folly) — don't hand-roll MPMC.
 - **Bounded vs unbounded.** Prefer **bounded** (fixed-size ring) on the hot path: pre-allocated (no allocation — Ch. 23), no reclamation, predictable memory, natural backpressure (push fails when full → caller handles it). Unbounded (linked) queues need allocation and reclamation (Ch. 36) — avoid on the hot path.
@@ -145,7 +145,7 @@ The ring buffer is the concrete structure behind bounded queues, and the details
 - **Power-of-two capacity (Ch. 28).** Keep the capacity a *compile-time* power of two: with an unsigned index, `idx % CAP` and `idx & (CAP-1)` both compile to a single AND (the compiler does the mask trick for you — §28.4.3); it is a *runtime* capacity (or a signed index needing sign fix-up) that forces a ~15-40-cycle `div` (Ch. 11) into the hot loop. Use *monotonically increasing* indices (never wrap the counters themselves; wrap only when indexing) so `head - tail` gives the count and full/empty are unambiguous (avoids the "is it full or empty?" ambiguity of wrapped indices).
 - **Pad head and tail to separate cache lines (Ch. 33).** The single most important layout rule (§34.3): producer-written `head` and consumer-written `tail` on **separate** lines, or they false-share and you lose 3-5×.
 - **Cache the opposite index (batching).** The producer reads `tail` only to check fullness; instead of reading it (a cross-core load) every push, **cache** the last-seen `tail` and only re-read when the cache says "full" — most pushes then need no cross-core read. Symmetrically for the consumer and `head`. This batching is the big throughput lever (§34.3) and the Disruptor's core trick (Ch. 37).
-- **Pre-allocate the buffer (Ch. 23, 26).** The ring's storage is allocated once at startup, pre-faulted and `mlock`ed (Ch. 26), ideally huge-page-backed (Ch. 15) and NUMA-local (Ch. 16). The hot path never allocates. For IPC, the ring lives in shared memory (Ch. 26, 50) with indices as offsets (Ch. 26).
+- **Pre-allocate the buffer (Ch. 23, 26).** The ring's storage is allocated once at startup, pre-faulted and `mlock`ed (Ch. 26), ideally huge-page-backed (Ch. 15) and NUMA-local (Ch. 16). The hot path never allocates. For IPC, the ring lives in shared memory (Ch. 26, 51) with indices as offsets (Ch. 26).
 - **Element layout.** Store fixed-size POD elements inline (no pointers to chase — Ch. 25); for variable-size messages, a ring of fixed slots with an overflow strategy, or a separate byte-ring. Keep the element cache-friendly (Ch. 8).
 
 ### 34.4.3 Avoiding ABA (tagged pointers)
@@ -202,7 +202,7 @@ For the CAS-based structures that *do* manipulate pointers (MPMC, lock-free stac
 
 - P. McKenney, *Is Parallel Programming Hard?* — lock-free design, ABA, and the reclamation problem (leads into Ch. 36).
 - J. Preshing's blog — lock-free programming, the ABA problem, and memory ordering, with clear examples.
-- Ch. 30 (*Atomics*) — the ordering foundation; Ch. 32 (*Spinlocks*) — the locking alternative and CAS backoff; Ch. 33 (*False Sharing*) — padding head/tail; Ch. 35 (*Seqlocks*) — single-writer publication; Ch. 36 (*Safe Reclamation*) — the hard part of dynamic lock-free; Ch. 37 (*Disruptor*) — the ring buffer productionized; Ch. 40 (*Concurrency Tooling*) — validating lock-free code; Ch. 50 (*IPC*) — rings in shared memory.
+- Ch. 30 (*Atomics*) — the ordering foundation; Ch. 32 (*Spinlocks*) — the locking alternative and CAS backoff; Ch. 33 (*False Sharing*) — padding head/tail; Ch. 35 (*Seqlocks*) — single-writer publication; Ch. 36 (*Safe Reclamation*) — the hard part of dynamic lock-free; Ch. 37 (*Disruptor*) — the ring buffer productionized; Ch. 40 (*Concurrency Tooling*) — validating lock-free code; Ch. 51 (*IPC*) — rings in shared memory.
 - **Appendix A** — ARM weak ordering and LSE atomics; **Appendix E** — cross-core (HITM) transfer latency, the floor under any handoff; **Appendix F** — ABA glossary entry.
 
 ---
