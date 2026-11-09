@@ -1231,6 +1231,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 89.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
   - 89.4.5 Symbol/venue sharding (core dumps → Ch. 93)
   - 89.4.6 Divergence forensics and determinism auditing
+  - 89.4.7 Checkpointing the core: consistent snapshots without stalling the hot path
+  - 89.4.8 Segment lifecycle: reattach, epochs and torn-write recovery
 - 89.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 - 89.6 Exercises & checklist
 

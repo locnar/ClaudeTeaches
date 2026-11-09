@@ -138,7 +138,7 @@ Building the zero-copy IPC substrate (Ch. 57, 89) on `mmap`:
 - **Offsets, not pointers.** A `MAP_SHARED` segment may map at *different virtual addresses* in each process, so **never store absolute pointers** in it — store **offsets from the segment base** or **indices** (Ch. 28.4.3). A pointer written by process A is meaningless in process B. This is the single most common shared-memory bug.
 - **Single-writer-per-segment discipline (Ch. 89).** Assign each shared region exactly one writer process; many readers. This makes the memory model tractable (seqlock/SPSC patterns) and contains faults — the foundation of the fault-isolated process topology (Ch. 89).
 - **Layout and false sharing (Ch. 36).** The shared structure's hot indices (head/tail of a ring) are written by different cores/processes; pad them to separate cache lines (`hardware_destructive_interference_size`) or they ping-pong across the interconnect (Ch. 16, 36) — the most expensive memory event, now across processes.
-- **Lifecycle.** `shm_unlink` removes the name (the segment persists until all maps close); design startup/shutdown/crash-recovery so a crashed writer's segment can be re-attached or recreated cleanly (Ch. 89's crash-only design). Back the segment with **explicit huge pages** for TLB friendliness (Ch. 15): a file on a hugetlbfs mount (e.g. `/dev/hugepages/feed`) mapped `MAP_SHARED`, `memfd_create(name, MFD_HUGETLB)` (Linux ≥ 4.14) with the fd passed between processes, or SysV `shmget(..., SHM_HUGETLB)`. `MAP_HUGETLB` on a `shm_open` (tmpfs) fd fails with `EINVAL` — the flag is accepted only for anonymous mappings and hugetlbfs/`MFD_HUGETLB` descriptors — and remounting `/dev/shm` as hugetlbfs breaks `shm_open`/`ftruncate` for everything else on the box.
+- **Lifecycle.** `shm_unlink` removes the name (the segment persists until all maps close); design startup/shutdown/crash-recovery so a crashed writer's segment can be re-attached or recreated cleanly (Ch. 89's crash-only design; the reattach protocol — header checks, owner liveness, epochs and torn-write recovery — is Ch. 89 §89.4.8). Back the segment with **explicit huge pages** for TLB friendliness (Ch. 15): a file on a hugetlbfs mount (e.g. `/dev/hugepages/feed`) mapped `MAP_SHARED`, `memfd_create(name, MFD_HUGETLB)` (Linux ≥ 4.14) with the fd passed between processes, or SysV `shmget(..., SHM_HUGETLB)`. `MAP_HUGETLB` on a `shm_open` (tmpfs) fd fails with `EINVAL` — the flag is accepted only for anonymous mappings and hugetlbfs/`MFD_HUGETLB` descriptors — and remounting `/dev/shm` as hugetlbfs breaks `shm_open`/`ftruncate` for everything else on the box.
 
 ### 29.4.2 Pre-faulting and `mlock`
 
@@ -159,7 +159,7 @@ The warming discipline that makes any mapping — allocator slab, book, shared r
 - **False sharing across processes (Ch. 36).** The ring's head/tail (written by different processes/cores) on the same cache line ping-pongs over the interconnect — expensive (Ch. 16). Pad hot shared indices to separate cache lines.
 - **`mlock` without raising `RLIMIT_MEMLOCK` / running out of locked memory.** `mlock` fails or partially locks if the limit is too low; verify the limit and that the lock succeeded. Locking *too much* (or `mlockall(MCL_FUTURE)` with a leaky process) can pressure the system — lock the hot regions deliberately.
 - **NUMA-blind pre-faulting of a mapped region (Ch. 16).** First-touch places the (possibly huge) page on the toucher's node; pre-faulting a shared/huge region from the wrong thread strands it remote. Fault from the using thread on the right node.
-- **Leaking shared segments / unclean lifecycle.** A crashed process can leave a `/dev/shm` segment behind; without `shm_unlink`/recovery logic, restarts accumulate or re-attach to stale state. Design crash-only re-attach/recreate (Ch. 89).
+- **Leaking shared segments / unclean lifecycle.** A crashed process can leave a `/dev/shm` segment behind; without `shm_unlink`/recovery logic, restarts accumulate or re-attach to stale state. Design crash-only re-attach/recreate (Ch. 89 §89.4.8).
 - **Assuming `munmap`/`MADV_DONTNEED` is free or instant on the hot path.** Unmapping and re-mapping per use reintroduces faults (and TLB shootdowns across cores). Map once at setup, keep it; tear down on the cold path.
 
 ## 29.6 Exercises & checklist
@@ -181,7 +181,7 @@ The warming discipline that makes any mapping — allocator slab, book, shared r
 - [ ] Hot shared indices (ring head/tail) are **cache-line-padded** to avoid cross-process false sharing (Ch. 36).
 - [ ] Large regions are **huge-page-backed** (`MAP_HUGETLB` — Ch. 15) and **pre-faulted from the using thread on the right NUMA node** (Ch. 16).
 - [ ] `RLIMIT_MEMLOCK` is sufficient and `mlock` success is **verified**; mappings are created **once at setup** and torn down on the cold path (no per-use map/unmap).
-- [ ] Shared-segment **lifecycle/crash-recovery** is designed (`shm_unlink`, re-attach/recreate — Ch. 89), and pre-faulting is part of **warm-up** (Ch. 53).
+- [ ] Shared-segment **lifecycle/crash-recovery** is designed (`shm_unlink`, re-attach/recreate — Ch. 89 §89.4.8), and pre-faulting is part of **warm-up** (Ch. 53).
 
 ## 29.7 References
 

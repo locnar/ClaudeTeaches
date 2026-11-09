@@ -135,7 +135,7 @@ If fault containment is the goal, the metric is **how fast you recover** — and
 |---|---|---|
 | **Detect** (supervisor notices death) | heartbeat timeout / `SIGCHLD` (§89.4.3) | the heartbeat interval — too long = slow detect; too short = false positives |
 | **Restart** (spawn / re-exec the process) | process spawn + map shared memory (Ch. 29) | spawn cost; mapping pre-existing shm is fast |
-| **Recover state** (crash-only, §89.2.4) | reload durable state from shm/journal (Ch. 94) | journal replay length — bounded by snapshot frequency |
+| **Recover state** (crash-only, §89.2.4) | reload durable state from shm/journal (Ch. 94): VM-measured, a 512 MiB snapshot loads from page cache in ~110 ms and the journal replays at ~3.3 ns/event (§89.4.7, Ch. 96 §96.3) | journal replay length — bounded by snapshot frequency; the snapshot's cost on the hot thread is the other side of the trade (§89.4.7: a fork/COW snapshot puts 1.3–3.7 µs on the p99–p99.9 of every write while the child lives; a double buffer with a dirty-line bitmap costs +10 ns per write) |
 | **Warm** (Ch. 53) | pre-touch pages, prime caches/TLB/predictors, shadow traffic | the warm-up you skip = a cold-start tail on the first real tick |
 | **Live** | back to full-speed correct decisions | — |
 
@@ -144,7 +144,7 @@ The harness is the §89.4.3 supervisor itself: it `fork`/`exec`s a role that pub
 The lessons:
 
 - **Recovery time is detect + restart + recover + warm — measure all four, and the tail of each.** Teams measure "restart time" and forget **warm** (Ch. 53): a process that's "up" but cold is still effectively impaired for its first ticks. The case study (Ch. 104) measures *warm-and-correct*, not *process-alive*.
-- **Bound recovery state with snapshots.** If recovery replays a journal (Ch. 94), the journal length bounds recovery time — take periodic state snapshots so replay starts from a recent checkpoint, not session-start (§89.4, Ch. 94).
+- **Bound recovery state with snapshots.** If recovery replays a journal (Ch. 94), the journal length bounds recovery time — take periodic state snapshots so replay starts from a recent checkpoint, not session-start (§89.4.7 for how to take one without stalling the hot thread, Ch. 94 §94.4.4 for where it goes).
 - **Tune the heartbeat for detect-vs-false-positive.** Too slow and you're impaired longer before noticing; too fast and a transient stall (a page fault, an SMI, a scheduler preemption on a non-isolated core) looks like death and you restart needlessly (§89.4.3). Measure the false-positive rate against the detect latency.
 - **The whole point is the *contained* failure has a *bounded, fast, warm* recovery** — the monolith's "recovery" is "restart everything and lose the session," which has no good tail.
 
@@ -279,6 +279,56 @@ Two operational techniques for keeping failures small and debuggable — one dev
   ```
 
   The two tests that catch most of it: replay the golden capture **twice with ASLR enabled** (`setarch -R` is the thing you must *not* use here) and require identical digest streams — pointer-keyed hashing and uninitialised padding fail this immediately; and build the core with GCC and Clang at `-march=x86-64-v3` and `-march=native` and require the same — FP reassociation fails this. Both run in the Ch. 104 §104.4.1 gate, which now fails with an event number instead of a diff.
+
+### 89.4.7 Checkpointing the core: consistent snapshots without stalling the hot path
+
+§89.3 bounded recovery by "snapshot frequency" and Ch. 94 §94.4.4 writes the snapshot to storage; neither said how a consistent image of a few hundred MiB of hot state is *taken* while the hot thread keeps applying ticks. A snapshot is a pair **(state, last-applied seq)** captured at a sequence boundary — nothing in it reflects event `seq+1` — so the problem is purely one of copying without pausing. Three mechanisms, measured on the 4-vCPU VM of Ch. 41 §41.3 (GCC 13.3 `-O2`, Linux 6.18; `ckpt.cpp`: a 512 MiB / 2 GiB resident state, a hot loop writing one random cache line every 200 ns with `rdtsc` around each write):
+
+```
+   state 512 MiB, THP off                  write p50 / p99 / p99.9 / max              what happened
+   ───────────────────────────────────     ─────────────────────────────────────────   ─────────────────────────────────────────────────────────────────────
+   baseline, no snapshot                   241 / 464 / 624 ns / 1.5 ms (VM steal)
+   fork() — the call itself                parent blocked 8.3 ms                       page-table copy of 512 MiB (28 ms for 2 GiB); the child owns a consistent image
+   fork() — the 2 M writes after it        241 / 1 324 / 3 670 ns / 199 µs             17 345 writes > 2 µs: each first write to a page after fork is a COW fault (4 KiB copy + TLB flush)
+   …the same with THP (madvise)            250 / 2 050 / 2 887 ns / 247 µs             21 588 writes > 2 µs: a COW fault now copies a 2 MiB page — THP makes fork snapshots WORSE
+   …2 GiB state, THP off                   424 / 2 335 / 15 301 ns / 7.1 ms            the fault storm scales with the working set; the max is the VM descheduling a faulting thread
+   memcpy to a second buffer, inline       stall 44 ms (12.1 GB/s); 177 ms for 2 GiB   simple and wrong on the hot thread; right from a housekeeping core over a stable double buffer
+   hot loop + dirty-line bitmap            252 / 546 / 701 ns                           +10 ns per write; 985 720 of 8.4 M lines dirty after 2 M writes → an incremental snapshot copies 60 MiB, not 512
+   restore: load 512 MiB from /dev/shm     113 ms (4.8 GB/s); 503 ms for 2 GiB         + replay of the journal since the snapshot at ~3.3 ns/event (Ch. 96 §96.3): 60 s of 100 k ev/s = 20 ms
+```
+
+- **`fork()` is the easy snapshot and the hot thread pays for it twice**: once in the call (the page-table copy blocks the *caller* for ~16 ms/GiB), then in a COW fault on the first write to every page it touches while the child lives — a tail of 1.3–3.7 µs at p99–p99.9 against a 0.5 µs baseline, for as long as the child takes to write its image. Redis-style snapshots work because Redis tolerates that tail; a tick-to-trade core does not. If `fork()` is used at all, call it from a **housekeeping thread** that owns no hot state (the page tables are per process, so the stall still lands on every thread's next fault, but the call's 8 ms does not block the hot loop), keep THP **off** for the state (a 2 MiB COW copy is 500× a 4 KiB one), and schedule it in a quiet window (Appendix M's pre-open, not 09:30:01).
+- **Double-buffered state is the steady-state answer.** The core keeps its state behind a seqlock-style version word (Ch. 38 §38.4.2): a housekeeping core copies the live state into the shadow buffer while re-checking the version, retrying the lines that changed under it; the hot thread's only cost is the version increment it already pays. With the **dirty-line bitmap** (one `or` into a bitmap per write — measured at +10 ns, two cache lines touched) the copy is incremental: 60 MiB instead of 512 MiB for two million writes, and the copier walks the bitmap with `tzcnt` (Ch. 31) and clears it under the version. The snapshot's `seq` is read with the version, so it is a boundary by construction.
+- **Deterministic cores snapshot for free from a replica** (Ch. 96 §96.2.3): a hot replica that applies the same stream can pause *itself* at any `seq`, write its state, and catch up at 3 ns/event — the primary never notices. This is the preferred design wherever a replica exists; §89.4.7's mechanisms are for the single-copy core.
+- **The RTO curve**: `RTO = detect (Ch. 97) + load(snapshot size) + replay(rate × interval since snapshot) + warm-up (Ch. 53)`. From the table: 512 MiB loads in ~110 ms, a 60 s interval at 100 k events/s replays in 20 ms, so snapshotting every minute buys an RTO dominated by load and warm-up, and a 10× larger state costs 10× the load term — which is the argument for keeping the *core's* state small and the research-grade state (Ch. 94 §94.4.7) elsewhere. Add the measured terms as a row to §89.3's table for your system; "bounded by snapshot frequency" is a curve, not a sentence.
+
+### 89.4.8 Segment lifecycle: reattach, epochs and torn-write recovery
+
+Ch. 29 §29.4.1 and Ch. 57 §57.4.2 defer the question of what a process does when it attaches to a shared segment whose writer died mid-store; here is the protocol (`segrecover.cpp`: a writer killed with `SIGKILL` at a random point while writing 64-byte records payload-first/commit-word-last and holding a robust mutex; a reader reattaches):
+
+```
+   header (one cache line, written once at creation, checked on every attach)
+   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   magic              identifies the segment type; mismatch → refuse (it is some other program's segment, or garbage)
+   layout_version     bumped on any incompatible change; mismatch → refuse (never "upgrade in place")
+   layout_fingerprint hash of sizeof/offsetof of every struct in the segment (Ch. 57): catches a rebuilt binary with a different layout under the same version number
+   epoch              incremented by every writer that takes ownership; records carry it, readers discard a dead epoch's tail
+   owner_pid + owner_start_ns   liveness of the writer: pid alone is reusable; pid + start time (or a pidfd) is not
+   heartbeat_ns       the writer's Ch. 89 §89.4.3 liveness slot, in the segment itself
+   seq                the last CLAIMED sequence — may exceed the last COMMITTED one after a crash
+   robust_mutex       the rare cross-process lock (config swaps, Ch. 88), PTHREAD_MUTEX_ROBUST so a dead holder's lock is recoverable
+
+   record discipline: write payload … then store commit = seq with release (Ch. 38 §38.4.2's seq-last ordering). A reader accepts a record iff commit == seq.
+
+   the reattach decision tree (measured 86–277 µs on the VM, dominated by the committed-prefix check):
+     magic / version / fingerprint wrong?                       → REFUSE to attach; alert. Never patch.
+     owner alive (kill(pid,0) && start time matches)?            → attach as a READER only (or refuse, if this process must be the writer: Ch. 97's lease decides)
+     owner dead (heartbeat stale AND pid gone)?                  → take ownership: epoch++, owner = me; scan from `seq` backwards to the last record with commit == seq
+     torn tail = records claimed but not committed               → discard; every consumer that read past the last committed seq in the dead epoch rolls back to it
+     robust mutex: lock() == EOWNERDEAD                          → pthread_mutex_consistent(), re-validate (or rebuild) the state the lock protected, unlock
+```
+
+The run that produced those numbers found the writer's last record with **all seven payload words written and the commit word still holding the previous lap's value** — a torn write that a payload-only check would have accepted, and that the commit-word rule rejects in one compare. The committed prefix validated clean (0 bad words in the last 4096 records), ownership moved to epoch 2, and the robust mutex returned `EOWNERDEAD` and was made consistent. Three rules follow. **Never fix up a header**: a wrong magic, version or fingerprint is a deployment error (Ch. 103 §103.4.2's compatibility window exists so a new binary attaches only to layouts it was built for). **Epoch stamps make the tail safe for readers**: a consumer that applied records from the dead writer's final, uncommitted lap sees an epoch it no longer trusts and re-reads from the last committed `seq` — the single-writer discipline (§89.4.2) is what makes "roll back to seq N" meaningful. **Robust mutexes recover the lock, not the data**: after `EOWNERDEAD` the state under the lock is whatever the dead holder left; the recovering process validates it against an invariant or rebuilds it from the journal (Ch. 94) before marking the mutex consistent — and on the hot path there should be no mutex to recover (Ch. 35).
 
 ## 89.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 
