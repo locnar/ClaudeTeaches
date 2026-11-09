@@ -45,13 +45,13 @@ Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each 
             │
             DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.16)
             │
-            (… and far below: NVMe/disk, Ch.86 — irrelevant to the hot path)
+            (… and far below: NVMe/disk, Ch.87 — irrelevant to the hot path)
 ```
 
 Two structural facts shape everything:
 
 - **Each level is roughly an order of magnitude larger and slower than the one above.** The hierarchy exists because fast memory is small and expensive; the design bet is that programs exhibit **locality**, so a small fast cache captures most accesses.
-- **L1 and L2 are private to a core; L3 is shared across the socket.** This sharing is what makes inter-core communication possible (Ch. 34–35) and also what makes coherence traffic and *false sharing* (Ch. 33) a thing. It also means another busy core on the socket can evict your data from L3 — a noisy-neighbor tail source that core pinning alone does not cure (Ch. 6, 16; partitioning the L3 with CAT is Ch. 45).
+- **L1 and L2 are private to a core; L3 is shared across the socket.** This sharing is what makes inter-core communication possible (Ch. 34–35) and also what makes coherence traffic and *false sharing* (Ch. 33) a thing. It also means another busy core on the socket can evict your data from L3 — a noisy-neighbor tail source that core pinning alone does not cure (Ch. 6, 16; partitioning the L3 with CAT is Ch. 46).
 
 The two forms of locality the hierarchy rewards:
 
@@ -83,7 +83,7 @@ The rule that matters for latency: **a core that wants to *write* a line must fi
 
 - **False sharing** (Ch. 33): two threads writing *different variables that happen to share one 64-byte line* suffer this ping-pong even though they share no data logically — one of the nastiest and most invisible scalability killers.
 - **Atomics and lock contention** (Ch. 30–34): every contended atomic is a coherence transaction; the cost of a spinlock or a CAS loop *is* coherence traffic.
-- The reason **single-writer designs** (Ch. 35, 84) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
+- The reason **single-writer designs** (Ch. 35, 85) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
 
 For now the takeaway is conceptual: **shared writable data has a hardware cost measured in coherence traffic**, and a huge fraction of Part VI exists to minimize it.
 
@@ -173,8 +173,8 @@ Concretely, for the hot path:
 
 - **Count the bytes touched per event**, not the total data size. A 1 GiB order book is fine *if* a single update touches only a few cache-resident lines (the top-of-book and the affected level). What kills you is a working *set* — the lines touched per event — that exceeds a cache level.
 - **Shrink the per-event footprint.** Smaller structs (Ch. 9), hot/cold splitting so only hot fields are resident (Ch. 8), and removing pointer indirection (each pointer hop is a potential extra line and a prefetch-defeating dependency) all reduce the lines touched.
-- **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 70) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
-- **Mind L3 sharing.** L3 is shared across the socket (§7.2.1), so your *effective* L3 budget shrinks under noisy neighbors; core isolation (Ch. 6) does *not* protect it — partitioning the L3 with CAT/resctrl (Ch. 45) does.
+- **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 71) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
+- **Mind L3 sharing.** L3 is shared across the socket (§7.2.1), so your *effective* L3 budget shrinks under noisy neighbors; core isolation (Ch. 6) does *not* protect it — partitioning the L3 with CAT/resctrl (Ch. 46) does.
 
 The measurement loop: pick the data structure, measure its per-event footprint and its MPKI (Ch. 2), and if it's missing, shrink the footprint or improve locality until it fits.
 

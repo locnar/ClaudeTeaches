@@ -44,4 +44,4 @@ TODO
 
 ---
 
-*Next: Ch. 39 — Coroutines & Async Models.*
+*Next: Ch. 39 — Flow Control, Backpressure & Conflation on the Hot Path.*

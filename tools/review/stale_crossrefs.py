@@ -44,6 +44,7 @@ STEPS = [
     ("insert", 75),  # Ch. 76 managed-runtimes-measured
     ("insert", 76),  # Ch. 77 choosing-a-language-per-latency-tier
     ("insert", 37),  # Ch. 38 threading-topologies-hot-loop
+    ("insert", 38),  # Ch. 39 flow-control-backpressure-conflation
     # INSERT_STEPS_END
 ]
 def old2new(n):

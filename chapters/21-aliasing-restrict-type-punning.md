@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 11 (out-of-order execution and dependency chains — aliasing is what forces the compiler to *assume* a dependency it can't disprove), Ch. 29-preview/Ch. 8 (vectorization and data layout — the optimization aliasing most often blocks), Ch. 4 (reading asm — §21.5 is the whole proof), Ch. 9 (object model — type punning is reinterpreting object representation).
 >
-> **Leads into:** Ch. 29 (SIMD & vectorization — `restrict` is frequently the difference between a vectorized and a scalar loop), Ch. 55 (zero-copy wire decoding — overlaying structs on a byte buffer is type punning, done safely with `bit_cast`/`memcpy`), Ch. 82 (secure programming — strict-aliasing UB as a vulnerability class). Ch. 22 (build toolchain — the flags that gate these optimizations) closes **Part III**.
+> **Leads into:** Ch. 29 (SIMD & vectorization — `restrict` is frequently the difference between a vectorized and a scalar loop), Ch. 56 (zero-copy wire decoding — overlaying structs on a byte buffer is type punning, done safely with `bit_cast`/`memcpy`), Ch. 83 (secure programming — strict-aliasing UB as a vulnerability class). Ch. 22 (build toolchain — the flags that gate these optimizations) closes **Part III**.
 
 ---
 
@@ -14,7 +14,7 @@ Two pointers **alias** if they can refer to the same memory. Whenever the compil
 
 This matters acutely for low-latency numeric code, which is exactly the code that lives or dies on vectorization (Ch. 29) and register allocation (Ch. 4, 11). A signal computation summing weighted inputs, a risk aggregation over position vectors, a price-conversion pass over a market-data array, a `memcpy`-shaped transform — every one is a loop over arrays through pointers, and every one is a candidate to be silently de-optimized because the compiler feared `out` might overlap `in`. The fix is often a single keyword (`__restrict__`) or a small refactor, and the payoff — proven in the asm (§21.5) — can be a 2-8× swing from scalar to SIMD. This is "free performance" of the same character as Ch. 11's accumulator splitting: the work didn't get cheaper, the compiler was simply *allowed* to do it well.
 
-The other half of the chapter is the flip side of aliasing: the **strict-aliasing rule**, C++'s promise that the compiler may *assume* you don't access an object of one type through a pointer to an unrelated type. That assumption is what lets it not reload memory across a write through a differently-typed pointer — a real optimization — but it makes the common low-level trick of **type punning** (reinterpreting the bytes of one type as another: reading a `float`'s bits as a `uint32`, overlaying a packed struct on a network buffer — Ch. 55) **undefined behavior** when done the naive way (a `reinterpret_cast` and dereference, or the wrong union access). UB here isn't theoretical: it produces miscompiles that appear only at `-O2`, only on one compiler, only sometimes (Ch. 82). So this chapter teaches both how to *give* the optimizer aliasing freedom where it helps (`restrict`), and how to *pun types safely* where you must (`std::bit_cast`, `memcpy`, `std::launder`) — keeping the wins without the UB.
+The other half of the chapter is the flip side of aliasing: the **strict-aliasing rule**, C++'s promise that the compiler may *assume* you don't access an object of one type through a pointer to an unrelated type. That assumption is what lets it not reload memory across a write through a differently-typed pointer — a real optimization — but it makes the common low-level trick of **type punning** (reinterpreting the bytes of one type as another: reading a `float`'s bits as a `uint32`, overlaying a packed struct on a network buffer — Ch. 56) **undefined behavior** when done the naive way (a `reinterpret_cast` and dereference, or the wrong union access). UB here isn't theoretical: it produces miscompiles that appear only at `-O2`, only on one compiler, only sometimes (Ch. 83). So this chapter teaches both how to *give* the optimizer aliasing freedom where it helps (`restrict`), and how to *pun types safely* where you must (`std::bit_cast`, `memcpy`, `std::launder`) — keeping the wins without the UB.
 
 ## 21.2 Mental model: strict-aliasing rules; how aliasing blocks vectorization/reordering
 
@@ -115,12 +115,12 @@ Read it the Ch. 11 / Ch. 4 way: **identical source, identical data, identical ca
 - **Where to put it.** On the pointer parameters of hot numeric kernels whose arrays genuinely don't overlap: `out`, `in`, the operands of a transform/reduction/convolution. Marking *both* the source and destination `__restrict__` is what lets the compiler assume they're disjoint and vectorize freely (§21.3, §21.5).
 - **It's a promise *you* must keep.** If the pointers *do* overlap at runtime and you marked them `restrict`, the behavior is undefined — silent miscompilation (the compiler reorders/vectorizes assuming disjointness). Use it only where you *know* the arrays are distinct (separate allocations, an in-place transform where in == out is genuinely safe element-wise, etc.). It's a correctness assertion, not a hint.
 - **Alternatives when you can't promise globally.** If overlap is possible in general but not on the hot path, provide a `restrict` fast path and a safe fallback, or copy to a scratch buffer. The compiler's own runtime-overlap-check versioning does this automatically but at the cost of code bloat and a branch; an explicit `restrict` path removes both.
-- **`char`/`std::byte` buffers are alias-pessimistic by design.** Because `char*`/`std::byte*` may alias any object (the strict-aliasing exception), code that works through byte buffers (parsers, serializers — Ch. 55) blocks optimization broadly. Where you process such a buffer numerically, load into typed locals / typed `restrict` pointers (via `memcpy`/`bit_cast` — §21.4.2) so the hot loop operates on values the compiler can reason about.
+- **`char`/`std::byte` buffers are alias-pessimistic by design.** Because `char*`/`std::byte*` may alias any object (the strict-aliasing exception), code that works through byte buffers (parsers, serializers — Ch. 56) blocks optimization broadly. Where you process such a buffer numerically, load into typed locals / typed `restrict` pointers (via `memcpy`/`bit_cast` — §21.4.2) so the hot loop operates on values the compiler can reason about.
 - **`assume`/`__builtin_assume_aligned` are cousins.** Telling the compiler about *alignment* (Ch. 9) similarly unblocks aligned SIMD loads; `[[assume(expr)]]` (C++23; GCC 13+, Clang 19+) — or the vendor forms `__builtin_assume` (Clang only; GCC rejects it), `__attribute__((assume(expr)))` (GCC 13) and the portable `if (!c) __builtin_unreachable();` — feed it other invariants. Same principle: hand the optimizer provable facts it can't deduce.
 
 ### 21.4.2 `std::bit_cast` and `std::launder` for safe punning
 
-Type punning — reinterpreting one type's bytes as another — is unavoidable in low-latency systems work (reading raw price bits, overlaying wire formats — Ch. 55), but the naive `*reinterpret_cast<int*>(&myfloat)` is **strict-aliasing UB** (§21.2). The sanctioned, zero-overhead channels:
+Type punning — reinterpreting one type's bytes as another — is unavoidable in low-latency systems work (reading raw price bits, overlaying wire formats — Ch. 56), but the naive `*reinterpret_cast<int*>(&myfloat)` is **strict-aliasing UB** (§21.2). The sanctioned, zero-overhead channels:
 
 - **`std::bit_cast<To>(from)` (C++20) — the right default for value punning.** Reinterprets the bit pattern of a trivially-copyable `From` as a same-sized `To`, with *defined* behavior — and compiles to nothing (a register move or no-op; §21.5). This is how you read a `float`'s bits, build a `double` from a `uint64`, or reinterpret fixed-layout POD — replacing the UB `reinterpret_cast` idiom entirely:
 
@@ -129,14 +129,14 @@ Type punning — reinterpreting one type's bytes as another — is unavoidable i
   float f          = std::bit_cast<float>(raw_u32);                 // (replaces the union/cast hacks)
   ```
 
-- **`memcpy` — the pre-C++20 / variable-size workhorse.** `std::memcpy(&to, &from, n)` is *always* well-defined for copying object representations, and the compiler reliably folds a small fixed-size `memcpy` into a register move (no actual call — §21.5). It's the portable way to pun and to read a value out of a byte buffer without aliasing UB. For the *overlay* use-case — treating a receive buffer as a `Msg` without copying (Ch. 55) — the standard's sanctioned tool is C++23's `std::start_lifetime_as<Msg>(p)` (P2590), which as of 2025 ships only in libstdc++ 16 and not yet in libc++ (gate on `__cpp_lib_start_lifetime_as`); until then rely on C++20's implicit-lifetime rule (P0593: a `memcpy`/`memmove` into storage starts the lifetime of a trivially-copyable implicit-lifetime object), i.e. copy the header fields out with `memcpy`, which the compiler folds into plain loads:
+- **`memcpy` — the pre-C++20 / variable-size workhorse.** `std::memcpy(&to, &from, n)` is *always* well-defined for copying object representations, and the compiler reliably folds a small fixed-size `memcpy` into a register move (no actual call — §21.5). It's the portable way to pun and to read a value out of a byte buffer without aliasing UB. For the *overlay* use-case — treating a receive buffer as a `Msg` without copying (Ch. 56) — the standard's sanctioned tool is C++23's `std::start_lifetime_as<Msg>(p)` (P2590), which as of 2025 ships only in libstdc++ 16 and not yet in libc++ (gate on `__cpp_lib_start_lifetime_as`); until then rely on C++20's implicit-lifetime rule (P0593: a `memcpy`/`memmove` into storage starts the lifetime of a trivially-copyable implicit-lifetime object), i.e. copy the header fields out with `memcpy`, which the compiler folds into plain loads:
 
   ```cpp
   std::uint64_t px; std::memcpy(&px, wire_ptr, sizeof px);   // pull 8 bytes out, defined, zero-cost
   ```
 
 - **`std::launder` — for *reusing storage*, not bit-punning.** A narrower tool: when you've placement-`new`'d a new object into existing storage (or need to access an object through a pointer obtained before its lifetime began), `std::launder` gives you a pointer the compiler treats as referring to the *new* object, defeating its (otherwise valid) assumption that the storage still holds the old one. Relevant to arenas/object pools (Ch. 24) and `std::variant`-like storage reuse — *not* a general "make my cast legal" tool (a common misconception).
-- **Unions for punning are UB in C++ (unlike C).** Writing one union member and reading another is *defined in C* but **UB in C++** (only the last-written member may be read). Don't port the C union-punning idiom; use `bit_cast`/`memcpy`. (Compilers often *tolerate* it, but it's not guaranteed — the kind of UB that bites at `-O2` on the next compiler, Ch. 82.)
+- **Unions for punning are UB in C++ (unlike C).** Writing one union member and reading another is *defined in C* but **UB in C++** (only the last-written member may be read). Don't port the C union-punning idiom; use `bit_cast`/`memcpy`. (Compilers often *tolerate* it, but it's not guaranteed — the kind of UB that bites at `-O2` on the next compiler, Ch. 83.)
 - **`char`/`std::byte` access is always allowed.** You may legally inspect *any* object's bytes through `char*`/`unsigned char*`/`std::byte*` — that's the sanctioned way to *view* representation. To turn those bytes back into a *typed value*, go through `bit_cast`/`memcpy` (§21.4.2), not a typed `reinterpret_cast` dereference.
 
 The discipline that closes the loop with §21.4.1: pun *into typed local values* (defined, via `bit_cast`/`memcpy`), then run the hot loop over those typed values (optionally `restrict`-qualified) — you get both the safety of defined punning and the optimization freedom of clean aliasing.
@@ -196,7 +196,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 
 - **For a numeric hot loop that should vectorize, read the asm:** packed ops (`...ps`/`...pd`, `vfmadd`) with *no* runtime overlap guard = aliasing is not blocking you. Scalar ops or a range-compare-and-branch = add `__restrict__` (or refactor to prove non-overlap) and re-check.
 - **Confirm `bit_cast`/`memcpy` punning folded to a move** (no call, no spill) — it should; if a `memcpy` didn't fold, the size wasn't a constant or the types weren't trivially copyable.
-- **Treat a lost vectorization as a regression** (Ch. 90): a change that reintroduces a possible-alias (e.g. routing a hot array through a `char*` buffer or dropping a `restrict`) silently drops you back to scalar — the asm diff catches it.
+- **Treat a lost vectorization as a regression** (Ch. 91): a change that reintroduces a possible-alias (e.g. routing a hot array through a `char*` buffer or dropping a `restrict`) silently drops you back to scalar — the asm diff catches it.
 
 ## 21.6 Pitfalls & anti-patterns: UB type punning via casts/unions
 
@@ -208,7 +208,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 - **`std::launder` as a "make my cast legal" spell.** `launder` is for *storage reuse* (re-pointing at a newly-constructed object in existing bytes), not for bit-punning between types. Using it to bless a `reinterpret_cast` is still UB. Different tool for a different problem (§21.4.2).
 - **Over-applying `restrict` everywhere.** Sprinkling it on every pointer adds risk (every one is a UB landmine if violated) for no gain where the loop doesn't vectorize anyway. Apply it to the hot kernels where the asm shows aliasing is the blocker.
 - **Ignoring misalignment after fixing aliasing.** Even disjoint, a loop the compiler can't prove *aligned* may use unaligned/scalar prologue-epilogue handling; pair `restrict` with alignment knowledge (Ch. 9, `__builtin_assume_aligned`) for the cleanest SIMD.
-- **Strict-aliasing UB as a security bug (Ch. 82).** Aliasing UB doesn't just slow things down — it can make the compiler emit code that violates your intended invariants (dropped bounds checks, reordered validation), a genuine vulnerability class on untrusted-input paths (Ch. 55, 82).
+- **Strict-aliasing UB as a security bug (Ch. 83).** Aliasing UB doesn't just slow things down — it can make the compiler emit code that violates your intended invariants (dropped bounds checks, reordered validation), a genuine vulnerability class on untrusted-input paths (Ch. 56, 83).
 
 ## 21.7 Exercises & checklist
 
@@ -217,19 +217,19 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 1. **Measure the swing.** Build `restrict.cpp` at `-O3 -march=native`; run `plain` vs `restrict` pinned/turbo-off. Confirm the ~several-× speedup. Then disassemble both (Ch. 4): does `plain` show a runtime overlap guard + scalar fallback, and `restrict` clean packed SIMD (§21.5)?
 2. **Make the alias real.** Call `axpy_restrict` with *overlapping* pointers (`out = in + 1`) and compare results to the `plain` version. Observe the wrong answer (UB) — and explain why the compiler is entitled to produce it. (Run under UBSan where possible.)
 3. **`bit_cast` vs `reinterpret_cast` codegen.** Implement float↔uint32 punning three ways: `reinterpret_cast` deref, union, and `std::bit_cast`/`memcpy`. Diff the asm (Ch. 4) — do they produce the same move? Now compile with `-O2 -Wstrict-aliasing=2` and see which warn (only the trivial casts — the warning is shallow). UBSan has *no* strict-aliasing check; the tool that finds type-based aliasing violations is TypeSanitizer (`clang++ -fsanitize=type`, LLVM 20+), and a violated `restrict` is detectable by no sanitizer at all — test with overlapping inputs against the plain version instead.
-4. **Byte buffer de-pessimization.** Write a loop that sums big-endian `int32`s read directly from a `char*` buffer vs one that `memcpy`s each into a typed local first. Compare vectorization and ns/element (§21.4.1, ties Ch. 55).
-5. **Lost-vectorization regression.** Take a vectorized `restrict` kernel, then refactor it to receive its data through a `std::byte*` view (no `restrict`). Confirm in the asm it fell back to scalar, and that a perf gate (Ch. 90) would catch the regression.
+4. **Byte buffer de-pessimization.** Write a loop that sums big-endian `int32`s read directly from a `char*` buffer vs one that `memcpy`s each into a typed local first. Compare vectorization and ns/element (§21.4.1, ties Ch. 56).
+5. **Lost-vectorization regression.** Take a vectorized `restrict` kernel, then refactor it to receive its data through a `std::byte*` view (no `restrict`). Confirm in the asm it fell back to scalar, and that a perf gate (Ch. 91) would catch the regression.
 
 **Checklist — aliasing & type punning**
 
 - [ ] Hot numeric kernels whose arrays are genuinely disjoint mark their pointers **`__restrict__`** — and I **only** promise it where overlap is truly impossible.
 - [ ] I **verified vectorization in the asm** (§21.5): packed ops, **no** runtime overlap guard / scalar fallback — not just trusted `-O3 -march=native`.
 - [ ] Type punning uses **`std::bit_cast`/`memcpy`** (defined, zero-cost) — **never** `reinterpret_cast`-deref or C-style union punning (UB).
-- [ ] Numbers read from **`char`/`std::byte` buffers** are pulled into **typed locals** (`memcpy`/`bit_cast`) before the hot loop, so byte-pointer aliasing doesn't pessimize it (ties Ch. 55).
+- [ ] Numbers read from **`char`/`std::byte` buffers** are pulled into **typed locals** (`memcpy`/`bit_cast`) before the hot loop, so byte-pointer aliasing doesn't pessimize it (ties Ch. 56).
 - [ ] `std::launder` is used **only** for storage reuse (placement-new), not to bless type casts.
 - [ ] Where I rely on alignment for SIMD, I told the compiler (**`__builtin_assume_aligned`** / over-aligned types — Ch. 9), not just `restrict`.
 - [ ] I tested `restrict` kernels for the **no-overlap precondition** with deliberately overlapping inputs against the plain version (no sanitizer catches a violated `restrict`; UBSan does not check aliasing — TypeSanitizer, LLVM 20+, checks type-based aliasing only), since a violated promise is silent miscompilation.
-- [ ] A change that reintroduces possible aliasing (byte-buffer routing, dropped `restrict`) is caught as a **vectorization regression** (Ch. 90) — and I treat strict-aliasing UB as a **security** concern on untrusted input (Ch. 82).
+- [ ] A change that reintroduces possible aliasing (byte-buffer routing, dropped `restrict`) is caught as a **vectorization regression** (Ch. 91) — and I treat strict-aliasing UB as a **security** concern on untrusted input (Ch. 83).
 
 ## 21.8 References
 
@@ -242,9 +242,9 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 ## 21.9 Additional Reading
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — vectorization blockers (aliasing, alignment) and how to read the compiler's vectorization diagnostics.
-- Chris Lattner / LLVM blog posts on undefined behavior ("What Every C Programmer Should Know About Undefined Behavior") — why strict-aliasing UB miscompiles and how to avoid it (ties Ch. 82).
-- Ch. 29 (*SIMD & Vectorization*) — where `restrict` most often pays; Ch. 9 (*Object Layout/Alignment*) — the alignment half of clean SIMD; Ch. 55 (*Zero-Copy Wire Decoding*) — safe struct/byte-buffer punning in feed handlers; Ch. 82 (*Secure Programming*) — UB as a vulnerability class; Ch. 11 (*Pipelines*) — dependencies the compiler must assume when it can't disprove aliasing.
-- **Appendix D** (Compiler Flag Reference) — `-fstrict-aliasing`/`-fno-strict-aliasing` and vectorization flags; **Ch. 75 §75.2.5 and §75.4.1** — aliasing (`&mut` as checked `noalias`, with the vectorizer's overlap check shown present in C++ and absent in Rust) and punning in Rust (`transmute` vs `from_ne_bytes`) for the cross-language reader.
+- Chris Lattner / LLVM blog posts on undefined behavior ("What Every C Programmer Should Know About Undefined Behavior") — why strict-aliasing UB miscompiles and how to avoid it (ties Ch. 83).
+- Ch. 29 (*SIMD & Vectorization*) — where `restrict` most often pays; Ch. 9 (*Object Layout/Alignment*) — the alignment half of clean SIMD; Ch. 56 (*Zero-Copy Wire Decoding*) — safe struct/byte-buffer punning in feed handlers; Ch. 83 (*Secure Programming*) — UB as a vulnerability class; Ch. 11 (*Pipelines*) — dependencies the compiler must assume when it can't disprove aliasing.
+- **Appendix D** (Compiler Flag Reference) — `-fstrict-aliasing`/`-fno-strict-aliasing` and vectorization flags; **Ch. 76 §76.2.5 and §76.4.1** — aliasing (`&mut` as checked `noalias`, with the vectorizer's overlap check shown present in C++ and absent in Rust) and punning in Rust (`transmute` vs `from_ne_bytes`) for the cross-language reader.
 
 ---
 
