@@ -706,12 +706,20 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 55.6 Exercises & checklist
 
 ### [56. Multicast Group Management & Dark-Feed Detection](56-multicast-group-management-dark-feed.md)
-- 56.1 Why it matters: TODO
-- 56.2 Mental model: TODO
-- 56.3 Measure it: TODO
+- 56.1 Why it matters: a lost membership produces no gap
+- 56.2 Mental model: IGMP, snooping, the querier, and the distribution tree
+  - 56.2.1 Reports, queries and leaves (IGMPv2/v3, MLD, SSM, version agreement)
+  - 56.2.2 Snooping switches and the querier problem (the ~260 s dark feed; unknown-multicast flooding)
+  - 56.2.3 From the exchange to your port: PIM, RPF and layer-1 replication
+  - 56.2.4 The four ways a feed goes dark without a gap
+- 56.3 Measure it: join latency (and the market-open join storm), time-to-dark after querier loss, the cost of the watchdog
 - 56.4 Techniques
-  - 56.4.1 TODO
-- 56.5 Pitfalls & anti-patterns: TODO
+  - 56.4.1 Joining correctly: SSM, interface-bound, group-bound, A/B on disjoint NICs
+  - 56.4.2 The Linux traps: `igmp_max_memberships`, `IP_MULTICAST_ALL`, `rp_filter`, versions
+  - 56.4.3 Verifying membership from the host (`/proc/net/igmp`, `ip maddr`, `tcpdump igmp`, `nstat`)
+  - 56.4.4 The dark-feed watchdog and the re-join policy
+  - 56.4.5 Kernel-bypass joins: who sends the report?
+- 56.5 Pitfalls & anti-patterns: silence is not a quiet market
 - 56.6 Exercises & checklist
 
 ### [57. NIC Features & Offloads](57-nic-features-offloads.md)

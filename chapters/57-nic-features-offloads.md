@@ -2,7 +2,7 @@
 
 # Chapter 57 — NIC Features & Offloads
 
-> **Prerequisites:** Ch. 48 (the kernel I/O path the NIC feeds), Ch. 52, 54 (multicast feeds / decoding the packets), Ch. 42 (IRQ affinity / pinning — RSS steers to cores), Ch. 17 (timekeeping — hardware timestamps), Ch. 41 (busy-poll vs interrupts), Ch. 64-preview (kernel bypass — the NIC's user-space fast path).
+> **Prerequisites:** Ch. 48 (the kernel I/O path the NIC feeds), Ch. 52, 54, 56 (multicast feeds / decoding the packets / membership — the group has to be joined on *this* NIC), Ch. 42 (IRQ affinity / pinning — RSS steers to cores), Ch. 17 (timekeeping — hardware timestamps), Ch. 41 (busy-poll vs interrupts), Ch. 64-preview (kernel bypass — the NIC's user-space fast path).
 >
 > **Leads into:** Ch. 58 (where the DMA'd packet lands — DDIO), Ch. 59 (flow steering & receive scaling — the deep-dive of §57.4.1), Ch. 60 (PTP & cross-host hardware timestamping — built on the NIC's timestamp unit), Ch. 63 (XDP/AF_XDP — in-driver/near-NIC processing), Ch. 64 (kernel bypass — ef_vi/Onload, the NIC's bypass path), Ch. 72 (SmartNICs/DPUs — programmable NICs). The receive-side hardware under Ch. 54's decoder.
 
