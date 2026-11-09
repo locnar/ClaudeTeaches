@@ -702,6 +702,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 55.4.1 A/B line arbitration and gap detection
   - 55.4.2 Retransmission and snapshot recovery off the hot path
   - 55.4.3 Trading through a gap: pause, continue, or safe-state
+  - 55.4.4 Feed liveness, data-quality invariants and session health beyond gaps (age vs heartbeat cadence, A/B skew, crossed/locked-book checks, FIX heartbeat/TestRequest, the stale-data kill, source failover beyond A/B)
 - 55.5 Pitfalls & anti-patterns: blocking on recovery and NAK storms
 - 55.6 Exercises & checklist
 
