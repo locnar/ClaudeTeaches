@@ -50,80 +50,79 @@ The model: **kernel-mediated IPC (pipes/sockets/msg-queues) costs a syscall + co
 
 ## 50.3 Measure it: shm ring vs pipe latency
 
-Measure the gap that justifies shared memory: producer→consumer message latency over a **pipe** (kernel-mediated) vs a **shared-memory lock-free ring** (kernel-free per message), between two processes.
+Measure the gap that justifies shared memory: producer→consumer handoff over a **pipe** (kernel-mediated) vs a **shared-memory lock-free ring** (kernel-free per message), between two processes. The ring is deliberately *not* a new implementation: it is `SpscRing<T, CAP>` from Ch. 34 §34.3, verbatim, lifted into a header and **placement-new'd into a `MAP_SHARED` segment**. That is the whole point of the measurement — the same code, the same protocol (relaxed/acquire/release, `& (CAP-1)` indexing, padded head/tail), moved across a process boundary:
 
 ```cpp
-// ipc.cpp — process-to-process latency: pipe vs shared-memory SPSC ring.
-// Build: g++ -O2 -std=c++20 ipc.cpp -o ipc -pthread
-// Run:  ./ipc pipe   |   ./ipc shm    (forks producer+consumer, pins to two cores)
-#include <atomic>
-#include <cstdio>
-#include <cstdint>
-#include <cstring>
-#include <vector>
+// ipc.cpp — process-to-process handoff: pipe vs the Ch. 34 SPSC ring placed in a MAP_SHARED segment.
+// Build: g++ -O2 -std=c++20 ipc.cpp -o ipc
+// Run:  ./ipc shm 2 3   |   ./ipc pipe 2 3     (producer pinned to core 2, consumer to core 3)
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <new>
+#include <sched.h>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include "spsc_ring.hpp"            // SpscRing<T, CAP> verbatim from Ch. 34 §34.3 — NOT a second implementation
 
-// Shared-memory SPSC ring: head/tail (padded — Ch.33) and slots, all in ONE mmap'd region.
-// Indices are integers; slots hold fixed-size PODs; NO pointers (Ch.50.5).
-struct Ring {
-    static constexpr std::size_t CAP = 1024;
-    alignas(64) std::atomic<std::uint64_t> head{0};   // producer writes (own cache line — Ch.33)
-    alignas(64) std::atomic<std::uint64_t> tail{0};   // consumer writes
-    alignas(64) std::uint64_t slot[CAP];              // fixed-size message slots
-};
+using Ring = SpscRing<std::uint64_t, 1024>;   // indices are integers, slots are fixed-size PODs: no pointers (§50.4.2)
+static_assert(std::is_trivially_destructible_v<Ring>);
+
+static void pin(int core) { cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s); sched_setaffinity(0, sizeof s, &s); }
 
 int main(int argc, char** argv) {
-    bool shm = (argc < 2) || std::strcmp(argv[1], "shm") == 0;
+    const bool shm = argc < 2 || std::strcmp(argv[1], "shm") == 0;
+    const int coreA = argc > 2 ? std::atoi(argv[2]) : 2, coreB = argc > 3 ? std::atoi(argv[3]) : 3;
     constexpr long N = 5'000'000;
 
-    // MAP_SHARED|MAP_ANONYMOUS region survives fork() and is shared by parent+child (Ch.26).
-    void* mem = mmap(nullptr, sizeof(Ring), PROT_READ|PROT_WRITE,
-                     MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-    Ring* r = new (mem) Ring();
-    std::memset(mem, 0, sizeof(Ring));                 // pre-fault (Ch.23,26)
+    // One MAP_SHARED|MAP_ANONYMOUS region (Ch. 26): it survives fork() and is the same physical pages in both
+    // processes. MAP_POPULATE pre-faults it (Ch. 23/26) BEFORE the ring is constructed in it.
+    void* mem = mmap(nullptr, sizeof(Ring), PROT_READ | PROT_WRITE,
+                     MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
+    if (mem == MAP_FAILED) { std::perror("mmap"); return 1; }
+    Ring* r = new (mem) Ring();                 // placement-new the Ch. 34 ring into the shared segment
 
-    int pfd[2]; if (!shm) pipe(pfd);
+    int pfd[2]; if (!shm && pipe(pfd)) { std::perror("pipe"); return 1; }
 
-    if (fork() == 0) {                                 // CHILD = consumer (pin to core B)
+    if (fork() == 0) {                          // CHILD = consumer
+        pin(coreB);
         std::uint64_t v;
-        for (long i = 0; i < N; ) {
-            if (shm) { std::uint64_t t = r->tail.load(std::memory_order_relaxed);
-                       if (t != r->head.load(std::memory_order_acquire)) {
-                           v = r->slot[t & (Ring::CAP-1)]; r->tail.store(t+1, std::memory_order_release); ++i; } }
-            else { if (read(pfd[0], &v, 8) == 8) ++i; }   // pipe: a syscall per message
+        for (long i = 0; i < N;) {
+            if (shm) { if (r->pop(v)) ++i; }                       // same pop() as the in-process ring
+            else     { if (read(pfd[0], &v, 8) == 8) ++i; }        // pipe: a syscall + copy per message
         }
         _exit(0);
     }
-    // PARENT = producer (pin to core A), measures round-of-pushes throughput
+    pin(coreA);                                 // PARENT = producer, times N pushes
     auto t0 = std::chrono::steady_clock::now();
-    for (long i = 0; i < N; ) {
-        if (shm) { std::uint64_t h = r->head.load(std::memory_order_relaxed);
-                   if (h - r->tail.load(std::memory_order_acquire) < Ring::CAP) {
-                       r->slot[h & (Ring::CAP-1)] = i; r->head.store(h+1, std::memory_order_release); ++i; } }
-        else { write(pfd[1], &i, 8); ++i; }               // pipe: a syscall per message
+    for (long i = 0; i < N;) {
+        if (shm) { if (r->push(std::uint64_t(i))) ++i; }           // same push() as the in-process ring
+        else     { std::uint64_t v = std::uint64_t(i); if (write(pfd[1], &v, 8) == 8) ++i; }
     }
+    wait(nullptr);                              // consumer has drained everything
     auto t1 = std::chrono::steady_clock::now();
-    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
-    std::printf("%-4s  %.1f Mmsg/s  (%.1f ns/msg)\n", shm?"shm":"pipe", N/(ns/1e3), ns/N);
+    double ns = double(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+    std::printf("%-4s  %.1f Mmsg/s  (%.1f ns/msg, inverse throughput)\n", shm ? "shm" : "pipe", N / (ns / 1e3), ns / N);
     return 0;
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), producer/consumer in separate processes pinned to two cores, turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3; this listing was last rebuilt and run with GCC 13.3) — producer and consumer in separate processes pinned to two cores, turbo off (illustrative). The figures are **inverse throughput** (N pushes timed, divided by N), not a per-message one-way latency — the timestamp-per-slot variant is exercise 1:
 
 ```
-   IPC mechanism                         throughput        ns/msg     note
-   pipe (kernel-mediated)                ~3-8 Mmsg/s       ~150-300 ns  write+read syscalls + copies (Ch.41,47)
-   Unix domain socket                    ~5-10 Mmsg/s      ~120-250 ns  faster than pipe, still kernel+copy
-   shared-memory SPSC ring (busy-poll)   ~80-150 Mmsg/s    ~7-15 ns     NO kernel per message — like threads (Ch.34)
+   IPC mechanism                              throughput        ns/msg (inverse)   note
+   pipe (kernel-mediated)                     ~3-8 Mmsg/s       ~125-330 ns        write+read syscalls + copies (Ch. 41, 47)
+   Unix domain socket                         ~5-10 Mmsg/s      ~100-200 ns        faster than a pipe, still kernel + copy
+   Ch. 34 SpscRing in a MAP_SHARED segment    ~80-150 Mmsg/s    ~7-12 ns           no kernel per message — the §34.3 figure, unchanged
 
-   the shared-memory ring is ~20x faster — same as the in-PROCESS SPSC ring (Ch.34.3).
+   the shared-memory ring is ~20x faster than the pipe — and IS the in-process SPSC ring of §34.3, byte for byte.
 ```
 
-Read it: the **shared-memory ring is ~20× faster than a pipe** and lands at *the same ~7-15 ns/msg as the in-process SPSC ring* (Ch. 34.3) — because, at the hardware level, *it is the same thing*: a lock-free ring over shared cache lines, just with the producer and consumer in different processes (§50.2). The **pipe** pays a `write` syscall (copy user→kernel) and a `read` syscall (copy kernel→user) **per message** — the per-syscall cost (Ch. 41, 47) plus copies dominate, capping it at single-digit Mmsg/s. The lesson is unambiguous: **for hot-path IPC, use a shared-memory lock-free ring — it makes the process boundary as cheap as a thread boundary; reserve pipes/sockets/msg-queues for control-plane/low-rate IPC** where the convenience (kernel handles framing/lifecycle) outweighs the latency. (Note the ring's details that carry over from Ch. 34: padded head/tail — Ch. 33, power-of-two — Ch. 28, acquire/release — Ch. 30, pre-faulted — Ch. 23/26, integer indices — §50.5.)
+Read it: the **shared-memory ring is ~20× faster than a pipe** and lands at *the same ~7-12 ns/msg as the in-process SPSC ring* (§34.3) — not approximately, but because it *is* that ring: the only things that changed are where its bytes live (a `MAP_SHARED` mapping instead of a global) and which process runs `push` and which runs `pop`. At the hardware level a lock-free ring over shared cache lines doesn't know about processes (§50.2). The **pipe** pays a `write` syscall (copy user→kernel) and a `read` syscall (copy kernel→user) **per message** — the per-syscall cost (Ch. 41, 47) plus copies dominate, capping it at single-digit Mmsg/s. The lesson is unambiguous: **for hot-path IPC, use a shared-memory lock-free ring — it makes the process boundary as cheap as a thread boundary; reserve pipes/sockets/msg-queues for control-plane/low-rate IPC** where the convenience (kernel handles framing/lifecycle) outweighs the latency. Everything Ch. 34 taught about the ring — padded head/tail (Ch. 33), power-of-two capacity (Ch. 28), acquire/release (Ch. 30), the cached-opposite-index batching (§34.4.2) — carries over untouched; what this chapter adds is the segment around it (§50.4).
 
 ## 50.4 Techniques
 
@@ -131,11 +130,10 @@ Read it: the **shared-memory ring is ~20× faster than a pipe** and lands at *th
 
 The hot-path IPC primitive — the Ch. 34/37 ring, placed in shared memory and made process-safe:
 
-- **Put the ring (indices + slots) entirely in the shared segment.** Both the atomic head/tail indices *and* the message slots live in the `MAP_SHARED` region (Ch. 26), so both processes see the same indices and data. The atomics work across processes (coherence is hardware — §50.2); use acquire/release ordering exactly as in-process (Ch. 30, 34).
+- **Reuse the Ch. 34 ring; its layout rules come with it.** Put the whole object — atomic head/tail indices *and* the message slots — in the `MAP_SHARED` region (Ch. 26) by placement-new, as §50.3 does, so both processes see the same indices and data; the atomics work across processes because coherence is hardware (§50.2), and the acquire/release protocol is exactly the in-process one (Ch. 30, 34). Everything §34.4.2 prescribes — producer-written `head` and consumer-written `tail` on separate cache lines (cross-process false sharing is the same ping-pong, Ch. 33), power-of-two capacity, caching the opposite index, pre-allocated storage — applies unchanged. Do *not* write a second ring for IPC: one implementation, tested once (Ch. 40), used in both places.
 - **SPSC across processes is the default** (Ch. 34). One producer process, one consumer process — no CAS, no ABA, wait-free, simple. The shared-nothing process topology (Ch. 74) maps each one-way data flow (feed→strategy, strategy→gateway) to an SPSC shared-memory ring. MPSC (many producers → one consumer, e.g. several strategies → one gateway) where needed, with the cross-process CAS care of Ch. 34.
-- **Padded head/tail (Ch. 33).** Producer-written `head` and consumer-written `tail` on **separate cache lines** — cross-process false sharing is the same bug as cross-thread (Ch. 33), and the ping-pong now crosses a process boundary but the cost is identical. Pad them.
-- **Fixed-size POD slots (no pointers, no allocation).** Messages are fixed-size plain-old-data copied into slots — no pointers (§50.5), no heap (Ch. 23). Variable-size messages use a fixed-slot ring with an overflow scheme, or a separate byte-ring with offset+length descriptors. The slot layout is a *wire format* across processes — version it (Ch. 53).
-- **Pre-faulted, `mlock`'d, huge-page, NUMA-placed (Ch. 15, 16, 23, 26).** The shared segment is set up once at startup: pre-faulted (no first-touch fault on the hot path — Ch. 23), `mlock`'d (resident), ideally huge-page-backed (TLB — Ch. 15) and on the NUMA node shared by the producer and consumer cores (Ch. 16 — or accept one cross-node hop if they're on different nodes).
+- **Slots are a wire format.** Messages are fixed-size plain-old-data copied into slots — no pointers (§50.4.2, §50.5), no heap (Ch. 23); variable-size messages use a fixed-slot ring with an overflow scheme, or a separate byte-ring with offset+length descriptors. Unlike the in-process ring, the slot layout crosses a *build* boundary too: the producer and consumer may be compiled separately, so version the layout in the segment header (§50.4.2, Ch. 53).
+- **The segment is set up once, like any hot mapping (Ch. 26 §26.4.2).** Pre-faulted (`MAP_POPULATE`, as in §50.3, or a touch pass — Ch. 23), `mlock`'d, ideally huge-page-backed (Ch. 15) and on the NUMA node shared by the producer and consumer cores (Ch. 16 — or accept one cross-node hop if they're on different nodes).
 - **Busy-poll the consumer (Ch. 41).** The consumer process busy-polls the ring's index on its dedicated core — instant, no kernel, no notification. Only a cold/background consumer blocks (futex/eventfd on a shared word — §50.2).
 
 ### 50.4.2 Shared-memory layout and addressing
@@ -164,7 +162,7 @@ The discipline that makes a shared region correct across address spaces:
 
 **Exercises**
 
-1. **shm vs pipe.** Build `ipc.cpp`; run `pipe` vs `shm` (pin the two processes to two cores). Confirm the shared-memory ring is ~20× faster and matches the in-process SPSC number (Ch. 34.3). Add `strace -c` — the pipe shows millions of read/write; the shm ring shows ~none on the loop (§50.3).
+1. **shm vs pipe.** Build `ipc.cpp` against Ch. 34's `spsc_ring.hpp`; run `pipe` vs `shm` on two pinned cores. Confirm the shared-memory ring is ~20× faster and matches the in-process SPSC number (Ch. 34.3). Then convert the measurement from inverse throughput to one-way latency: stamp `rdtsc` (Ch. 17) into each slot, histogram `now - stamp` on the consumer. Add `strace -c` — the pipe shows millions of read/write; the shm ring shows ~none on the loop (§50.3).
 2. **The pointer trap.** Store a pointer (to a slot, or to heap) in the shared region and read it from the other process (force different map bases with `MAP_FIXED` hints or just observe ASLR). Watch it crash/corrupt. Fix with an offset/index (§50.5).
 3. **Cross-process false sharing.** Put the ring's head and tail on the *same* cache line; measure the throughput drop and HITM (`perf c2c` — Ch. 33) across the process boundary. Re-pad; confirm recovery.
 4. **Ordering on ARM.** Weaken the cross-process ring to `relaxed`; show it "works" on x86 and races on ARM (Appendix A) / model-check (Ch. 40). Restore acquire/release (§50.5).

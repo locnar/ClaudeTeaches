@@ -68,12 +68,10 @@ Read it: the **batching offloads add latency** — GRO coalescing and interrupt 
 
 ### 55.4.1 RSS and flow steering
 
-Getting the right packets to the right core (ties Ch. 42, 53):
+The NIC side of the mechanism, so the rest of this chapter makes sense; the *policy* — which feed lands on which queue, core and L3 slice, and the measurements that justify it — is **Ch. 57**:
 
-- **RSS spreads RX across queues/cores.** Enable multiple RX queues (`ethtool -L <iface> combined N`), each with its interrupt pinned to a specific core (`/proc/irq/*/smp_affinity` — Ch. 42). The NIC hashes flows across queues. For a *throughput* server this load-balances; for HFT the point is *control* — putting specific flows on specific cores.
-- **Flow steering — direct a specific flow to a specific queue/core.** `ethtool -N <iface> flow-type ... action <queue>` (ntuple / Intel Flow Director), or aRFS (accelerated Receive Flow Steering). Steer the **market-data multicast feed** to the queue whose IRQ is on the **dedicated decoder core** (Ch. 42, 53) — so the feed lands on the right core, with warm caches (Ch. 46), no cross-core handoff, and a predictable IRQ. This is how you place the feed in the topology you designed (Ch. 31, 42).
-- **Per-feed/per-symbol steering.** With enough queues, steer different feeds (or symbol shards — Ch. 31) to different cores, mapping the network topology onto the shared-nothing core topology (Ch. 31). Each shard's feed → its core → its book.
-- **Coordinate with IRQ affinity (Ch. 42).** RSS/steering decides which *queue*; IRQ affinity decides which *core* handles that queue's interrupt. They must agree (the feed's queue's IRQ on the decoder core, *not* a housekeeping core if you're interrupt-driven — though busy-poll avoids interrupts entirely). Disable `irqbalance` (Ch. 42) so your steering sticks.
+- **What the card exposes.** Multiple RX queues (`ethtool -L <iface> combined N`), each with its own interrupt vector that IRQ affinity pins to a core (Ch. 42); a hash-based spreader — **RSS**, with an indirection table you can reshape — that assigns flows to queues; **exact-match filters** (`ethtool -N <iface> flow-type … action <queue>` — n-tuple / Intel Flow Director, `rte_flow` on a DPDK path) and **aRFS** that override the hash for a specific flow; and per-queue counters (`ethtool -S`) to verify where packets actually landed.
+- **What you do with them is Ch. 57.** Steering the market-data multicast group to the queue the dedicated decoder core polls, per-shard steering onto the shared-nothing core topology (Ch. 31), RSS contexts for deliberate spreading, `SO_REUSEPORT`, keeping IRQ affinity and the steering rules in agreement (and `irqbalance` off so they stay that way), and the cross-core-handoff measurement that shows why it matters — Ch. 57 §57.2–§57.4. The one-line HFT summary: RSS *spreading* one feed across cores is the anti-pattern (§55.5); exact steering to the owning core is the technique.
 
 ### 55.4.2 Busy-polling
 
@@ -87,13 +85,10 @@ Eliminating interrupt latency on the RX path (Ch. 41, 47):
 
 ### 55.4.3 Solarflare/Onload
 
-The vendor kernel-bypass stacks — the production HFT NIC path (leads into Ch. 62):
+The vendor kernel-bypass stacks — **Onload** (transparent `LD_PRELOAD` socket acceleration), **ef_vi** (Solarflare/AMD's raw ring API) and **libexanic** (ExaNIC/Cisco's) — are the production HFT NIC path, and **Ch. 62 §62.4.4 is their owner**: the ring-access mechanics, the transparent-vs-explicit latency floors, the DPDK/AF_XDP alternatives and the decision between them. What belongs *here* is the coupling between the stack and the card:
 
-- **Onload (Solarflare/AMD) — transparent bypass.** Onload is a user-space network stack that **transparently** accelerates existing **sockets** applications (`LD_PRELOAD` — no code change): standard socket calls are intercepted and serviced by a user-space stack reading the NIC's rings directly, **bypassing the kernel**. You get most of the bypass latency win *without rewriting* to a bypass API — a major practical advantage. Tune via Onload environment variables (spinning, polling). The common "easy bypass" path.
-- **ef_vi (Solarflare) — the raw bypass API.** For the absolute lowest latency, **ef_vi** is Solarflare's *raw* layer-2 API: the application manages the NIC's RX/TX rings directly (post receive buffers, poll for completions, send) with no stack at all — explicit, lowest-latency, more work (Ch. 62). Used for the ultra-hot feed/order path.
-- **ExaNIC libexanic (Exablaze/Cisco).** The equivalent raw bypass API for ExaNIC cards, with extremely low latency and precise hardware timestamping; some ExaNICs offer FPGA-based inline processing (Ch. 69). Another vendor in the same niche (Ch. 62).
-- **Hardware timestamping in bypass.** The bypass APIs expose the NIC's **hardware timestamps** (ef_vi/libexanic give per-packet hardware RX timestamps) — combining the lowest-latency receive with the most accurate timing (Ch. 17, 58). The HFT receive path is bypass + hardware timestamps.
-- **The decision (Ch. 62).** Onload (transparent, socket-compatible, easy) vs ef_vi/libexanic (raw, lowest-latency, more work) vs DPDK (vendor-neutral bypass — Ch. 62). Covered fully in Ch. 62; the point here is that these are *NIC* features (vendor stacks for specific cards) — the NIC choice and the bypass stack are coupled.
+- **The stack and the NIC are chosen together.** Each vendor API runs only on that vendor's silicon, so choosing Onload/ef_vi or libexanic *is* a NIC purchase — and the card must expose what a bypass path needs: user-mappable RX/TX rings with a protected doorbell (Ch. 66), per-packet **hardware timestamps** in the descriptor (Ch. 58), and filters programmable from userspace (§55.4.1, Ch. 57) so the bypass stack can claim its flows without the kernel's help.
+- **This chapter's features still apply under bypass.** Steering (Ch. 57), hardware timestamping and busy-polling (§55.4.2) are used *inside* the bypass path, not replaced by it; the batching offloads mostly are not (a raw ring delivers frames as the wire carried them, which is the point). Measure a vendor path with the same offload-on/off and hardware-timestamp methodology as §55.3 before trusting a datasheet floor — Ch. 62 §62.3 does exactly that.
 
 ## 55.5 Pitfalls & anti-patterns: offloads that add latency
 

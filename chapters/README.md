@@ -674,7 +674,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 53.4 Techniques
   - 53.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing
   - 53.4.2 Scatter/gather and zero-copy receive paths
-  - 53.4.3 A/B line arbitration; sequence-gap detection and recovery
+  - 53.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 54)
   - 53.4.4 Tuning RX ring sizes, managing UDP reordering in software ring buffers, detecting hardware packet drops
 - 53.5 Verify the codegen: parse loop
 - 53.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 72)*
