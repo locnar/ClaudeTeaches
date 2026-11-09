@@ -53,6 +53,7 @@ STEPS = [
     ("insert", 21),  # Ch. 22 cost-of-modern-idioms-strings-without-allocation
     ("insert", 24),  # Ch. 25 build-systems-build-time-hygiene-hermetic-toolchains
     ("insert", 91),  # Ch. 92 order-entry-gateway-session-layer
+    ("insert", 94),  # Ch. 95 line-rate-capture-timing-faithful-replay
     # INSERT_STEPS_END
 ]
 def old2new(n):

@@ -1,22 +1,22 @@
 # Part XIII — Observability & Operations in Production
 
-# Chapter 95 — The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers
+# Chapter 96 — The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers
 
 > **Prerequisites:** Ch. 89 §89.2.2 (the deterministic state machine — `apply(state, input)`; this chapter produces the single ordered input stream it presupposes) and §89.3 (single-host restart time — the baseline a replica beats), Ch. 94 (the journal and snapshot + replay catch-up — the sequenced stream *is* the journal), Ch. 40–41 (one-ring broadcast with sequence barriers; the hop-cost model — the sequencer is one more hop), Ch. 57 and Ch. 61 (shm rings and reliable multicast — the two fan-out transports; A/B arbitration is what the sequencer's feed input has already done), Ch. 42 (the slow-replica policy), Ch. 47 §47.2.3 (timer fires as events), Ch. 66 (hardware timestamps — how the added hop is measured), Ch. 73 §73.4.1 (Aeron Cluster — the off-the-shelf comparison), Ch. 90–91 (the gate decisions and order transitions that become sequenced events).
 >
-> **Leads into:** Ch. 96 (spike forensics — a replica's divergence digest is the first forensic input), Ch. 97–98 (the sequencer's own health is a host and network telemetry concern), Ch. 99 (the capstone's architecture gains the sequencer and a replica). Not in this chapter: leader leases, fencing tokens and split-brain prevention on the *order path* — that is a separate failover topic (Appendix F defines *fencing token*); this chapter scopes to producing one order, consuming it identically in many places, and standing a replica up in place of a dead primary.
+> **Leads into:** Ch. 97 (spike forensics — a replica's divergence digest is the first forensic input), Ch. 98–99 (the sequencer's own health is a host and network telemetry concern), Ch. 100 (the capstone's architecture gains the sequencer and a replica). Not in this chapter: leader leases, fencing tokens and split-brain prevention on the *order path* — that is a separate failover topic (Appendix F defines *fencing token*); this chapter scopes to producing one order, consuming it identically in many places, and standing a replica up in place of a dead primary.
 
 ---
 
-## 95.1 Why it matters: one truth, or the replay lies
+## 96.1 Why it matters: one truth, or the replay lies
 
 Ch. 89 §89.2.2 made the core a fold over an input stream and promised exact replay; Ch. 94 journaled the stream; Ch. 89 §89.4.6 compared a live run's digest with its replay's to find the first diverging event. All of it assumes something the book never built: **a single, total order over every input** — ticks (after A/B arbitration, Ch. 61), order acks and fills (Ch. 91), timer fires (Ch. 47), operator commands, configuration changes (Ch. 88) — agreed on by every component that applies them. In Ch. 89's reference topology the inputs arrive over point-to-point rings: the strategy sees the feed in one order, the gateway sees acks interleaved with the strategy's orders in *its* order, the risk process sees fills and limit updates in a third; each process's journal is its own truth, and "replay the system" means reconciling three logs whose relative order was never recorded. The **sequencer** is the component that removes the ambiguity: one process (or one switch, or one FPGA — Ch. 68, 77) receives every input, stamps a global sequence number, and fans the sequenced stream out; every consumer applies *that* stream, in *that* order. It is the dominant architecture of exchanges' matching systems (Nasdaq INET's, CME's, every LMAX-style venue) and of many trading firms' cores — and the book has a single glossary line for it (Appendix J.6).
 
-What it buys, in order of importance. **Bit-identical replicas**: a gateway, a risk engine, a strategy, a journal writer and a GUI feed that all fold the same sequenced stream through deterministic `apply` functions hold states that agree to the bit — verifiable by comparing a running digest (§95.3 shows two replicas and a replay from the log producing the same digest over 400 000 events, and a replica that peeks at a clock diverging on the first run). **Replay that is one log**, not three. **Hot standby for free**: a second copy of any consumer, already applying the stream, is a replica that can take over in the time it takes to tell it to start emitting — against Ch. 89 §89.3's restart-and-replay path. **Position and risk views that agree** because they were computed from the same fills in the same order. The price is **one hop** on the critical path (§95.3: ~450 ns on the VM, ~100–150 ns on the reference machine over a shm ring, more over multicast) and a new single point of failure — the sequencer itself — whose failover is §95.4.5.
+What it buys, in order of importance. **Bit-identical replicas**: a gateway, a risk engine, a strategy, a journal writer and a GUI feed that all fold the same sequenced stream through deterministic `apply` functions hold states that agree to the bit — verifiable by comparing a running digest (§96.3 shows two replicas and a replay from the log producing the same digest over 400 000 events, and a replica that peeks at a clock diverging on the first run). **Replay that is one log**, not three. **Hot standby for free**: a second copy of any consumer, already applying the stream, is a replica that can take over in the time it takes to tell it to start emitting — against Ch. 89 §89.3's restart-and-replay path. **Position and risk views that agree** because they were computed from the same fills in the same order. The price is **one hop** on the critical path (§96.3: ~450 ns on the VM, ~100–150 ns on the reference machine over a shm ring, more over multicast) and a new single point of failure — the sequencer itself — whose failover is §96.4.5.
 
-## 95.2 Mental model
+## 96.2 Mental model
 
-### 95.2.1 The sequencer and its stream
+### 96.2.1 The sequencer and its stream
 
 ```
    INPUTS (unordered, many sources)                 SEQUENCER (one process, one core, one writer)            SEQUENCED STREAM (the one truth)
@@ -30,23 +30,23 @@ What it buys, in order of importance. **Bit-identical replicas**: a gateway, a r
    the strategy's ORDER is an event in the stream too: the gateway acts on it when it reads it, so "what did the strategy decide at seq 3" is a fact every replica shares
 ```
 
-- **One writer stamps.** The sequencer is the only component that assigns `seq`; it is single-threaded on one core (Ch. 41 §41.4.2's loop with the inputs as sources), it does not interpret payloads, and its only state is the next sequence number and the ring cursor. Its per-event cost is a copy into the log slot and a cursor store — tens of nanoseconds; §95.3 measures the hop it adds.
-- **The stream is a Disruptor ring with many readers** (Ch. 40 §40.4.1's one-ring fan-out) on one host — each consumer tracks its own sequence, the slowest gates the sequencer's wrap (which is Ch. 42's BLOCK policy, legitimate here only because every consumer is *supposed* to keep up; §95.4.4 handles the one that does not). Across hosts it is a **reliable multicast** of the same records (Ch. 61's machinery, now on the *output* side: sequence gap detection, NAK/retransmit from the sequencer's or the journal's buffer) or a transport like Aeron (Ch. 73).
-- **Outputs are inputs.** A strategy's decision to send an order is *published back into the sequencer* as an event; the gateway sends when it reads that event from the stream. This closes the loop that makes everything replayable: the order's position in the total order relative to the ticks that caused it and the fills that followed it is recorded by construction, and a replica of the strategy that reads the same stream makes the same decision at the same `seq` (which is also how hot standby works — §95.2.3).
+- **One writer stamps.** The sequencer is the only component that assigns `seq`; it is single-threaded on one core (Ch. 41 §41.4.2's loop with the inputs as sources), it does not interpret payloads, and its only state is the next sequence number and the ring cursor. Its per-event cost is a copy into the log slot and a cursor store — tens of nanoseconds; §96.3 measures the hop it adds.
+- **The stream is a Disruptor ring with many readers** (Ch. 40 §40.4.1's one-ring fan-out) on one host — each consumer tracks its own sequence, the slowest gates the sequencer's wrap (which is Ch. 42's BLOCK policy, legitimate here only because every consumer is *supposed* to keep up; §96.4.4 handles the one that does not). Across hosts it is a **reliable multicast** of the same records (Ch. 61's machinery, now on the *output* side: sequence gap detection, NAK/retransmit from the sequencer's or the journal's buffer) or a transport like Aeron (Ch. 73).
+- **Outputs are inputs.** A strategy's decision to send an order is *published back into the sequencer* as an event; the gateway sends when it reads that event from the stream. This closes the loop that makes everything replayable: the order's position in the total order relative to the ticks that caused it and the fills that followed it is recorded by construction, and a replica of the strategy that reads the same stream makes the same decision at the same `seq` (which is also how hot standby works — §96.2.3).
 - **Time is stamped by the sequencer**, once, into every record (`t_seq`); consumers never read a clock (Ch. 89 §89.2.2, Ch. 47 §47.2.3). The sequencer's clock is the system's clock.
 
-### 95.2.2 Replicated deterministic consumers and the digest
+### 96.2.2 Replicated deterministic consumers and the digest
 
-Every consumer is `state = apply(state, event)` over the stream (Ch. 89 §89.2.2); two consumers running the same `apply` from the same snapshot over the same stream hold the same state — **state-machine replication** (Schneider 1990), with the sequencer as the agreement protocol reduced to its cheapest form: there is one proposer, so there is nothing to agree on. The property is checked, not assumed: each replica folds a **running digest** (a 64-bit hash of `(seq, state-delta)` — Ch. 89 §89.4.6) and publishes it every *k* events; a monitor compares replicas' digests at equal `seq`, and a disagreement names the first event at which two copies of the "same" program did different things — a clock read, uninitialized memory, a data race, a different binary, a floating-point reduction in a different order (Ch. 30). §95.3's harness does exactly this: two replicas and a replay from the log agree; a replica that consults `rdtsc()` inside `apply` does not.
+Every consumer is `state = apply(state, event)` over the stream (Ch. 89 §89.2.2); two consumers running the same `apply` from the same snapshot over the same stream hold the same state — **state-machine replication** (Schneider 1990), with the sequencer as the agreement protocol reduced to its cheapest form: there is one proposer, so there is nothing to agree on. The property is checked, not assumed: each replica folds a **running digest** (a 64-bit hash of `(seq, state-delta)` — Ch. 89 §89.4.6) and publishes it every *k* events; a monitor compares replicas' digests at equal `seq`, and a disagreement names the first event at which two copies of the "same" program did different things — a clock read, uninitialized memory, a data race, a different binary, a floating-point reduction in a different order (Ch. 30). §96.3's harness does exactly this: two replicas and a replay from the log agree; a replica that consults `rdtsc()` inside `apply` does not.
 
-### 95.2.3 Standby: hot, warm, cold — RPO, RTO and what each survives
+### 96.2.3 Standby: hot, warm, cold — RPO, RTO and what each survives
 
 ```
    mode            what the standby does continuously                   RPO (data lost)            RTO (time to serve)                      survives
    ─────────────   ─────────────────────────────────────────────────    ────────────────────────   ──────────────────────────────────────   ───────────────────────────────────────
    HOT replica     applies the live stream, OUTPUT SUPPRESSED;          0 (it has every event      the election: tell it to emit (µs–ms)   process, host (on another host),
                    same state, same digest, as the primary             the primary applied)         + session takeover (Ch. 91 §91.4.4)      rack (on another rack); needs the stream
-   WARM standby    receives the JOURNAL (shipped records, seconds       the shipping lag           catch-up replay of the lag (§95.3:        host, rack, site (journal shipped off-site);
+   WARM standby    receives the JOURNAL (shipped records, seconds       the shipping lag           catch-up replay of the lag (§96.3:        host, rack, site (journal shipped off-site);
                    behind), applies lazily; process is up               (seconds of events)         ~3 ns/event → 10⁶ events in ~3 ms)       does not need the live stream at the site
                                                                                                     + session takeover
    COLD restore    nothing; a snapshot (Ch. 94 §94.4.4) exists           since the last snapshot    process start + snapshot load + replay    anything, slowly; the Ch. 89 §89.3 path
@@ -54,15 +54,15 @@ Every consumer is `state = apply(state, event)` over the stream (Ch. 89 §89.2.2
 ```
 
 - **Hot standby is a replica with its outputs discarded.** It holds the gateway's in-flight table (Ch. 91) and the risk accumulators (Ch. 90) to the bit; on failover it is told to start emitting (one control event *in the stream*, so every replica agrees on the exact `seq` at which emission moved) and takes over the venue session (logon with the true sequence numbers — Ch. 91 §91.4.4). RTO is dominated by the venue session, not by state.
-- **Warm standby is journal shipping**: the sequenced log (which is the journal) streamed to another host or site; the standby applies it as it arrives or on demand. Its RPO is the shipping lag; its RTO is the catch-up — §95.3 measures the fold at ~3 ns/event, so even a minute's backlog at 100 k events/s is ~20 ms of replay.
+- **Warm standby is journal shipping**: the sequenced log (which is the journal) streamed to another host or site; the standby applies it as it arrives or on demand. Its RPO is the shipping lag; its RTO is the catch-up — §96.3 measures the fold at ~3 ns/event, so even a minute's backlog at 100 k events/s is ~20 ms of replay.
 - **Cold restore is Ch. 89 §89.3's path**, kept for the failures the others cannot survive (a bad deploy that corrupts every replica identically — determinism replicates bugs perfectly).
 - **The single-emitter rule**: at any instant exactly one replica of the gateway emits to the venue; everything else is suppressed. Enforcing that across a partition (leases, fencing tokens, the venue's own session exclusivity) is the failover topic this chapter leaves aside; within one host and one sequencer it is the control event's position in the stream.
 
-### 95.2.4 The sequencer as the single point of failure
+### 96.2.4 The sequencer as the single point of failure
 
-Everything downstream is replicable *because* there is one sequencer; the sequencer itself is therefore the one component whose failure stops the system. The mitigations are standard and §95.4.5 details them: a **standby sequencer** that reads the same stream (it knows the last `seq`) and the same inputs, promoted by the supervisor (Ch. 89 §89.4.3) with the venue's cancel-on-disconnect as the backstop during the gap; **inputs that are themselves sequenced** (the feed's venue sequence numbers, the session's `MsgSeqNum`s — Ch. 91) so a new sequencer can prove it has not skipped or duplicated an input; the **journal as the recovery point** (the last published `seq` is on disk/in shm within microseconds — Ch. 94 §94.4.3). The alternative — consensus among several sequencers (Raft/Paxos, Aeron Cluster — Ch. 73 §73.4.1) — removes the SPOF at the cost of a quorum round trip per batch (tens of µs across hosts), which is why it appears *behind* the hot path (the cluster that owns the journal and the standby election) and not on it.
+Everything downstream is replicable *because* there is one sequencer; the sequencer itself is therefore the one component whose failure stops the system. The mitigations are standard and §96.4.5 details them: a **standby sequencer** that reads the same stream (it knows the last `seq`) and the same inputs, promoted by the supervisor (Ch. 89 §89.4.3) with the venue's cancel-on-disconnect as the backstop during the gap; **inputs that are themselves sequenced** (the feed's venue sequence numbers, the session's `MsgSeqNum`s — Ch. 91) so a new sequencer can prove it has not skipped or duplicated an input; the **journal as the recovery point** (the last published `seq` is on disk/in shm within microseconds — Ch. 94 §94.4.3). The alternative — consensus among several sequencers (Raft/Paxos, Aeron Cluster — Ch. 73 §73.4.1) — removes the SPOF at the cost of a quorum round trip per batch (tens of µs across hosts), which is why it appears *behind* the hot path (the cluster that owns the journal and the standby election) and not on it.
 
-## 95.3 Measure it: the hop the sequencer adds, the digest, and catch-up
+## 96.3 Measure it: the hop the sequencer adds, the digest, and catch-up
 
 *Toolchain and machine: Appendix L.3. Built with GCC 13.3 (`-O2 -std=c++20 -march=native -pthread`), run on the 4-vCPU Intel Xeon VM of Ch. 41 §41.3 (TSC 2.70 GHz, no isolation). Four spinning threads on four vCPUs leave the hypervisor nothing, so the tails here are steal, not design; medians and the hop ratios transfer (divide the hop figures by ~2.5–3 for the reference machine's line-transfer cost). Labelled VM-measured.*
 
@@ -97,26 +97,26 @@ replica that consults rdtsc() inside apply():  digest 1d887fa021e774e8   → DIV
 
 Reading it:
 
-- **The price of one truth is one hop.** Against Ch. 41 §41.3's point-to-point rows, the sequencer inserts one ring hop between producer and consumer: ~450 ns here, ~100–150 ns on the reference machine with both ends spinning on the same socket (Ch. 89 §89.2.1's per-hop figure), and the sequencer's own work (a 40-byte copy and a release store) is invisible inside it. For the single-process build of Ch. 99 §99.3 that is ~10 % of the software budget; for the process-per-role topology it is one more of the "~3 shm hops" already being paid, and it *replaces* the strategy→gateway and gateway→risk rings rather than adding to them — the sequencer's fan-out is how those roles talk.
+- **The price of one truth is one hop.** Against Ch. 41 §41.3's point-to-point rows, the sequencer inserts one ring hop between producer and consumer: ~450 ns here, ~100–150 ns on the reference machine with both ends spinning on the same socket (Ch. 89 §89.2.1's per-hop figure), and the sequencer's own work (a 40-byte copy and a release store) is invisible inside it. For the single-process build of Ch. 100 §100.3 that is ~10 % of the software budget; for the process-per-role topology it is one more of the "~3 shm hops" already being paid, and it *replaces* the strategy→gateway and gateway→risk rings rather than adding to them — the sequencer's fan-out is how those roles talk.
 - **Replication is exact and cheap to verify.** Two replicas on two cores and a cold replay from the log agree to the bit over 400 001 events; the digest costs two multiplies per event. This is the measurement Ch. 89 §89.4.6 asked for and the one a production monitor publishes every *k* events (Ch. 86).
 - **Catch-up is ~3 ns per event** for a state that fits in cache: a warm standby a minute behind at 100 k events/s replays in ~20 ms; a cold restore's replay of a full day (50 M events) is ~150 ms before warm-up — against Ch. 89 §89.3's single-host restart, the state-rebuild term disappears into the session-takeover term. Real `apply` functions (a book update, a gate decision) cost 20–100 ns, so scale accordingly: still sub-second for a day.
 - **Determinism is fragile and the digest proves it.** One `rdtsc()` in `apply` — the mildest possible impurity — produced a different digest on the first run. Ch. 89 §89.2.2's rule is not advice; it is the precondition for everything in this chapter, and the digest comparison is how it is enforced in production rather than hoped for.
 
-## 95.4 Techniques
+## 96.4 Techniques
 
-### 95.4.1 Building the sequencer: the loop, the stamp, the log
+### 96.4.1 Building the sequencer: the loop, the stamp, the log
 
 ```cpp
 // sequencer.hpp — the whole component: Ch. 41's hot loop with the inputs as sources, appending to a Disruptor-style log ring (Ch. 40) that is also the journal (Ch. 94).
 struct alignas(64) SeqRecord { std::uint64_t seq; std::uint64_t t_seq; std::uint32_t kind; std::uint32_t src_seq; std::uint8_t payload[40]; };   // 64 B: one line per event
 class Sequencer {
     LogRing<SeqRecord, 1 << 22>& log;                   // shm segment (Ch. 57): readers = gateway, risk, strategy shards, journal writer, standby sequencer
-    FeedIn& feed; AckIn& acks; TimerIn& timers; CmdIn& cmds; OrdersIn& orders;   // inputs; `orders` = strategies' decisions coming BACK as events (§95.2.1)
+    FeedIn& feed; AckIn& acks; TimerIn& timers; CmdIn& cmds; OrdersIn& orders;   // inputs; `orders` = strategies' decisions coming BACK as events (§96.2.1)
     std::uint64_t next = 0;
     template <class Src> std::uint32_t pull(Src& s, std::uint32_t cap, std::uint64_t now) {
         std::uint32_t n = 0; typename Src::Msg m;
         while (n < cap && s.pop(m)) { SeqRecord& r = log.claim(next); r.seq = next; r.t_seq = now; r.kind = Src::KIND; r.src_seq = m.src_seq; m.copy_into(r.payload); ++next; ++n; }
-        return n;                                       // claim() gates on the slowest reader's sequence (wrap protection) — §95.4.4 decides what to do about a slow one
+        return n;                                       // claim() gates on the slowest reader's sequence (wrap protection) — §96.4.4 decides what to do about a slow one
     }
 public:
     void run() { for (;;) { std::uint64_t now = rdtsc(); std::uint32_t n = 0;
@@ -126,61 +126,61 @@ public:
 };
 ```
 
-- **Stateless beyond `next`**: the sequencer never decodes a payload; adding an input kind is adding a source. Its restart state is `next`, which is in the log (§95.4.5).
+- **Stateless beyond `next`**: the sequencer never decodes a payload; adding an input kind is adding a source. Its restart state is `next`, which is in the log (§96.4.5).
 - **`src_seq` carries the input's own sequence** (the venue's tick sequence after arbitration, the session's `MsgSeqNum`, the timer id's generation) so a consumer or a replacement sequencer can prove continuity per source.
 - **Publish once per iteration**, not per event: the readers batch-consume (Ch. 40 §40.4.2), so a burst of 64 ticks is one cursor store and one line transfer per reader — the per-message-hop queueing of Ch. 41 §41.3's microburst rows does not occur.
 - **The log is the journal**: the Ch. 94 writer is just another reader of the ring, draining to storage off the hot path; there is no second journal format and no reconciliation between "what we sequenced" and "what we recorded".
 
-### 95.4.2 Fan-out: shm ring on-host, reliable multicast across hosts
+### 96.4.2 Fan-out: shm ring on-host, reliable multicast across hosts
 
-- **On one host**: the ring lives in a `MAP_SHARED` segment (Ch. 57), each consumer is a process with its own sequence word in the segment (Ch. 40's one-ring fan-out across processes); ~100–150 ns from publish to a spinning reader on the reference machine (§95.3). Place the sequencer and its hottest readers on one socket (Ch. 16, Ch. 41 §41.4.3).
+- **On one host**: the ring lives in a `MAP_SHARED` segment (Ch. 57), each consumer is a process with its own sequence word in the segment (Ch. 40's one-ring fan-out across processes); ~100–150 ns from publish to a spinning reader on the reference machine (§96.3). Place the sequencer and its hottest readers on one socket (Ch. 16, Ch. 41 §41.4.3).
 - **Across hosts**: the same `SeqRecord`s over UDP multicast (Ch. 61's reliability layer inverted — the sequencer is now the *publisher*; receivers detect gaps by `seq` and NAK; retransmission is served from the ring by the sequencer's housekeeping thread or by the journal writer's buffer, never from the sequencer's hot loop), or over Aeron (Ch. 73 §73.4.1) which implements exactly this with its own flow control. Hardware-timestamp the egress and the far-end ingress (Ch. 66) to measure the cross-host hop (typically 2–5 µs through a switch — Ch. 68).
-- **Readers that fall behind** are the policy question of §95.4.4; readers that are *off the box* (GUI, analytics) take a conflated or sampled view (Ch. 42 §42.2.1) fed by a dedicated reader, never the raw stream.
+- **Readers that fall behind** are the policy question of §96.4.4; readers that are *off the box* (GUI, analytics) take a conflated or sampled view (Ch. 42 §42.2.1) fed by a dedicated reader, never the raw stream.
 
-### 95.4.3 Replicas: the fold, the digest, the monitor
+### 96.4.3 Replicas: the fold, the digest, the monitor
 
 - **The replica is Ch. 89 §89.2.2's shell around `apply`**: read from its sequence to the cursor, apply each record, emit outputs to its own output ring — and for a *suppressed* standby, drop them (or better: write them to a shadow ring that the monitor compares with the primary's outputs, event for event — a free end-to-end test that the standby *would* have done the same thing).
-- **The digest** (`digest = mix(digest, seq, state_delta)`) is updated inside `apply` from the *delta* the event caused (not the whole state — Ch. 89 §89.4.6) and published every *k* events as `(seq, digest)` into the telemetry segment (Ch. 86); a housekeeping monitor compares all replicas at equal `seq` and raises Ch. 96's forensic trigger on the first mismatch, with the `seq` as the pointer into the journal.
-- **Snapshots for catch-up** (Ch. 94 §94.4.4): a replica writes `(seq, state)` every *N* events off-path; a new replica loads the latest snapshot and replays from `seq+1` (§95.3: ~3 ns/event for a cache-resident state). Snapshots are taken at *sequence boundaries*, so every replica's snapshot at `seq` is identical — and comparable.
+- **The digest** (`digest = mix(digest, seq, state_delta)`) is updated inside `apply` from the *delta* the event caused (not the whole state — Ch. 89 §89.4.6) and published every *k* events as `(seq, digest)` into the telemetry segment (Ch. 86); a housekeeping monitor compares all replicas at equal `seq` and raises Ch. 97's forensic trigger on the first mismatch, with the `seq` as the pointer into the journal.
+- **Snapshots for catch-up** (Ch. 94 §94.4.4): a replica writes `(seq, state)` every *N* events off-path; a new replica loads the latest snapshot and replays from `seq+1` (§96.3: ~3 ns/event for a cache-resident state). Snapshots are taken at *sequence boundaries*, so every replica's snapshot at `seq` is identical — and comparable.
 - **Determinism hygiene** (the list every divergence hunt ends at): no clock, no RNG without a seeded, journaled generator, no floating-point reduction whose order depends on anything but the stream (Ch. 30), no iteration over a hash map (Ch. 28) whose order depends on allocation, no uninitialized memory (Ch. 87), one binary for all replicas (build id in the digest's epoch record — Appendix N).
 
-### 95.4.4 The slow replica: gate, drop, or demote
+### 96.4.4 The slow replica: gate, drop, or demote
 
-The sequencer's wrap gate (Ch. 40) blocks the *sequencer* when the slowest reader falls a full ring behind — Ch. 42's BLOCK policy on the system's single most critical producer. The policy, by reader class (Ch. 42 §42.2.1): **critical readers** (gateway, risk) must never gate — their lag is a kill trigger (Ch. 90 §90.4.5: "the facts are stale") long before the ring wraps, and the ring is sized so that a reader that *could* gate it has already been killed; **journal writer**: never gate — its own ring is large and its overflow is drop-and-flag (Ch. 94 §94.5), i.e. it reads the log through a second, larger buffer; **non-critical readers** (GUI, analytics, a standby that is catching up): **demoted** — the supervisor (Ch. 89 §89.4.3) removes a reader that lags beyond a threshold from the gate set (its sequence no longer participates in the minimum), and it re-joins by snapshot + replay (§95.4.3). The sequencer thus never blocks in practice, and the ring's size is a *detection* budget, not a *tolerance* budget.
+The sequencer's wrap gate (Ch. 40) blocks the *sequencer* when the slowest reader falls a full ring behind — Ch. 42's BLOCK policy on the system's single most critical producer. The policy, by reader class (Ch. 42 §42.2.1): **critical readers** (gateway, risk) must never gate — their lag is a kill trigger (Ch. 90 §90.4.5: "the facts are stale") long before the ring wraps, and the ring is sized so that a reader that *could* gate it has already been killed; **journal writer**: never gate — its own ring is large and its overflow is drop-and-flag (Ch. 94 §94.5), i.e. it reads the log through a second, larger buffer; **non-critical readers** (GUI, analytics, a standby that is catching up): **demoted** — the supervisor (Ch. 89 §89.4.3) removes a reader that lags beyond a threshold from the gate set (its sequence no longer participates in the minimum), and it re-joins by snapshot + replay (§96.4.3). The sequencer thus never blocks in practice, and the ring's size is a *detection* budget, not a *tolerance* budget.
 
-### 95.4.5 Sequencer failover and the standby sequencer
+### 96.4.5 Sequencer failover and the standby sequencer
 
 - **A standby sequencer reads the log** like any replica and so knows `next` to within one publish; it also subscribes to the same inputs (which are themselves sequenced — `src_seq`) but does not stamp. On promotion (the supervisor's decision from heartbeat loss — Ch. 89 §89.4.3; or a crash handler's handoff — Ch. 93 §93.4.3) it: reads the log to its end (`next`), reconciles each input's `src_seq` against the last stamped one (re-reading from the input rings anything the dead sequencer pulled but never published — inputs must be *re-readable* for this: the input rings keep a window, Ch. 61's retransmit buffer for the feed), and begins stamping at `next`. Consumers see a gap-free `seq`; a `SequencerEpoch` record marks the takeover in the stream so every replica agrees when it happened.
 - **During the gap** (detect + promote: Ch. 89 §89.3's detect term, tens of µs to ms) nothing is sequenced, so no order can be sent — the gateway is a replica and has no input. That is the safe failure: the venue's cancel-on-disconnect is not triggered (the session is up) and working orders rest; the gateway's ageing timers (Ch. 47) are themselves sequenced events and so do not fire either — a deliberate consequence, bounded by the detect budget, which Ch. 90's monitors watch (a sequencer whose `seq` has not advanced in *T* while inputs are arriving is a kill trigger if *T* exceeds the budget).
 - **Two sequencers stamping** is the catastrophic case — two truths — and within one host the supervisor's promotion is the single point of decision; across hosts it is the lease/fencing problem this chapter leaves to its own item. Every record carries the sequencer epoch, so a consumer that sees two epochs interleaved halts and alarms rather than applying both.
 - **Consensus where the hop is affordable**: Aeron Cluster (Ch. 73 §73.4.1) replicates the *log* across hosts by Raft and elects the leader; its per-batch commit is a cross-host round trip (tens of µs), which is why it sits behind the on-host sequencer (as the journal's and standby's agreement layer) rather than in the tick-to-trade path.
 
-### 95.4.6 Reducing what the other chapters carry
+### 96.4.6 Reducing what the other chapters carry
 
-Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's point-to-point rings remain the *minimal* topology and this chapter is the alternative when more than one consumer must agree; Ch. 94's journal becomes the sequenced log's persistence; Appendix J.6's glossary line now points at a chapter; Ch. 99's architecture diagram gains the sequencer and a replica (§99.2 and §99.3's hop note).
+Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's point-to-point rings remain the *minimal* topology and this chapter is the alternative when more than one consumer must agree; Ch. 94's journal becomes the sequenced log's persistence; Appendix J.6's glossary line now points at a chapter; Ch. 100's architecture diagram gains the sequencer and a replica (§100.2 and §100.3's hop note).
 
-## 95.5 Pitfalls & anti-patterns
+## 96.5 Pitfalls & anti-patterns
 
-- **A replica that reads a clock.** One `rdtsc()`, `clock_gettime` or `std::chrono::now()` inside `apply` and the digest diverges on the first run (§95.3). Time is `t_seq` in the record; timers are sequenced events (Ch. 47, §95.2.1).
+- **A replica that reads a clock.** One `rdtsc()`, `clock_gettime` or `std::chrono::now()` inside `apply` and the digest diverges on the first run (§96.3). Time is `t_seq` in the record; timers are sequenced events (Ch. 47, §96.2.1).
 - **Two emitters.** A standby that emits while the primary is alive doubles every order; emission moves on a control event *in the stream*, so every replica agrees on the `seq` at which it moved; the venue's session exclusivity is the backstop.
 - **Two stampers.** Two sequencers after a messy failover produce two truths; the epoch in every record and a consumer that halts on an interleaved epoch are the detection; the supervisor's single decision is the prevention on one host.
 - **The sequencer that decodes.** Payload inspection in the stamping loop is state and latency where neither belongs; the sequencer copies bytes and stamps.
 - **Outputs that bypass the stream.** A strategy that sends to the gateway over a side ring has made its decision invisible to the replay and to its own replica. Decisions are events.
 - **Publishing per event.** One cursor store per event is one line transfer per reader per event — the Ch. 41 §41.3 microburst queue; publish per iteration.
-- **Letting a critical reader gate the sequencer.** A slow gateway that stalls the sequencer stalls the system; its lag is a kill trigger well before that (§95.4.4), and non-critical readers are demoted, not waited for.
+- **Letting a critical reader gate the sequencer.** A slow gateway that stalls the sequencer stalls the system; its lag is a kill trigger well before that (§96.4.4), and non-critical readers are demoted, not waited for.
 - **A floating-point fold.** Summation order that depends on anything but the stream (threads, SIMD width — Ch. 32) diverges across replicas on different builds or cores; integers for state, or a fixed reduction order (Ch. 30).
 - **Hash-map iteration in `apply`.** Iteration order depends on insertion history and allocation; two replicas with different histories (one restarted from a snapshot) differ. Flat arrays and explicit orders (Ch. 28).
 - **Snapshots at arbitrary points.** A snapshot taken mid-batch or at a wall-clock time is not comparable across replicas; snapshot at a `seq`.
 - **One copy of the journal.** The log is the system's memory; it is shipped (warm standby) and persisted (Ch. 94) from a dedicated reader, not from the sequencer's loop.
-- **Treating the sequencer's hop as free.** It is one ring hop (§95.3); budget it (Ch. 99 §99.3) and keep both ends on one socket.
+- **Treating the sequencer's hop as free.** It is one ring hop (§96.3); budget it (Ch. 100 §100.3) and keep both ends on one socket.
 
-## 95.6 Exercises & checklist
+## 96.6 Exercises & checklist
 
-1. Reproduce §95.3 on isolated cores; add a third replica and a shm-segment fan-out (Ch. 57) with the replicas as processes; confirm the digests and measure the hop with the sequencer on the same and on the other socket (Ch. 16).
-2. Introduce each determinism bug of §95.4.3 in turn (clock read, unordered-map iteration, an FP accumulator, an uninitialized field) and record the `seq` at which the digest monitor catches it.
+1. Reproduce §96.3 on isolated cores; add a third replica and a shm-segment fan-out (Ch. 57) with the replicas as processes; confirm the digests and measure the hop with the sequencer on the same and on the other socket (Ch. 16).
+2. Introduce each determinism bug of §96.4.3 in turn (clock read, unordered-map iteration, an FP accumulator, an uninitialized field) and record the `seq` at which the digest monitor catches it.
 3. Implement snapshot + replay catch-up: snapshot every 10⁵ events, kill replica B, restart it from the latest snapshot and measure time to digest agreement.
-4. Build the standby sequencer of §95.4.5 with re-readable input rings; kill the primary mid-burst; verify the stream is gap-free with one epoch record and measure detect + promote against Ch. 89 §89.3.
-5. Put the strategy's orders back into the stream (§95.2.1) and show, from the log alone, the exact tick that caused each order and the fill that followed — then hot-standby the gateway with output suppression and compare its shadow outputs to the primary's.
+4. Build the standby sequencer of §96.4.5 with re-readable input rings; kill the primary mid-burst; verify the stream is gap-free with one epoch record and measure detect + promote against Ch. 89 §89.3.
+5. Put the strategy's orders back into the stream (§96.2.1) and show, from the log alone, the exact tick that caused each order and the fill that followed — then hot-standby the gateway with output suppression and compare its shadow outputs to the primary's.
 6. Replace the on-host fan-out with reliable multicast to a second host (Ch. 61, 66); measure the cross-host hop wire-to-wire and the time a far replica needs to catch up after a 1-second link loss.
 
 **Checklist**
@@ -195,7 +195,7 @@ Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's poi
 - [ ] A standby sequencer exists, inputs are re-readable, failover is measured, and an interleaved epoch halts consumers.
 - [ ] The sequencer's hop is in the latency budget; sequencer and hot readers share a socket.
 
-## 95.7 References
+## 96.7 References
 
 - Schneider, F. B. "Implementing Fault-Tolerant Services Using the State Machine Approach: A Tutorial." *ACM Computing Surveys* 22(4), 1990 — state-machine replication; the sequencer as the degenerate agreement protocol.
 - Lamport, L. "Time, Clocks, and the Ordering of Events in a Distributed System." *CACM* 21(7), 1978 — total order from a single sequence.
@@ -204,7 +204,7 @@ Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's poi
 - Ongaro, D., Ousterhout, J. "In Search of an Understandable Consensus Algorithm (Raft)." USENIX ATC 2014 — the consensus alternative (Aeron Cluster, Ch. 73).
 - Nasdaq. *INET* / *Genium INET* architecture overviews (sequencer-based matching); Chronicle Software, *Chronicle Queue* documentation (a sequenced log as the system of record).
 
-## 95.8 Additional Reading
+## 96.8 Additional Reading
 
 - Kleppmann, M. *Designing Data-Intensive Applications*, Ch. 9 ("Consistency and Consensus": total order broadcast) and Ch. 11 ("Stream Processing": the log as the system of record).
 - Kreps, J. "The Log: What every software engineer should know about real-time data's unifying abstraction." LinkedIn Engineering, 2013.
@@ -214,4 +214,4 @@ Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's poi
 
 ---
 
-*Next: Ch. 96 — Latency-Spike Forensics & Anomaly-Triggered Diagnostics: when a message blows its budget, freezing the flight recorder, the kernel's ring and the sampled profile at the moment of the spike — and, when a replica's digest disagrees, using the sequence number as the pointer into the journal.*
+*Next: Ch. 97 — Latency-Spike Forensics & Anomaly-Triggered Diagnostics: when a message blows its budget, freezing the flight recorder, the kernel's ring and the sampled profile at the moment of the spike — and, when a replica's digest disagrees, using the sequence number as the pointer into the journal.*

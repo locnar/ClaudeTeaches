@@ -6,7 +6,7 @@
 >
 > **Prerequisites:** Ch. 3 (micro-benchmarking — this chapter is the *instrument* every benchmark in the book relies on; coordinated omission and the measurement overhead caveats live here too), Ch. 11 (out-of-order execution — why an *unserialized* `rdtsc` measures the wrong thing), Ch. 6 (system setup — turbo/C-states, and §6.4.4 for the `tsc` clocksource and SMIs this chapter's timestamps depend on).
 >
-> **Leads into:** Ch. 66 (PTP & hardware timestamping — distributing time *across hosts* and measuring true wire-to-wire, the multi-machine sequel to this single-host chapter), Ch. 63 (NIC hardware timestamps), Ch. 84 (logging — every timestamped log line uses this clock), Ch. 99 (end-to-end latency measurement). Closes **Part II**.
+> **Leads into:** Ch. 66 (PTP & hardware timestamping — distributing time *across hosts* and measuring true wire-to-wire, the multi-machine sequel to this single-host chapter), Ch. 63 (NIC hardware timestamps), Ch. 84 (logging — every timestamped log line uses this clock), Ch. 100 (end-to-end latency measurement). Closes **Part II**.
 
 ---
 
@@ -171,7 +171,7 @@ Choosing and using the clock correctly on the steady-state hot path:
 
 When software timestamps (even `rdtsc`) aren't precise or comparable enough — notably for **wire-to-wire** latency — push timestamping into hardware:
 
-- **NIC hardware timestamps (Ch. 63).** Modern NICs can stamp each packet with a hardware clock at the moment it crosses the wire (RX) or is sent (TX), via `SO_TIMESTAMPING` (`SOF_TIMESTAMPING_RX_HARDWARE`/`TX_HARDWARE`) or the driver's facilities. This removes the software stack's variable latency from the measurement: you get the *true* time the bytes arrived, not when your code got around to reading them. Essential for honest tick-to-trade numbers (Ch. 99).
+- **NIC hardware timestamps (Ch. 63).** Modern NICs can stamp each packet with a hardware clock at the moment it crosses the wire (RX) or is sent (TX), via `SO_TIMESTAMPING` (`SOF_TIMESTAMPING_RX_HARDWARE`/`TX_HARDWARE`) or the driver's facilities. This removes the software stack's variable latency from the measurement: you get the *true* time the bytes arrived, not when your code got around to reading them. Essential for honest tick-to-trade numbers (Ch. 100).
 - **Correlating the NIC clock with the TSC.** The NIC's PHC (PTP Hardware Clock) and the host TSC are *different* clocks; to compare a hardware RX timestamp with a software TSC stamp you must relate them (cross-timestamping: the `PTP_SYS_OFFSET_PRECISE` ioctl is hardware-assisted — backed by the kernel's `get_device_system_crosststamp()`, e.g. ART on Intel NICs — while `PTP_SYS_OFFSET_EXTENDED`/`PTP_SYS_OFFSET` sample system/PHC/system timestamp triples in software). This is the bridge into Ch. 66.
 - **PTP for cross-host time (Ch. 66).** The on-host TSC tells you *intervals on this box*; to compare a timestamp taken *here* with one taken on *another machine* (the exchange, a matching engine, a peer) you need the clocks **synchronized** — PTP (IEEE 1588) disciplines the NIC PHC to a grandmaster to sub-microsecond (sub-ns with enhancements), and that's the entire subject of Ch. 66. This chapter is the single-host foundation; Ch. 66 is the distributed sequel.
 

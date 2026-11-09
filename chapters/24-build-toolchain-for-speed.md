@@ -123,7 +123,7 @@ The highest tier: replace the compiler's *guesses* about hot/cold and branch dir
 
 ### 24.4.4 Debug info, frame pointers and unwind tables: what the production binary carries
 
-Ch. 2 and Ch. 5 told you to keep frame pointers and `-g` on the production build and called the cost "small". This section measures it and decides, flag by flag, what the shipped binary carries for the profiler (Ch. 2, 99), the crash handler (Ch. 93) and the post-mortem (Ch. 5). *Toolchain and machine: Appendix L.3; the numbers below are GCC 13.3, `-O2 -std=c++20 -march=native`, on a 4-vCPU Xeon VM (TSC 2.7 GHz) under Linux 6.18 — CPU-bound, and the same shape on the reference machine.*
+Ch. 2 and Ch. 5 told you to keep frame pointers and `-g` on the production build and called the cost "small". This section measures it and decides, flag by flag, what the shipped binary carries for the profiler (Ch. 2, 100), the crash handler (Ch. 93) and the post-mortem (Ch. 5). *Toolchain and machine: Appendix L.3; the numbers below are GCC 13.3, `-O2 -std=c++20 -march=native`, on a 4-vCPU Xeon VM (TSC 2.7 GHz) under Linux 6.18 — CPU-bound, and the same shape on the reference machine.*
 
 **1. `-fno-omit-frame-pointer` on the hot kernels.** A decode (`memcpy` + two `bswap`s) feeding a book update (one level, two fields), both `noinline` so the frame-pointer prologue has somewhere to land, one million messages, best of twenty:
 
@@ -147,7 +147,7 @@ Ch. 2 and Ch. 5 told you to keep frame pointers and `-g` on the production build
    glibc backtrace()              same + libgcc_s at runtime    ~200–235 cycles  3,056 cyc   7,308 cyc    984k cyc = 365 µs backtrace_symbols_fd, lazy dlopen
                                                                                                            (dlopen!)
    LBR (hardware)                 nothing                       0 (the CPU records 32 taken branches)      —                 perf --call-graph lbr: depth ≤ 32
-                                                                                                                             branches, no program cost (Ch. 99 §99.4.4)
+                                                                                                                             branches, no program cost (Ch. 100 §100.4.4)
    DWARF copy (perf dwarf)        .eh_frame + -g                copies 8 KiB of stack per SAMPLE into the ring (Ch. 2 §2.5),  perf --call-graph dwarf: unwinds offline,
                                                                 unwinds offline                                              costs the NMI path the copy
    SFrame (.sframe)               -Wa,--gsframe (binutils ≥     ~4–8 cycles/frame: a sorted table lookup per frame, no        the kernel's deferred user unwinder

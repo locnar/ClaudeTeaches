@@ -1,8 +1,8 @@
 # Appendix O — Hot-Path Anti-Pattern Catalogue
 
-> **Consolidates:** every chapter's *Pitfalls & anti-patterns* section (§N.5 or §N.6 of Ch. 1–99), read and re-sorted by **where the sin lives** rather than by chapter, with the one column no chapter provides in aggregate: **the counter, probe or signature that exposes it**. The probe invocations are Appendix I's; the fixes point at the section that develops them. Companion to Appendix C (tuning knobs), D (flags), E (latency numbers), I (commands) and M (the readiness gate); the pre-merge review checklist Ch. 99 §99.4.1 asks for.
+> **Consolidates:** every chapter's *Pitfalls & anti-patterns* section (§N.5 or §N.6 of Ch. 1–100), read and re-sorted by **where the sin lives** rather than by chapter, with the one column no chapter provides in aggregate: **the counter, probe or signature that exposes it**. The probe invocations are Appendix I's; the fixes point at the section that develops them. Companion to Appendix C (tuning knobs), D (flags), E (latency numbers), I (commands) and M (the readiness gate); the pre-merge review checklist Ch. 100 §100.4.1 asks for.
 
-**How to use this:** two ways. *As a reviewer*, read the left column of the sections that touch the change (a new queue → O.5; a new container → O.1 and O.8; a new thread → O.4 and O.6) and ask whether each row applies. *On call*, start from the **symptom** you have — a p99.9 spike every ~N minutes, a flat median with a long tail, throughput that fell when you added a core — find it in the second column, run the probe in the third, and follow the pointer. Each row is one line: **anti-pattern → how it shows up → what exposes it → the fix → where the book develops it**. The "exposes it" column names the cheapest *discriminating* evidence: a counter that moves for this pattern and not for its neighbours. Rows added by the design-pattern chapters (Ch. 41, 42, 47, 90, 91, 95) are marked ◆.
+**How to use this:** two ways. *As a reviewer*, read the left column of the sections that touch the change (a new queue → O.5; a new container → O.1 and O.8; a new thread → O.4 and O.6) and ask whether each row applies. *On call*, start from the **symptom** you have — a p99.9 spike every ~N minutes, a flat median with a long tail, throughput that fell when you added a core — find it in the second column, run the probe in the third, and follow the pointer. Each row is one line: **anti-pattern → how it shows up → what exposes it → the fix → where the book develops it**. The "exposes it" column names the cheapest *discriminating* evidence: a counter that moves for this pattern and not for its neighbours. Rows added by the design-pattern chapters (Ch. 41, 42, 47, 90, 91, 96) are marked ◆.
 
 ---
 
@@ -42,8 +42,8 @@
 | Branchless code that is slower (cmov on a predictable branch; a lookup table that misses cache) | `cmov` version slower than the branch; L1d misses on a "fast" table | `perf stat -e branch-misses` (near zero → the branch was fine); `mem_load_retired.l1_miss` on the table | Keep predictable branches; tables that fit L1; measure both | Ch. 13 §13.6 |
 | Mis-hinting `[[likely]]`/`[[unlikely]]`; optimizing branches when not Bad-Speculation-bound | no change, or code layout got worse | top-down level 1: Bad-Speculation share before and after | Hint only from a profile; PGO | Ch. 13 §13.6, 12 §12.6 |
 | Branch chain instead of a bitmask in a validation gate (risk checks) ◆ | each reject mispredicts; the all-pass path pollutes the predictor | `perf stat -e branch-misses` scaled with reject rate | Accumulate `r \|= (cond) * BIT`, one branch on the verdict | Ch. 90 §90.2.3, §90.5 |
-| Reading the clock inside the deterministic core; timers as callbacks ◆ | replay digest diverges on the first run | Ch. 89 §89.4.6 digest compare live vs replay; `grep rdtsc\|clock_gettime` in core code | Time as an input (`now` stamped once per iteration); timer fires as events | Ch. 89 §89.5, 44 §47.5, 91 §95.5 |
-| Floating-point fold / hash-map iteration order inside a replicated fold ◆ | replicas with different histories disagree | replica digest comparison at equal `seq` | Integer state or fixed reduction order; flat arrays; one binary | Ch. 95 §95.5, 27 §30.6, 29 §32.6 |
+| Reading the clock inside the deterministic core; timers as callbacks ◆ | replay digest diverges on the first run | Ch. 89 §89.4.6 digest compare live vs replay; `grep rdtsc\|clock_gettime` in core code | Time as an input (`now` stamped once per iteration); timer fires as events | Ch. 89 §89.5, 44 §47.5, 91 §96.5 |
+| Floating-point fold / hash-map iteration order inside a replicated fold ◆ | replicas with different histories disagree | replica digest comparison at equal `seq` | Integer state or fixed reduction order; flat arrays; one binary | Ch. 96 §96.5, 27 §30.6, 29 §32.6 |
 
 ## O.4 Sharing, contention and false sharing
 
@@ -62,7 +62,7 @@
 | Anti-pattern | Symptom | What exposes it | Fix | Where |
 |---|---|---|---|---|
 | A thread per concern; staging onto the critical path "to parallelize" ◆ | hop time ≫ work time; tails compounding across cores | Ch. 85's per-stage stamps: time between stages > time in stages; `hops.cpp`-style RTT | Run-to-completion within a shard; stage only off-path consumers or fault domains | Ch. 41 §41.2.2, §41.5 |
-| Per-message hops in a burst (no cached indices, no consumer batching) ◆ | microburst → tens of µs of queueing in a 2-stage pipeline | `perf c2c` on the ring's index lines (one transfer per message); queue-depth telemetry | Batch at the consumer; cache the indices; publish once per iteration | Ch. 41 §41.3, 37 §40.4.2, 34 §37.5, 91 §95.5 |
+| Per-message hops in a burst (no cached indices, no consumer batching) ◆ | microburst → tens of µs of queueing in a 2-stage pipeline | `perf c2c` on the ring's index lines (one transfer per message); queue-depth telemetry | Batch at the consumer; cache the indices; publish once per iteration | Ch. 41 §41.3, 37 §40.4.2, 34 §37.5, 91 §96.5 |
 | Polling sources in arrival order, uncapped ◆ | a kill command or an ack delayed by a whole market-data burst | control-message latency under a replayed burst (Ch. 94) | Fixed priority order with per-source batch caps | Ch. 41 §41.4.2 |
 | Unbounded queue / "size the ring bigger" ◆ | no drops, but the strategy acts on 20 ms-old data | message *age* at point of use (Ch. 42 §42.4.3), not drop counters | Conflate state; lossless channels sized for the venue burst with fullness = incident | Ch. 42 §42.3, §42.5, 34 §37.5 |
 | Ignoring `push`'s return value (drop-newest by omission) ◆ | the newest state lost, the oldest backlog kept | the `Fail` channel's drop counter; stale ages | Declare the policy per channel in the type; publish drops | Ch. 42 §42.4.1 |
@@ -86,7 +86,7 @@
 | Signals landing on the hot thread (a kill delivered by signal; unmasked hot thread) ◆ | a 2.5 KB sigframe and an interrupt on the hot core | ftrace `signal_deliver` on the hot CPU | Mask signals on hot threads; control words + control-ring events; `eventfd` only from a crash handler | Ch. 46 §46.5, 87 §90.5, 89 §93.5 |
 | Busy-polling on a shared core; blocking on the hot path "to be nice" | starving neighbours, or a wake-up tail | CPU share of the hot core; `perf sched` wake-up latency | Dedicated core for busy-poll; block only on housekeeping threads | Ch. 46 §46.5, 32 §35.5 |
 | The core dump that stalls the survivors; `SIGCHLD` as the kill trigger | survivors' max gap grows 20–50× during a dump; cancels wait for the dump | survivor latency during an induced crash; the dump's duration | `MADV_DONTDUMP` on the big segments, piped bounded handler on a housekeeping core, kill-switch handoff from the handler | Ch. 93 §93.5, 86 §89.5 |
-| Monitors that are the noise (sampling too fast, on the sibling, with syscalls) | the tail appears when monitoring is on | `rtla osnoise` with monitors on/off; the monitor's own CPU | Housekeeping cores, bounded cadence, shared-memory scraping | Ch. 97 §97.5, 49 §52.5, 83 §86.6 |
+| Monitors that are the noise (sampling too fast, on the sibling, with syscalls) | the tail appears when monitoring is on | `rtla osnoise` with monitors on/off; the monitor's own CPU | Housekeeping cores, bounded cadence, shared-memory scraping | Ch. 98 §98.5, 49 §52.5, 83 §86.6 |
 
 ## O.7 I/O, networking, logging and capture
 
@@ -94,7 +94,7 @@
 |---|---|---|---|---|
 | Forgetting `TCP_NODELAY` (Nagle + delayed ACK) | 40–200 ms stalls on small writes | `ss -ti` (`nagle`), a 40 ms mode in the RTT histogram | `TCP_NODELAY`; `TCP_QUICKACK`; one write per message | Ch. 58 §58.5, 51 §54.5 |
 | Batching offloads (GRO/LRO, interrupt coalescing) left on; interrupt-driven RX on the hot path | tens of µs added per packet | `ethtool -k`/`-c`; NIC timestamp vs application timestamp gap | Offloads off for the feed NIC; busy-poll / bypass | Ch. 63 §63.5, 56 §59.5 |
-| Undersized RX ring / slow consumer → market-open drops | `rx_missed`/`rx_no_buffer` at 09:30; sequence gaps | `ethtool -S` deltas; feed gap counter vs NIC drop counter | Ring sizing, steering to an isolated core, DDIO sizing, consumer batching | Ch. 60 §60.6, 60 §63.5, 61 §64.5, 94 §98.5 |
+| Undersized RX ring / slow consumer → market-open drops | `rx_missed`/`rx_no_buffer` at 09:30; sequence gaps | `ethtool -S` deltas; feed gap counter vs NIC drop counter | Ring sizing, steering to an isolated core, DDIO sizing, consumer batching | Ch. 60 §60.6, 60 §63.5, 61 §64.5, 94 §99.5 |
 | Leaving the feed to RSS / steering to a non-isolated or wrong-NUMA core | locality loss; cross-core handoff per packet | `ethtool -x`; `perf c2c` on the RX path; `numastat` | Flow steering to the consumer's isolated core on the NIC's node | Ch. 65 §65.5, 16 §16.5 |
 | Software timestamps for a wire measurement / cross-host comparison | ±µs–ms "latency" that is really clock error | `phc_ctl`/`pmc` offsets; compare SW vs HW stamps on one NIC | Hardware timestamps; PTP with HW stamping; `TAI` offset set | Ch. 66 §66.5, 17 §17.5, 65 §68.5, 90 §94.5 |
 | Blocking on recovery; NAK storms; trading through an unrecovered gap | the hot path waits on a retransmit; a quiet feed mistaken for a quiet market | gap/recovery counters; dark-feed detector; `/proc/net/igmp` lies — use the querier | Recovery off-path; per-instrument stale flags; membership health | Ch. 61 §61.5, 59 §62.5 |
@@ -150,10 +150,10 @@
 | Reporting the mean; averaging percentiles; a `p99_9` gauge | the tail invisible until the incident | the histogram itself (HdrHistogram) vs the summary statistic | Full histograms, merged off-path; percentiles from enough samples | Ch. 1 §1.5, 3 §3.5, 83 §86.6 |
 | Coordinated omission; service time instead of response time | a closed-loop benchmark that cannot see the stall | compare paced-intended vs dequeue-time histograms (Appendix L.2) | Record against the intended time; paced load | Ch. 3 §3.5, 39 §42.7, Appendix L |
 | Unserialized `rdtsc` on a tiny region; converting to ns on the hot path; comparing TSC to the venue's clock | numbers off by the measurement's own cost or by a clock domain | the measured cost of the empty region; TSC↔PHC anchors | `rdtscp`/fenced pairs; convert off-path; anchor to PTP | Ch. 17 §17.5, 82 §85.6, 63 §66.5 |
-| Measuring kernel-only/component latency, not wire-to-wire; one run, no CI | optimizing a stage the tail does not live in | end-to-end HW-timestamped histogram vs the stage sum | Wire-to-wire with hardware stamps; the regression gate with confidence intervals | Ch. 99 §99.5, 72 §75.5, 75 §78.5 |
+| Measuring kernel-only/component latency, not wire-to-wire; one run, no CI | optimizing a stage the tail does not live in | end-to-end HW-timestamped histogram vs the stage sum | Wire-to-wire with hardware stamps; the regression gate with confidence intervals | Ch. 100 §100.5, 72 §75.5, 75 §78.5 |
 | Drops measured instead of age; lag without age ◆ | the strategy traded on stale data with zero drops | message age at point of use | Age histograms and budgets per consumer | Ch. 42 §42.5 |
-| Trusting `smp_affinity`, `scaling_cur_freq`, `/proc/net/igmp`, zero counters on a bypass box | the configuration says one thing, the hardware another | `effective_affinity_list`; `turbostat`; the querier; NIC vendor counters | Verify the effective state in the host fingerprint (Appendix M) | Ch. 52 §52.5, 59 §62.5, 93 §97.5, 94 §98.5 |
-| Profiling overhead / tracing everything on every CPU / `perf -C <isolated>` all day | the observer is the tail | `rtla osnoise` with and without the tool | Targeted-live tier only, armed from a housekeeping core | Ch. 2 §2.5, 49 §52.5, 92 §96.5, 95 §99.5 |
+| Trusting `smp_affinity`, `scaling_cur_freq`, `/proc/net/igmp`, zero counters on a bypass box | the configuration says one thing, the hardware another | `effective_affinity_list`; `turbostat`; the querier; NIC vendor counters | Verify the effective state in the host fingerprint (Appendix M) | Ch. 52 §52.5, 59 §62.5, 93 §98.5, 94 §99.5 |
+| Profiling overhead / tracing everything on every CPU / `perf -C <isolated>` all day | the observer is the tail | `rtla osnoise` with and without the tool | Targeted-live tier only, armed from a housekeeping core | Ch. 2 §2.5, 49 §52.5, 92 §97.5, 95 §100.5 |
 | Benchmarking only the warm path; shadow traffic with side effects | the first real message is cold; a test order went to the venue | cold-vs-warm histograms; an order you did not mean to send | Measure cold; warm deliberately; shadow traffic that cannot leave the box | Ch. 53 §53.5 |
 
 ## O.12 Operational and architectural
@@ -163,12 +163,12 @@
 | Monolith creep "for latency"; shared fate through a back door | one crash takes the session down | the fault-injection drill (kill a strategy; does the gateway survive?) | Process-per-role with shm data planes; the gateway and risk separate | Ch. 89 §89.5, 38 §41.4.1 ◆ |
 | No kill-switch, or a kill-switch in the dead process; never rehearsed ◆ | orders strand after a crash; unknown time-to-safe-state | Appendix M.4's daily dry run; the measured time-to-zero-working-orders | Kill in the surviving gateway; triggers as monitors; rehearse daily | Ch. 89 §89.5, 87 §90.5 |
 | Send before journal; resending an unacked order; string ClOrdIDs; a counter without a generation ◆ | duplicate positions; fills booked to the wrong order | stale-response counter; position vs drop-copy; `unordered_map<string>` in the hot profile | Journal-before-send; the unknown-state matrix; slot + generation ids | Ch. 91 §91.5 |
-| Two emitters / two stampers after a failover ◆ | doubled orders; two truths | replica digest mismatch; interleaved sequencer epochs | Emission moves on a control event in the stream; epoch in every record; one promotion decision | Ch. 95 §95.5 |
+| Two emitters / two stampers after a failover ◆ | doubled orders; two truths | replica digest mismatch; interleaved sequencer epochs | Emission moves on a control event in the stream; epoch in every record; one promotion decision | Ch. 96 §96.5 |
 | Restart that is up-but-cold; reload without warming | the restarted process limps through its first ticks | cold-start histogram after an induced restart | Warm before `trading` (Appendix M.1); shadow traffic | Ch. 89 §89.5, 50 §53.5, 85 §88.5 |
-| Heartbeat that only catches exits; thresholds on invariants; a baseline nobody updates | a hung process trades stale; alerts that never fire or always fire | heartbeat *sequence* stalls while the process lives; invariant checks | Progress heartbeats; invariants as hard checks; baselines refreshed per release | Ch. 89 §89.5, 93 §97.5 |
+| Heartbeat that only catches exits; thresholds on invariants; a baseline nobody updates | a hung process trades stale; alerts that never fire or always fire | heartbeat *sequence* stalls while the process lives; invariant checks | Progress heartbeats; invariants as hard checks; baselines refreshed per release | Ch. 89 §89.5, 93 §98.5 |
 | Trusting the wire / the shared region / the operator | a malformed packet or a bad limit set takes the system down | fuzzing the decoders; validate-before-swap failures | Bounds-check at the gate; validate config off-path; four-eyes on limits | Ch. 60 §60.6, 84 §87.5, 85 §88.5, 87 §90.4.4 ◆ |
 | A mode nobody owns (shedding scattered across stages) ◆ | inconsistent behaviour under load, no record of it | the journal has no mode transitions | One owner, one word, journaled transitions | Ch. 42 §42.5 |
-| Drift between test and production; tuned once and walked away | the gate passes, production regresses | host fingerprint delta (Appendix M); the production always-on tier | Configuration as code; continuous monitoring; re-tune per kernel/firmware | Ch. 99 §99.5, 6 §6.5, 48 §51.5 |
+| Drift between test and production; tuned once and walked away | the gate passes, production regresses | host fingerprint delta (Appendix M); the production always-on tier | Configuration as code; continuous monitoring; re-tune per kernel/firmware | Ch. 100 §100.5, 6 §6.5, 48 §51.5 |
 
 ---
 
@@ -189,7 +189,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 
 ## O.14 References
 
-- The §N.5/§N.6 sections of Ch. 1–99 of this book, from which every row is drawn; Appendix I for the probe invocations; Appendix M for the readiness checks that catch the operational rows before the open.
+- The §N.5/§N.6 sections of Ch. 1–100 of this book, from which every row is drawn; Appendix I for the probe invocations; Appendix M for the readiness checks that catch the operational rows before the open.
 - Gregg, B. *Systems Performance*, 2nd ed., Ch. 2 §"Methodologies" (the USE and RED methods — symptom-first diagnosis), and *BPF Performance Tools* — the uprobe/tracepoint one-liners.
 - Intel. *Optimization Reference Manual*, Appendix B (top-down analysis — the counter names in O.3/O.8).
 - Fog, A. *Optimizing software in C++* — the per-construct costs behind O.2/O.3/O.9.
@@ -203,7 +203,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 
 ---
 
-*This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 99) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
+*This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 100) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
 
 ---
 

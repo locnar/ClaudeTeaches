@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 60 (zero-copy wire decoding — the untrusted-input surface this chapter hardens), Ch. 27 (arena/zero-allocation — where memory-safety bugs live without a GC to catch them), Ch. 30 (price/quantity arithmetic — integer-overflow safety), Ch. 21–23 (abstractions / aliasing — UB as a vulnerability class), Ch. 6 (system setup — spec-exec mitigations and their cost), Ch. 45 (sanitizers/fuzzing tooling), Ch. 84 (logging — keeping secrets out of it).
 >
-> **Leads into:** Ch. 89 (process topology — privilege reduction, fault domains, kill-switch as a safety mechanism), Ch. 94–99 (capture/case study — integrity of the captured record). A cross-cutting Part XIII chapter: security treated as a *hot-path* and *correctness* concern, not a bolt-on.
+> **Leads into:** Ch. 89 (process topology — privilege reduction, fault domains, kill-switch as a safety mechanism), Ch. 94–100 (capture/case study — integrity of the captured record). A cross-cutting Part XIII chapter: security treated as a *hot-path* and *correctness* concern, not a bolt-on.
 
 ---
 
@@ -143,7 +143,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 
 - **Fuzz the decoder with libFuzzer/AFL++ under ASan+UBSan (+MSan).** Feed the ITCH/OUCH/FIX/SBE/FAST parser random and mutated inputs; the sanitizers (Ch. 45) turn latent memory-safety/UB bugs (§87.2.2) into loud, reproducible crashes. Seed the corpus with real captured packets (Ch. 94) and known-tricky messages (max-length, zero-length, truncated, oversized counts).
 - **MSan for uninitialized reads, ASan for spatial/temporal, UBSan for the rest.** The three catch complementary classes; run all (ASan+UBSan together, MSan separately due to its requirements). The arena (§87.4.2) especially benefits from ASan's use-after-free detection.
-- **Continuous, in CI (Ch. 45, 99).** Fuzzing is not a one-time audit — run it continuously so new parser code and new message types stay covered. A latency-regression gate (Ch. 99) and a fuzzing gate belong in the same CI.
+- **Continuous, in CI (Ch. 45, 100).** Fuzzing is not a one-time audit — run it continuously so new parser code and new message types stay covered. A latency-regression gate (Ch. 100) and a fuzzing gate belong in the same CI.
 - **Ship the fixes, not the instrumentation (§87.3).** Production runs the hardened-but-fast binary; the sanitizer builds are the test bench.
 
 ## 87.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
@@ -163,7 +163,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 **Exercises:**
 
 1. **Break a trusting parser.** Take a zero-copy ITCH/SBE parser (Ch. 60) that trusts its length fields and craft packets (truncated, oversized count, out-of-range index) that make it read out of bounds — confirm with ASan. Then add the §87.4.1 validation gate and re-run: the malformed packets are rejected, and measure the gate's hot-path cost (one early pass).
-2. **Fuzz the decoder.** Wire the parser to libFuzzer under ASan+UBSan (§87.4.8), seed with captured packets (Ch. 94), and run until it finds (or fails to find) a memory-safety/UB bug. Fix what it finds; add it to CI (Ch. 99).
+2. **Fuzz the decoder.** Wire the parser to libFuzzer under ASan+UBSan (§87.4.8), seed with captured packets (Ch. 94), and run until it finds (or fails to find) a memory-safety/UB bug. Fix what it finds; add it to CI (Ch. 100).
 3. **Bounds checks that vanish.** Write an order-book index access two ways — unchecked, and `.at()`/`span`-checked with a compile-time-known bound — and verify in Godbolt (Ch. 4) that the checked version compiles to *identical* code (the check folded away, §87.4.2). Then make the bound runtime-unknown and watch the check reappear; structure the code so it doesn't.
 4. **Measure the hardening ladder.** Build the feed handler at the §87.3 hardening levels and measure tick-to-trade (Ch. 66) at each. Reproduce "most are free, CFI/spec-exec are the costly few," and decide per-feature for your isolated box (Ch. 6).
 5. **Un-deletable secret wipe.** Zero a key buffer with a plain `memset` and with `explicit_bzero`; show in the asm (Ch. 4) that the plain one is deleted and the explicit one survives (§87.4.5).
@@ -194,7 +194,7 @@ The wire parser (Ch. 60) is the highest-value fuzz target in the system — it's
 - *Secure Coding in C and C++* (Seacord) and the OWASP/secure-design literature adapted to a systems/hot-path context.
 - Spectre/Meltdown and transient-execution mitigation analyses (Ch. 6 references) — the cost and interaction of spec-exec hardening (§87.4.4).
 - Talks on fuzzing network parsers and on memory safety in C++ (sanitizers, `std::span`, hardened standard libraries) — the parser-hardening and bounds-check-elision patterns (§87.4.1-2).
-- Ch. 89 (*Process Topology*) — fault domains, kill-switch/safe-state, privilege isolation as architecture; Ch. 88 (*Hot Reload*) — validated, signed config; Ch. 94 (*Capture*) — integrity and secret-redaction of the record; Ch. 45 (*Correctness Tooling*) — the sanitizer/fuzzing bench; Ch. 99 (*Case Study*) — fuzzing + latency-regression gates in CI.
+- Ch. 89 (*Process Topology*) — fault domains, kill-switch/safe-state, privilege isolation as architecture; Ch. 88 (*Hot Reload*) — validated, signed config; Ch. 94 (*Capture*) — integrity and secret-redaction of the record; Ch. 45 (*Correctness Tooling*) — the sanitizer/fuzzing bench; Ch. 100 (*Case Study*) — fuzzing + latency-regression gates in CI.
 - **Appendix D** (Compiler Flag Reference) — the optimization flags the hardening flags of §87.4.4 sit beside (`-fno-plt`/`-fno-semantic-interposition` for PIE, `-fsanitize=cfi`); **Appendix C** — `mitigations=` and isolated-box tuning; **Appendix F** — security/UB glossary.
 
 ---

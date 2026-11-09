@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 46 §46.4.2 (busy-poll vs block — the fork this chapter's two halves sit on either side of), Ch. 41 §41.4.2 (the hot loop that polls the deadline queue as one of its sources), Ch. 17 (`rdtsc`, invariant TSC, calibration — the loop's clock), Ch. 28 §28.4.3–§28.4.4 (intrusive lists and slot maps — the timer nodes' containers), Ch. 27 §27.4.2 (pools — where timer nodes come from), Ch. 31 §31.4.3 (power-of-two masks — the wheel's slot arithmetic), Ch. 89 §89.2.2 (time is an *input* to the deterministic core), Ch. 6 §6.3 and Ch. 51 §51.3 (`cyclictest` — the numbers this chapter finally explains).
 >
-> **Leads into:** Ch. 48–52 (the isolation layers that make the sleeping half's tail small), Ch. 53 (warming cadence as a timer), Ch. 60 §60.2.4 (the reorder-window timeout), Ch. 89 §89.4.3 (heartbeat timeouts), Ch. 90 (throttle windows and kill-switch timers), Ch. 91 (cancel-if-no-ack and unacked-order ageing — this chapter's largest customer), Ch. 95 (timer fires as sequenced, replayable events). Ch. 46 said a hot thread never sleeps and a housekeeping thread may; this chapter is what each of them does about *time*: the busy-poll core's deadline queue — 10⁴–10⁶ armed timers expired without a syscall — and the Linux timer stack beneath every thread that does sleep.
+> **Leads into:** Ch. 48–52 (the isolation layers that make the sleeping half's tail small), Ch. 53 (warming cadence as a timer), Ch. 60 §60.2.4 (the reorder-window timeout), Ch. 89 §89.4.3 (heartbeat timeouts), Ch. 90 (throttle windows and kill-switch timers), Ch. 91 (cancel-if-no-ack and unacked-order ageing — this chapter's largest customer), Ch. 96 (timer fires as sequenced, replayable events). Ch. 46 said a hot thread never sleeps and a housekeeping thread may; this chapter is what each of them does about *time*: the busy-poll core's deadline queue — 10⁴–10⁶ armed timers expired without a syscall — and the Linux timer stack beneath every thread that does sleep.
 
 ---
 
@@ -43,7 +43,7 @@ The decision: **a wheel for the TTL-shaped bulk (arm/cancel-heavy, tolerant of t
 
 ### 47.2.3 Timer fires are inputs
 
-Ch. 89 §89.2.2's rule — *time is an input* — makes a timer fire a **record in the ordered event stream**, not a callback: the loop reads `now` once (Ch. 41 §41.4.2), the queue emits `TimerFired{id, deadline, now}` events, the core applies them like any message, and the journal (Ch. 94) or the sequencer (Ch. 95) records them in sequence with everything else. Replaying the journal replays the fires *at the same positions* in the stream — which is the only way a timeout-driven decision ("cancel-if-no-ack fired before the ack arrived") is reproducible. A timer that calls into the core directly from the queue, or a core that reads the clock itself, is not replayable (§47.5).
+Ch. 89 §89.2.2's rule — *time is an input* — makes a timer fire a **record in the ordered event stream**, not a callback: the loop reads `now` once (Ch. 41 §41.4.2), the queue emits `TimerFired{id, deadline, now}` events, the core applies them like any message, and the journal (Ch. 94) or the sequencer (Ch. 96) records them in sequence with everything else. Replaying the journal replays the fires *at the same positions* in the stream — which is the only way a timeout-driven decision ("cancel-if-no-ack fired before the ack arrived") is reproducible. A timer that calls into the core directly from the queue, or a core that reads the clock itself, is not replayable (§47.5).
 
 ### 47.2.4 The Linux timer stack beneath a sleeping thread
 
@@ -187,7 +187,7 @@ Each timer *kind* is a row in the core's state, not a closure:
 
 ### 47.4.3 Replayable time: the fire in the journal, the clock as an input
 
-The core applies `TimerFired` from the stream; the journal (Ch. 94) records it in sequence; the sequencer (Ch. 95) stamps it like any input. Two rules make it hold: (1) the core's *arm* calls go through the same output path as orders — `arm(kind, ref, deadline)` is an *output* record the shell executes on the real queue, so a replay arms the same timers at the same stream positions; (2) `now` reaches the core only inside events (`TimerFired.now`, each message's ingress stamp — Ch. 85), never from `rdtsc()` in core code. Ch. 89 §89.4.6's digest comparison between a live run and its replay is the test; a timer that is not an event shows up there as the first divergence.
+The core applies `TimerFired` from the stream; the journal (Ch. 94) records it in sequence; the sequencer (Ch. 96) stamps it like any input. Two rules make it hold: (1) the core's *arm* calls go through the same output path as orders — `arm(kind, ref, deadline)` is an *output* record the shell executes on the real queue, so a replay arms the same timers at the same stream positions; (2) `now` reaches the core only inside events (`TimerFired.now`, each message's ingress stamp — Ch. 85), never from `rdtsc()` in core code. Ch. 89 §89.4.6's digest comparison between a live run and its replay is the test; a timer that is not an event shows up there as the first divergence.
 
 ### 47.4.4 Sleeping threads done right: slack, `TIMER_ABSTIME`, `timerfd`
 

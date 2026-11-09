@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 2 (profiling / the PMU — eBPF is the programmable extension), Ch. 46 (syscalls — what you trace), Ch. 54–55 (the kernel I/O path XDP sits in front of), Ch. 63 (NIC RX — XDP is the earliest software hook), Ch. 70-preview (kernel bypass — AF_XDP is the middle ground before it), Ch. 87 (privilege reduction — who may load eBPF, §87.4.6).
 >
-> **Leads into:** Ch. 70 (full kernel bypass — AF_XDP is the step before DPDK/ef_vi), Ch. 99 (production profiling — bpftrace as the continuous-observability tool), Ch. 78 (SmartNICs — eBPF/XDP offload to the NIC). Two distinct topics: eBPF *observability* (the production tracing tool) and XDP/AF_XDP *fast packet paths*.
+> **Leads into:** Ch. 70 (full kernel bypass — AF_XDP is the step before DPDK/ef_vi), Ch. 100 (production profiling — bpftrace as the continuous-observability tool), Ch. 78 (SmartNICs — eBPF/XDP offload to the NIC). Two distinct topics: eBPF *observability* (the production tracing tool) and XDP/AF_XDP *fast packet paths*.
 
 ---
 
@@ -105,7 +105,7 @@ void on_message(std::uint64_t seq, std::uint64_t rx_ns) {
 ```
 
 - **kprobes/uprobes — dynamic, for anything without a tracepoint.** kprobes attach to *any* kernel function (powerful, slightly more overhead); uprobes to *any* user function (expensive — §69.3, §69.5). Use for ad-hoc debugging where no tracepoint/USDT exists; mind the cost.
-- **BCC tools and continuous profiling (Ch. 99).** The `bcc-tools`/`bpftrace` tool suite (`funclatency`, `offcputime`, `runqlat`, `biolatency`, `tcplife`, ...) are ready-made; and eBPF underlies **continuous profilers** (Parca, Pyroscope) that profile production with low overhead (Ch. 99). Build eBPF observability into production monitoring.
+- **BCC tools and continuous profiling (Ch. 100).** The `bcc-tools`/`bpftrace` tool suite (`funclatency`, `offcputime`, `runqlat`, `biolatency`, `tcplife`, ...) are ready-made; and eBPF underlies **continuous profilers** (Parca, Pyroscope) that profile production with low overhead (Ch. 100). Build eBPF observability into production monitoring.
 
 ### 69.4.2 XDP for in-driver drop/redirect/filter
 
@@ -136,8 +136,8 @@ The standard-Linux fast receive path — the middle ground before bypass:
 - **XDP not a full-bypass replacement (Ch. 70).** XDP is in-kernel-driver (great for filtering/redirect); AF_XDP is a good fast path but not the lowest latency. For the ultra-hot tick-to-trade receive, **full bypass** (ef_vi/DPDK — Ch. 70) still wins. Use XDP/AF_XDP for filtering and a portable fast path; bypass for the floor.
 - **AF_XDP without zero-copy driver support.** AF_XDP in *copy* mode is much slower — defeating the point — and native-XDP support alone does *not* imply it: the driver must implement the AF_XDP zero-copy hooks (`XDP_ZEROCOPY`, §69.4.3). Verify with `bpftool net`/the `xsk` bind flags before relying on AF_XDP latency.
 - **Kernel-version dependence.** eBPF/XDP/AF_XDP features evolve fast and require recent kernels (and the feature/helper availability varies). Check kernel version and `bpftool feature`; an eBPF program/feature on an old kernel may not load. (HFT boxes sometimes run older "stable" kernels — verify support.)
-- **Trusting a histogram without enough samples / context.** A bpftrace histogram with few samples, or that perturbs the system (observer effect), can mislead. Gather enough samples, account for the probe's own cost, and correlate with other signals (Ch. 2, 99). 
-- **Leaving heavy tracing running in production.** Even cheap tracing has a cost; leaving broad/heavy eBPF tracing on continuously taxes the system. Use targeted, time-boxed tracing for investigation; for *continuous* observability use the low-overhead tools/sampling deliberately (Ch. 99).
+- **Trusting a histogram without enough samples / context.** A bpftrace histogram with few samples, or that perturbs the system (observer effect), can mislead. Gather enough samples, account for the probe's own cost, and correlate with other signals (Ch. 2, 100). 
+- **Leaving heavy tracing running in production.** Even cheap tracing has a cost; leaving broad/heavy eBPF tracing on continuously taxes the system. Use targeted, time-boxed tracing for investigation; for *continuous* observability use the low-overhead tools/sampling deliberately (Ch. 100).
 
 ## 69.6 Exercises & checklist
 
@@ -152,13 +152,13 @@ The standard-Linux fast receive path — the middle ground before bypass:
 **Checklist — eBPF, bpftrace & XDP/AF_XDP**
 
 - [ ] eBPF observability is used **near, not on, the hot path** — **USDT markers at boundaries** + **tracepoints/kprobes** for kernel-side latency (Ch. 46); **uprobes used sparingly** (expensive — §69.3) and **never in the critical inner loop** (observer effect — §69.5).
-- [ ] `bpftrace`/BCC one-liners are part of the **production-debugging toolkit** (syscall audit, latency histograms, scheduling/block-I/O latency) — answering "what's slow live" (§69.4.1, Ch. 99).
+- [ ] `bpftrace`/BCC one-liners are part of the **production-debugging toolkit** (syscall audit, latency histograms, scheduling/block-I/O latency) — answering "what's slow live" (§69.4.1, Ch. 100).
 - [ ] **XDP** filters unwanted packets at the driver (`XDP_DROP` non-feed/malformed before the stack — §69.4.2), reducing stack cost and hot-core jitter.
 - [ ] **AF_XDP** (zero-copy, driver-supported) is used as a **portable fast receive path** where appropriate — faster than the kernel stack (Ch. 54), standard Linux — with the floor reserved for **full bypass** (ef_vi/DPDK — Ch. 70).
 - [ ] eBPF program **verifier constraints** (bounded loops, 512B stack, complexity) are understood; complex logic moves to user space (§69.2, §69.5).
 - [ ] eBPF's **security surface** (privileged loading, CVE history) is managed — loading locked down on sensitive boxes (Ch. 87).
 - [ ] **Kernel-version / driver support** for eBPF/XDP/AF_XDP (esp. zero-copy) is verified (`bpftool feature`); copy-mode AF_XDP isn't mistaken for the fast path (§69.5).
-- [ ] Tracing is **targeted and time-boxed** for investigation; continuous observability uses **low-overhead sampling** deliberately (Ch. 99) — heavy tracing isn't left running.
+- [ ] Tracing is **targeted and time-boxed** for investigation; continuous observability uses **low-overhead sampling** deliberately (Ch. 100) — heavy tracing isn't left running.
 
 ## 69.7 References
 
@@ -171,8 +171,8 @@ The standard-Linux fast receive path — the middle ground before bypass:
 ## 69.8 Additional Reading
 
 - B. Gregg's blog (brendangregg.com) — bpftrace one-liners, flame graphs, and production tracing case studies.
-- The continuous-profiling projects (Parca, Pyroscope, `perf`+eBPF) — low-overhead production profiling (ties Ch. 99).
-- Ch. 2 (*Profiling/PMU*) — the measurement foundation eBPF extends; Ch. 46 (*Context Switching*) — the syscalls/scheduling you trace; Ch. 54–55 (*epoll/io_uring*) — the stack XDP fronts; Ch. 63 (*NIC*) — the RX path; Ch. 70 (*Kernel Bypass*) — the lower-latency floor beyond AF_XDP; Ch. 78 (*SmartNICs*) — offloaded XDP/eBPF; Ch. 99 (*Production Profiling*) — continuous observability.
+- The continuous-profiling projects (Parca, Pyroscope, `perf`+eBPF) — low-overhead production profiling (ties Ch. 100).
+- Ch. 2 (*Profiling/PMU*) — the measurement foundation eBPF extends; Ch. 46 (*Context Switching*) — the syscalls/scheduling you trace; Ch. 54–55 (*epoll/io_uring*) — the stack XDP fronts; Ch. 63 (*NIC*) — the RX path; Ch. 70 (*Kernel Bypass*) — the lower-latency floor beyond AF_XDP; Ch. 78 (*SmartNICs*) — offloaded XDP/eBPF; Ch. 100 (*Production Profiling*) — continuous observability.
 - **Appendix I §I.5** — the bpftrace/eBPF one-liners as a cookbook; **Appendix E** — kernel-stack vs bypass vs FPGA RX numbers (AF_XDP sits between the first two — §70.3).
 
 ---
