@@ -177,4 +177,4 @@ The discipline, stated once: **offload what terminates on the NIC or was never h
 
 ---
 
-*Next: Ch. 73 — Hand-Written & Inline Assembly.*
+*Next: Ch. 73 — Hand-Written & Inline Assembly, opening Part XII (Beyond C++: Languages at the Latency Floor): the writing-side sequel to Ch. 4 — GCC/Clang extended-asm anatomy (operands, constraints, clobbers, `volatile`, `asm goto`), what the optimizer may do around an asm statement, the intrinsics-first rule measured, the irreducible cases (`rdpmc`, serializing timestamps, `clwb`, `movdir64b` doorbells), a hand-written NASM decoder against the compiler's, and the one-line clobber bug that turns a loop infinite under both compilers.*

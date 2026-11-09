@@ -923,53 +923,100 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part XII — Beyond C++: Languages at the Latency Floor
 
-*TODO: one-line Part intro.*
+*Stepping outside C++ to the instructions themselves and to the other languages at or near the floor: inline and hand-written assembly, Rust measured against C++ on the book's own kernels, the C ABI boundary and vendor-SDK wrappers, the managed runtimes measured from the hot thread, and the tier-by-tier choice with an equal-rigour cross-language protocol.*
 
 ### [73. Hand-Written & Inline Assembly](73-hand-written-inline-assembly.md)
-- 73.1 Why it matters: TODO
-- 73.2 Mental model: TODO
-- 73.3 Measure it: TODO
+- 73.1 Why it matters: when the compiler has no word for what you mean
+- 73.2 Mental model
+  - 73.2.1 Extended asm anatomy: template, outputs, inputs, clobbers
+  - 73.2.2 What the optimizer may do around an asm statement
+  - 73.2.3 The two asm statements you have used since Ch. 3
+  - 73.2.4 Hand-written functions: the ABI is the whole contract
+- 73.3 Measure it: asm vs intrinsic vs compiler, on this book's own instructions
 - 73.4 Techniques
-  - 73.4.1 TODO
-- 73.5 Pitfalls & anti-patterns: TODO
-- 73.6 Exercises & checklist
-
+  - 73.4.1 Intrinsics first — and why that is not a cop-out
+  - 73.4.2 The irreducible cases (`rdpmc`, serializing timestamps, `clwb`, doorbells)
+  - 73.4.3 `asm goto`: a branch the compiler never materialises as a flag
+  - 73.4.4 The constraints cookbook
+  - 73.4.5 Writing a hand-written function that stays correct
+- 73.5 Verify the codegen: the statement in its context
+- 73.6 Pitfalls & anti-patterns: the undeclared clobber, and friends
+- 73.7 Exercises & checklist
 ### [74. Rust for the Hot Path](74-rust-for-the-hot-path.md)
-- 74.1 Why it matters: TODO
-- 74.2 Mental model: TODO
-- 74.3 Measure it: TODO
+- 74.1 Why it matters: a second language at the floor
+- 74.2 Mental model
+  - 74.2.1 Ownership vs the zero-allocation discipline
+  - 74.2.2 Layout you control: `repr`, `align`, padding
+  - 74.2.3 Atomics and the memory model: the same model, the same instructions
+  - 74.2.4 Bounds checks: where they are elided and where they stay
+  - 74.2.5 `&mut` is `noalias`
+  - 74.2.6 `unsafe` at the hardware boundary
+- 74.3 Measure it: the book's kernels, Rust beside GCC and Clang
 - 74.4 Techniques
-  - 74.4.1 TODO
-- 74.5 Pitfalls & anti-patterns: TODO
-- 74.6 Exercises & checklist
-
+  - 74.4.1 The wire overlay without `transmute`
+  - 74.4.2 Indexing that compiles to a load
+  - 74.4.3 The SPSC ring: where `unsafe` lives and why it is small
+  - 74.4.4 The build profile for a hot path
+  - 74.4.5 What maps to what: Part III in Rust
+- 74.5 Verify the codegen: side by side
+- 74.6 Pitfalls & anti-patterns: where parity breaks, and the one that is not Rust's fault
+- 74.7 Exercises & checklist
 ### [75. Language Interop & ABI Boundaries](75-language-interop-abi-boundaries.md)
-- 75.1 Why it matters: TODO
-- 75.2 Mental model: TODO
-- 75.3 Measure it: TODO
+- 75.1 Why it matters: the hot path already crosses a boundary on every packet
+- 75.2 Mental model
+  - 75.2.1 The hourglass: one narrow C waist
+  - 75.2.2 What may not cross
+  - 75.2.3 The cost model: a call is a call; a transition is not
+  - 75.2.4 Symbols, visibility and the dynamic linker
+- 75.3 Measure it: the cross-language call ladder
 - 75.4 Techniques
-  - 75.4.1 TODO
-- 75.5 Pitfalls & anti-patterns: TODO
-- 75.6 Exercises & checklist
-
+  - 75.4.1 Parity asserts on both sides
+  - 75.4.2 Zero-cost RAII wrappers over vendor C SDKs
+  - 75.4.3 Exceptions and panics at the boundary
+  - 75.4.4 Shared memory across languages
+  - 75.4.5 C and Zig idioms worth stealing
+  - 75.4.6 Binding generators and where each belongs
+- 75.5 Verify the codegen: the wrapper adds nothing; the boundary adds a PLT hop
+- 75.6 Pitfalls & anti-patterns: per-message crossings and silent ABI drift
+- 75.7 Exercises & checklist
 ### [76. Managed Runtimes Near the Hot Path, Measured](76-managed-runtimes-measured.md)
-- 76.1 Why it matters: TODO
-- 76.2 Mental model: TODO
-- 76.3 Measure it: TODO
+- 76.1 Why it matters: the runtime owns the timing of your tail
+- 76.2 Mental model
+  - 76.2.1 What a collector does to the hot thread
+  - 76.2.2 Safepoints and time-to-safepoint
+  - 76.2.3 Tiered JIT: interpreter, C1, C2, OSR, deoptimisation
+  - 76.2.4 The four runtimes in one frame
+- 76.3 Measure it: pauses, warm-up and the garbage-free line
 - 76.4 Techniques
-  - 76.4.1 TODO
-- 76.5 Pitfalls & anti-patterns: TODO
-- 76.6 Exercises & checklist
-
+  - 76.4.1 Garbage-free code: the flyweight over the bytes
+  - 76.4.2 Choosing and tuning the collector
+  - 76.4.3 Warming the JIT, and pinning what it compiled
+  - 76.4.4 .NET: `Span<T>`, `ref struct`, and the collector you cannot turn off
+  - 76.4.5 Go: allocation-free loops, `GOGC`, and the scheduler
+  - 76.4.6 OCaml: unboxed ints, the minor heap, and Jane Street's discipline
+  - 76.4.7 One hop away: the managed reader of a C++-written ring
+- 76.5 Verify the codegen: reading what the JIT emitted
+- 76.6 Pitfalls & anti-patterns
+- 76.7 Exercises & checklist
 ### [77. Choosing a Language per Latency Tier](77-choosing-a-language-per-latency-tier.md)
-- 77.1 Why it matters: TODO
-- 77.2 Mental model: TODO
-- 77.3 Measure it: TODO
+- 77.1 Why it matters: a one-time decision with a per-tick consequence
+- 77.2 Mental model
+  - 77.2.1 The tiers, restated with what the language controls
+  - 77.2.2 What the language does not control
+  - 77.2.3 Equal rigour: the protocol
+  - 77.2.4 What this Part measured, and what it did not
+- 77.3 Measure it: one kernel, nine toolchains
 - 77.4 Techniques
-  - 77.4.1 TODO
-- 77.5 Pitfalls & anti-patterns: TODO
-- 77.6 Exercises & checklist
-
+  - 77.4.1 Running the protocol
+  - 77.4.2 The tier table with measured floors
+  - 77.4.3 `constexpr` vs `const fn` vs `comptime`: one table, three compilers, one `.rodata`
+  - 77.4.4 The scorecard
+  - 77.4.5 The polyglot architecture
+  - 77.4.6 Parity testing across languages
+  - 77.4.7 Three worked placements
+- 77.5 Verify the codegen: the same bytes
+- 77.6 Pitfalls & anti-patterns: the benchmark that compares warm-up to steady state
+- 77.7 Exercises & checklist
 ## Part XIII — Observability & Operations in Production
 
 *Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology, crash handling, capture/replay, latency-spike forensics, host and network health, and the end-to-end case study.*
