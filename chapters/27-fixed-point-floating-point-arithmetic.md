@@ -147,7 +147,7 @@ Eliminate the denormal cliff (§27.2.3, §27.3):
 
 ### 27.4.3 Cross-build determinism on the hot path
 
-When bit-exact reproducibility matters — **deterministic replay** (Ch. 90, 94), cross-machine agreement, regression testing — pin the FP environment:
+When bit-exact reproducibility matters — **deterministic replay** (Ch. 90, 95), cross-machine agreement, regression testing — pin the FP environment:
 
 - **Prefer integers where determinism is required.** Integer math is *always* bit-exact and deterministic across compilers/flags/machines — another reason prices and any decision-critical math use scaled integers. The deterministic core (Ch. 86) ideally avoids FP in the decision path entirely.
 - **Avoid `-ffast-math` where you need determinism.** `-ffast-math` permits reassociation and other reorderings that make results depend on optimization level/compiler/FMA-contraction — *non-deterministic across builds* (Ch. 22). Determinism-critical FP code is built at *strict* FP (and may need `-ffp-contract=off` to stop FMA-vs-separate-ops differences).

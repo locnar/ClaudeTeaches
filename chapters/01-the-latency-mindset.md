@@ -225,7 +225,7 @@ Treat latency like a financial budget. Three steps:
 
 1. **State the end-to-end target** as a percentile, e.g. "tick-to-trade ≤ 2.5 µs at p99.9." A target without a percentile is undefined.
 2. **Decompose into stages** and allocate a sub-budget to each — wire-in, decode, strategy, risk, encode, wire-out (§1.2.3). The allocation forces the question "is this stage worth its slice?" and exposes the stages with no slack.
-3. **Measure each stage against its sub-budget at the target percentile**, continuously, in production (Ch. 94). A stage that blows its budget at p99.9 is a defect even if its mean is fine.
+3. **Measure each stage against its sub-budget at the target percentile**, continuously, in production (Ch. 95). A stage that blows its budget at p99.9 is a defect even if its mean is fine.
 
 The budget is also where you decide a piece of code's **latency tier**, which is the highest-leverage decision you will make about it:
 
