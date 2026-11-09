@@ -10,7 +10,7 @@
 
 ## 76.1 Why it matters: when the compiler has no word for what you mean
 
-Everything the book has measured so far was written in C++ and *read* in assembly (Ch. 4). The optimizer did the writing. That division of labour is right 99 % of the time — Ch. 10, 17, 28, 29 and 32 all reached for *intrinsics* (`__builtin_prefetch`, `__rdtscp`, `_mm_pause`, `_pdep_u64`, `_mm256_shuffle_epi8`) and left register allocation, scheduling and inlining to the compiler, and §76.3 will show that this costs nothing. But a feed handler sits on a boundary where the compiler has no vocabulary at all: a user-space performance-counter read (`rdpmc`) for a cycle-exact per-stage budget (Ch. 2 §2.4.4, Ch. 93 §93.4.4), an architecturally serializing instruction before a timestamp (`cpuid`, `serialize`, `lfence` — Ch. 17 §17.2.1), a 64-byte doorbell write that must leave the core as *one* PCIe transaction (`movdir64b` — Ch. 71 §71.4), a cache-line write-back without eviction (`clwb`) for a persistent journal (Ch. 89 §89.4.3), a branch straight to a C++ label from a flag the compiler never materialises (`asm goto`), or a compiler-only barrier that pins stores in place without emitting a fence (Ch. 30). Each of those is one `asm` statement — if you write it correctly.
+Everything the book has measured so far was written in C++ and *read* in assembly (Ch. 4). The optimizer did the writing. That division of labour is right 99 % of the time — Ch. 10, 17, 28, 29 and 32 all reached for *intrinsics* (`__builtin_prefetch`, `__rdtscp`, `_mm_pause`, `_pdep_u64`, `_mm256_shuffle_epi8`) and left register allocation, scheduling and inlining to the compiler, and §76.3 will show that this costs nothing. But a feed handler sits on a boundary where the compiler has no vocabulary at all: a user-space performance-counter read (`rdpmc`) for a cycle-exact per-stage budget (Ch. 2 §2.4.4, Ch. 94 §94.4.4), an architecturally serializing instruction before a timestamp (`cpuid`, `serialize`, `lfence` — Ch. 17 §17.2.1), a 64-byte doorbell write that must leave the core as *one* PCIe transaction (`movdir64b` — Ch. 71 §71.4), a cache-line write-back without eviction (`clwb`) for a persistent journal (Ch. 90 §90.4.3), a branch straight to a C++ label from a flag the compiler never materialises (`asm goto`), or a compiler-only barrier that pins stores in place without emitting a fence (Ch. 30). Each of those is one `asm` statement — if you write it correctly.
 
 "Correctly" is the subject. An asm statement is a contract with the optimizer: *these registers hold my inputs, these are my outputs, these others I destroy, this is whether memory changed*. Get the contract right and the compiler schedules and allocates around your instruction as if it were one of its own. Get it wrong and nothing warns you: §76.6 shows a one-line `mul` with an undeclared `rdx` clobber that turns a 1000-iteration loop into an infinite one under both GCC and Clang, at `-O2`, silently, because the compiler kept the loop counter in the register the instruction overwrote. The second subject is *when*: the book's answer stays intrinsics-first, and §76.3 earns it with numbers — the asm `rdtscp` and the intrinsic cost the same 45 cycles, and a hand-written NASM decoder is slower than the inlined C++ one it replaces, because the thing you lose by leaving the language is inlining.
 
@@ -155,11 +155,11 @@ The rule the book has followed since Ch. 10: **if an intrinsic exists, use it.**
 Each of these is an `asm` statement in a real hot path, with the constraints that make it right:
 
 ```cpp
-// (a) user-space PMU read: core cycles (fixed counter 1) via rdpmc, for cycle-exact per-stage budgets (Ch. 2 §2.4.4; Ch. 93 §93.4.4 shows the perf_event_open setup).
+// (a) user-space PMU read: core cycles (fixed counter 1) via rdpmc, for cycle-exact per-stage budgets (Ch. 2 §2.4.4; Ch. 94 §94.4.4 shows the perf_event_open setup).
 //     The counter index goes in ecx; the result comes back in edx:eax. lfence before: no later load may start before the read is taken.
 static inline std::uint64_t rdpmc_cycles() {
     std::uint32_t lo, hi;
-    asm volatile("lfence\n\trdpmc" : "=a"(lo), "=d"(hi) : "c"(1u << 30 | 1) : "memory");   // (1<<30)|1 = fixed counter 1 (core clocks); mmap'd perf page gives the index (Ch. 93)
+    asm volatile("lfence\n\trdpmc" : "=a"(lo), "=d"(hi) : "c"(1u << 30 | 1) : "memory");   // (1<<30)|1 = fixed counter 1 (core clocks); mmap'd perf page gives the index (Ch. 94)
     return (std::uint64_t(hi) << 32) | lo;
 }
 // (b) architecturally serializing before a start timestamp (Ch. 17 §17.2.1): cpuid clobbers eax,ebx,ecx,edx — declare ALL four, or you corrupt rbx (a callee-saved register!)
@@ -168,7 +168,7 @@ static inline std::uint64_t rdtsc_serialized() {
     asm volatile("xor %%eax, %%eax\n\tcpuid\n\trdtsc" : "=a"(lo), "=d"(hi) : : "rbx", "rcx", "memory");   // rax/rdx are outputs; rbx/rcx are clobbers
     return (std::uint64_t(hi) << 32) | lo;                      // on Sapphire Rapids+ prefer the one-instruction `serialize` (_serialize())
 }
-// (c) write back a journal line without evicting it (Ch. 89 §89.4.3): clwb takes a memory operand; the "+m" says the line's contents are "used"
+// (c) write back a journal line without evicting it (Ch. 90 §90.4.3): clwb takes a memory operand; the "+m" says the line's contents are "used"
 static inline void writeback_line(const void* p) { asm volatile("clwb %0" : "+m"(*static_cast<const char(*)[64]>(p)) : : "memory"); }
 // (d) descriptor-then-doorbell (Ch. 71 §71.4): the sfence orders the WC descriptor stores before the doorbell; movdir64b posts the 64-byte doorbell as one TLP
 static inline void ring_doorbell(void* bar, const void* desc64) {
@@ -296,7 +296,7 @@ Compiled at `-O2`, **both GCC 13.3 and Clang 18.1 produce a program that never t
 2. **Hoist or not.** Build `nonvolatile.cpp` with GCC and Clang; find the `rdtsc` in each `-S`; explain in one sentence why Clang's loop reads the same timestamp every iteration and GCC's does not — and why both are allowed.
 3. **Beat the compiler, fairly.** Take Ch. 57's `decode()` and write a NASM version; measure out-of-line vs out-of-line, then vs inlined, as §76.3 does. Then inline *your* instruction selection as an `asm` statement inside the C++ function with `"=r"` outputs and compare again.
 4. **A doorbell on the reference machine.** With a NIC or FPGA BAR scratch register (Ch. 71 §71.3 — never a live doorbell), measure `movdir64b` vs four `vmovdqa` to a write-combining mapping with `sfence`; count PCIe TLPs with the device's counters if it exposes them.
-5. **`rdpmc` per stage.** Using Ch. 93 §93.4.4's `perf_event_open` + `mmap` setup, replace the `rdtscp` stage stamps of Ch. 77 (tracing) with `rdpmc` core-cycle reads in one stage; compare the two distributions and the cost of the read itself.
+5. **`rdpmc` per stage.** Using Ch. 94 §94.4.4's `perf_event_open` + `mmap` setup, replace the `rdtscp` stage stamps of Ch. 77 (tracing) with `rdpmc` core-cycle reads in one stage; compare the two distributions and the cost of the read itself.
 
 Checklist for every `asm` statement in a review:
 
@@ -324,7 +324,7 @@ Checklist for every `asm` statement in a review:
 - Agner Fog, *Optimizing subroutines in assembly language* — the hand-written-function craft: instruction selection, register use, calling conventions across OSes (§76.4.5).
 - Intel Intrinsics Guide (online) — the first stop before any `asm`: if the instruction is listed, use the intrinsic (§76.4.1).
 - Matt Godbolt, *"What Has My Compiler Done for Me Lately?"* (CppCon 2017) — reading asm around your code, the habit §76.5 applies to asm statements (Ch. 4).
-- Ch. 17 (fenced timestamps), Ch. 30 §30.4.2 (compiler vs hardware barriers), Ch. 71 §71.4 (doorbells and write-combining), Ch. 93 §93.4.4 (`rdpmc` with `perf_event_open`), Appendix A.1 (why the memory clobber is not enough on ARM), Appendix D (`-masm=`, `-S`, unwind-table flags), Appendix I.9 (`objdump`/`-S` one-liners).
+- Ch. 17 (fenced timestamps), Ch. 30 §30.4.2 (compiler vs hardware barriers), Ch. 71 §71.4 (doorbells and write-combining), Ch. 94 §94.4.4 (`rdpmc` with `perf_event_open`), Appendix A.1 (why the memory clobber is not enough on ARM), Appendix D (`-masm=`, `-S`, unwind-table flags), Appendix I.9 (`objdump`/`-S` one-liners).
 
 ---
 

@@ -44,4 +44,4 @@ TODO
 
 ---
 
-*Next: Ch. 88 — Crash Handling, Core Dumps & Post-Mortem Diagnostics.*
+*Next: Ch. 88 — Idempotent Order Entry & Order-State Recovery.*
