@@ -86,7 +86,7 @@ Applied when launching the trading process(es) (Ch. 42, 45, 16). **Why:** pin th
 
 - The Red Hat *Low Latency Performance Tuning* and *Realtime* guides, and the CERN/CMS and trading-community tuning write-ups — real deployed checklists (C.1-C.5).
 - Talks on building deterministic Linux boxes for trading (e.g. the Carl Cook / Mechanical Sympathy material — Ch. 76) — the *why* behind the knobs.
-- **Appendix A** (ARM/Graviton) — the ARM-server analogs of these knobs (often fewer: fixed frequency, no SMT — A.5-A.6); **Appendix D** (Compiler Flag Reference) — the *build-side* counterpart to this *system-side* checklist; **Appendix E** (Latency Numbers) — the costs (page fault, context switch, C-state exit) these knobs eliminate.
+- **Appendix A** (ARM/Graviton) — the ARM-server analogs of these knobs (often fewer: fixed frequency, no SMT — A.5-A.6); **Appendix D** (Compiler Flag Reference) — the *build-side* counterpart to this *system-side* checklist; **Appendix E** (Latency Numbers) — the costs (page fault, context switch, C-state wake-up) these knobs eliminate.
 
 ---
 
