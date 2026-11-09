@@ -26,7 +26,7 @@ The trade-off is explicit and worth stating up front: you are **spending through
 
 A modern x86 core constantly adjusts its power and clock. Two orthogonal mechanisms, both jitter sources:
 
-**C-states (idle states)** — how deeply an *idle* core sleeps. `C0` is active; `C1`, `C1E`, `C3`, `C6`… progressively power down more of the core (flush caches, gate clocks, drop voltage) to save energy, at the cost of **exit latency**: a core in a deep C-state takes longer — potentially **tens of microseconds** — to return to `C0` and execute your code. This is poison for a hot path that wakes on a rare event: the *first* message after a quiet spell pays the full wake-up cost, landing squarely in your tail. The fix is to forbid deep C-states (cap at `C1`, or busy-poll so the core never idles — Ch. 41, 46).
+**C-states (idle states)** — how deeply an *idle* core sleeps. `C0` is active; `C1`, `C1E`, `C3`, `C6`… progressively power down more of the core (flush caches, gate clocks, drop voltage) to save energy, at the cost of **exit latency**: a core in a deep C-state takes longer — potentially **a hundred microseconds or more** for C6 (the kernel's `intel_idle` table rates Ice Lake-SP C6 exit at 170 µs, Skylake-SP at 133 µs, Sapphire Rapids at 290 µs; C1/C1E are 1–4 µs — `/sys/devices/system/cpu/cpu0/cpuidle/state*/latency` shows your box's values) — to return to `C0` and execute your code. This is poison for a hot path that wakes on a rare event: the *first* message after a quiet spell pays the full wake-up cost, landing squarely in your tail. The fix is to forbid deep C-states (cap at `C1`, or busy-poll so the core never idles — Ch. 41, 46).
 
 **P-states (performance states / DVFS)** — the voltage/frequency operating point of an *active* core, managed on Intel by the `intel_pstate` driver and a *governor*. The default `powersave` algorithm (in `intel_pstate`'s active mode — the default on Ice Lake-SP with HWP — only `powersave` and `performance` exist; `schedutil`/`ondemand` appear only in passive mode or with `acpi-cpufreq`) ramps frequency with load: your code runs at 1.0 GHz when idle-ish and scales up under load. **Turbo Boost** goes further, opportunistically clocking *above* base frequency when thermal/power headroom allows — but how far, and for how long, depends on how many cores are active, the temperature, and power limits. The consequence for us is brutal: **the same instruction sequence takes a different number of nanoseconds depending on the clock**, and the clock depends on history you don't control. Ch. 3 already bit you with this; the fix is to *pin the frequency*: governor `performance` and, for the tightest determinism, **disable turbo** so the clock is a constant, not a variable. You give up peak single-core speed to get a number you can trust.
 
@@ -51,7 +51,7 @@ Starting in 2018, a family of **speculative-execution side-channel vulnerabiliti
 
 - **Retpoline / IBRS / eIBRS** — defenses against branch-target-injection (Spectre v2) that constrain indirect-branch speculation. Retpoline is a *compile-time* rewrite of indirect branches applied to the **kernel's** own code (IBRS/eIBRS likewise act at the kernel/user boundary), so their direct cost lands on every syscall, interrupt and context switch; your process's own virtual calls, function pointers and PLT calls (Ch. 14) are untouched unless *you* build with `-mindirect-branch=thunk`/`-mretpoline` (or CFI — Ch. 72).
 - **KPTI (Kernel Page-Table Isolation)** — the Meltdown fix; separates kernel and user page tables, making **every syscall and interrupt more expensive** (extra TLB/page-table work — Ch. 15, 41). It taxes precisely the kernel-boundary crossings you're already trying to eliminate.
-- **MDS/TAA/L1TF flushes** — buffer/cache flushes on context switch or VM exit, adding per-transition cost on affected (pre-Ice-Lake) cores.
+- **MDS/TAA/L1TF flushes** — a `VERW` CPU-buffer clear on every kernel→user return (MDS/TAA, MMIO stale data) and an L1D flush on every VM *entry* (L1TF), adding per-syscall / per-VM-entry cost on affected (pre-Ice-Lake) cores.
 
 Which of these are actually active depends on the CPU generation — step one is `grep . /sys/devices/system/cpu/vulnerabilities/*`. On the reference Ice Lake-SP, Meltdown, L1TF and MDS/TAA report *Not affected*, so KPTI and the MDS flushes are not running and `mitigations=off` reclaims nothing from them; what does run there is Spectre v1/v2 handling (eIBRS, RSB filling, BHI clearing), the MMIO-stale-data buffer clear and the Downfall (GDS) microcode fix that slows AVX gathers (Ch. 29) — price *those*, not the Skylake-era list.
 
@@ -67,8 +67,9 @@ The right way to *see* system jitter — independent of any application — is *
 
 ```bash
 # Measure wake-up latency: 1 thread per CPU, 10us interval, highest RT prio, for a while.
-# -m locks memory (no page-fault jitter, Ch.23/26); -p99 RT priority; -h builds a histogram.
-sudo cyclictest --smp -p99 -m -i 10 -h 200 -D 60s
+# -m locks memory (no page-fault jitter, Ch.23/26); -p99 RT priority; -h builds a histogram;
+# -d0 gives every thread the same 10us interval (the default spaces them 500us apart).
+sudo cyclictest --smp -p99 -m -i 10 -d0 -h 200 -D 60s
 ```
 
 Run it twice — once on the box as shipped, once after applying the §6.4 tuning — and compare the **max** and the tail of the histogram. Representative results, reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.18 (illustrative — your hardware and kernel decide the real numbers; the *shape* of the improvement is the point):
@@ -85,7 +86,7 @@ tuned (perf gov, C1 cap, IRQs
   reviewed):                       1 us      1 us       4 us   <- ~800x tighter tail
 ```
 
-Read it the Ch. 1 way: the *average* barely mattered (9 µs vs 1 µs); the **max collapsed from ~3.2 ms to ~4 µs**. That three-millisecond outlier on the untuned box — a deep C-state wake plus a stray interrupt plus a scheduler migration, all landing together — is a catastrophically lost race, and *nothing in your code* could have prevented it. Only the box tuning did. This single before/after is the entire justification for the chapter.
+Read it the Ch. 1 way: the *average* barely mattered (9 µs vs 1 µs); the **max collapsed from ~3.2 ms to ~4 µs**. That three-millisecond outlier on the untuned box is *not* a C-state wake (a C6 exit is ~0.2 ms, and a thread waking every 10 µs never lets the core reach C6) and not a migration (`--smp` pins each thread): a stall that long on a pinned RT thread is an SMI (§6.4.4), a long interrupt-disabled kernel section, or a stray interrupt plus its softirq landing on the core — a catastrophically lost race, and *nothing in your code* could have prevented it. Only the box tuning did. This single before/after is the entire justification for the chapter.
 
 To attribute the improvement to specific knobs, change **one at a time** and re-measure (the Ch. 2–3 discipline applies to system tuning too): disable turbo alone, then add the governor change, then C-state capping, then IRQ steering, then isolation. Each step should move the tail; if one doesn't, you've learned that knob doesn't matter for *your* workload on *your* hardware — which is itself worth knowing. To measure a *specific mitigation's* cost, boot with and without its flag and compare a syscall-heavy or indirect-call-heavy microbenchmark (Ch. 3) — not just `cyclictest`, since mitigations tax kernel crossings and indirect branches specifically (§6.2.3).
 
@@ -177,7 +178,7 @@ A non-zero SMI rate on an isolated core — or `hwlat` reporting multi-µs gaps 
 
 **Exercises**
 
-1. **See the jitter floor.** Run `cyclictest --smp -p99 -m -i 10 -h 200 -D 60s` on a box as shipped. Record min/avg/**max** and eyeball the histogram tail. Which is bigger — the gap between min and avg, or between avg and max? Tie this back to Ch. 1: which one is "the latency"?
+1. **See the jitter floor.** Run `cyclictest --smp -p99 -m -i 10 -d0 -h 200 -D 60s` on a box as shipped. Record min/avg/**max** and eyeball the histogram tail. Which is bigger — the gap between min and avg, or between avg and max? Tie this back to Ch. 1: which one is "the latency"?
 2. **Attribute the wins.** Change knobs one at a time — disable turbo, then set governor `performance`, then cap C-states (`max_cstate=1` on the cmdline), then steer IRQs off the core — re-running `cyclictest` after each. Which single change moved the **max** the most on your hardware? Did any change nothing?
 3. **Map your machine.** Run `lscpu --extended` and `lstopo`. List the SMT sibling pairs. Which NUMA node is your NIC on? If you had to pin one feed-handler thread, which exact CPU would you choose, and which CPU would you deliberately leave idle, and why?
 4. **Price a mitigation.** Boot once with default mitigations and once with `mitigations=off` (on a box you're allowed to, and understand the risk). Run a syscall-heavy microbenchmark (Ch. 3, e.g. a tight `getpid`/`read` loop) under each. How many nanoseconds per syscall did the mitigations cost? Would that matter on a hot path that does zero syscalls?

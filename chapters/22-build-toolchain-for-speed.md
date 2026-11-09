@@ -10,7 +10,7 @@
 
 ## 22.1 Why it matters: flags can swing latency by double digits
 
-You can write perfect Part II/III code — cache-friendly layout, broken dependency chains, branchless hot paths, zero-cost abstractions, `restrict`-clean kernels — and then hand the compiler the wrong flags and watch half of it evaporate. The build toolchain is the last translation step between your source and the bytes the CPU runs, and its settings are not a footnote: the difference between `-O0` and `-O2` is routinely **10×**; between `-O2` and `-O2 -march=native` on vectorizable numeric code, another **2-4×**; LTO and PGO each add high-single-digit to double-digit percentages on a large binary; and BOLT recovers several more on top. These are not micro-optimizations — they are some of the largest, cheapest latency levers in the entire book, applied uniformly across the *whole* program with zero source changes.
+You can write perfect Part II/III code — cache-friendly layout, broken dependency chains, branchless hot paths, zero-cost abstractions, `restrict`-clean kernels — and then hand the compiler the wrong flags and watch half of it evaporate. The build toolchain is the last translation step between your source and the bytes the CPU runs, and its settings are not a footnote: the difference between `-O0` and `-O2` is routinely **10×**; between `-O2` and `-O2 -march=native` on vectorizable numeric code, another **2-5×** (§22.3); LTO and PGO each add high-single-digit to double-digit percentages on a large, front-end-bound binary, and BOLT recovers several more on top (the published numbers: Panchenko et al.'s BOLT paper, Ch. 12 §12.8; the mechanism is Ch. 12 §12.3's measurement, and exercise 5 has you reproduce the stack on your own binary). These are not micro-optimizations — they are some of the largest, cheapest latency levers in the entire book, applied uniformly across the *whole* program with zero source changes.
 
 The reason flags matter so much is that the compiler's best transformations are *gated* on information and permission that only the build configuration supplies. `-march=native` tells it which instructions exist (AVX-512, BMI2, FMA — Ch. 28–29), unlocking SIMD that `-O3` alone can't emit for a generic target. **LTO** tears down the translation-unit walls so inlining and devirtualization (Ch. 14) work *across* files, not just within them. **PGO** replaces the compiler's hot/cold *guesses* (Ch. 12–13) with measured truth, so layout and inlining match reality. **BOLT** re-lays-out the final linked binary for I-cache/I-TLB locality (Ch. 12) using a production profile. Each is a different way of giving the optimizer more to work with, and for a tick-to-trade binary — large, branchy, front-end-sensitive — they compound.
 
@@ -21,12 +21,12 @@ But the toolchain is also where you can quietly *break* things: `-Ofast`/`-ffast
 **Optimization levels — what each tier actually does.**
 
 - **`-O0`** — no optimization, every variable to memory; for debugging only. Never benchmark or ship it.
-- **`-O1`/`-O2`** — `-O2` is the sane production baseline: inlining, common-subexpression elimination, dead-code elimination, register allocation, loop optimizations, the table-based exception model (Ch. 20) — essentially all the "obviously correct" optimizations. Most of the win over `-O0` is here.
+- **`-O1`/`-O2`** — `-O2` is the sane production baseline: inlining, common-subexpression elimination, dead-code elimination, register allocation, loop optimizations — essentially all the "obviously correct" optimizations. (Exception handling is table-based at every `-O` level — Ch. 20 — it is the ABI, not an optimization.) Most of the win over `-O0` is here.
 - **`-O3`** — `-O2` plus more *aggressive* (and sometimes code-size-increasing) transforms: more aggressive vectorization (Ch. 29), loop unrolling (Ch. 11), function cloning. Often faster on numeric/vectorizable code, occasionally *slower* if it bloats a front-end-bound path (Ch. 12) — so `-O3` is a *measure-it* choice, not a strict upgrade over `-O2`.
 - **`-Os`/`-Oz`** — optimize for size; relevant when I-cache footprint dominates (Ch. 12), rarely the hot-path default but worth trying on a front-end-bound binary.
 - **`-Ofast`** — `-O3` plus `-ffast-math` and other standard-relaxing flags. **Fast but dangerous** (§22.5): it changes FP semantics (Ch. 27). Opt into the specific relaxations you want, don't blanket-enable `-Ofast`.
 
-The key mental correction: **`-O3` is not strictly "better" than `-O2`** — it's a different point on a speed/size/risk curve. The latency-bound, front-end-sensitive parts of a trading system sometimes prefer `-O2` (or `-O2` + targeted `-O3`/`#pragma` on hot numeric kernels). Per-function/per-file optimization (`__attribute__((optimize))`, `#pragma GCC optimize`, or just building hot TUs differently) lets you mix.
+The key mental correction: **`-O3` is not strictly "better" than `-O2`** — it's a different point on a speed/size/risk curve. The latency-bound, front-end-sensitive parts of a trading system sometimes prefer `-O2` (or `-O2` + targeted `-O3`/`#pragma` on hot numeric kernels). Mix them per *translation unit* from the build system (hot numeric TUs at `-O3`, the rest at `-O2`); `__attribute__((optimize))`/`#pragma GCC optimize` exist but GCC documents them as debugging aids "not suitable in production code" — they block inlining between functions with differing option sets — so for a single hot loop prefer `#pragma GCC unroll`/`#pragma clang loop` or targeted intrinsics.
 
 **Inlining control.** Inlining is the optimization multiplier (it enables everything else — Ch. 11, 14, 19) but also the bloat risk (Ch. 12). The levers: `-finline-functions`, `-finline-limit=N`, `__attribute__((always_inline))`/`((noinline))`, `[[gnu::flatten]]`, and the hot/cold attributes of Ch. 12. The model from Ch. 12 holds: *inline the small and hot; outline the large and cold*; the flags tune the compiler's threshold, but the front-end counters (Ch. 12) are the arbiter.
 
@@ -45,7 +45,7 @@ The key mental correction: **`-O3` is not strictly "better" than `-O2`** — it'
                                                across all .o, after the per-file walls fall
 ```
 
-Without LTO, each `.cpp` is optimized in isolation — the compiler can't inline `a.cpp`'s function into `b.cpp` or devirtualize across the boundary (Ch. 14). **LTO (Link-Time Optimization)** defers real optimization to link time, when the whole program is visible — that's the §22.4.2 win. The linker *also* governs code placement (section ordering — Ch. 12), symbol resolution, and which `-march` baseline the whole binary assumes; the choice of linker (`bfd`/`gold`/`lld`/`mold`) mostly affects link *speed*, but `lld`/`mold` are the modern fast defaults that make LTO/iterate loops bearable.
+Without LTO, each `.cpp` is optimized in isolation — the compiler can't inline `a.cpp`'s function into `b.cpp` or devirtualize across the boundary (Ch. 14). **LTO (Link-Time Optimization)** defers real optimization to link time, when the whole program is visible — that's the §22.4.2 win. The linker *also* governs code placement (section ordering — Ch. 12), symbol resolution, and it merges the per-object ISA-level property notes — it does *not* check that every TU was built with the same `-march`, which is how the flag-drift `SIGILL` of §22.5 gets in; the choice of linker (`bfd`/`gold`/`lld`/`mold`) mostly affects link *speed*, but `lld`/`mold` are the modern fast defaults that make LTO/iterate loops bearable.
 
 The unifying model: **`-O2` is the baseline of safe optimizations; `-O3`/`-march` add aggressive/ISA-specific ones (measure); LTO removes the per-file walls so inlining/devirtualization go whole-program; PGO/BOLT (next) replace guesses with measured layout. Each gives the optimizer more information or permission — and each must be verified, because they interact and platform-depend.**
 
@@ -55,7 +55,9 @@ The point is to see the *tiers* and their interaction on representative code —
 
 ```bash
 # build_matrix.sh — same source, escalating flags. Time + size each.
-SRC=hotpath.cpp          # contains: a SAXPY/reduction kernel + a message-dispatch loop
+SRC="hotpath.cpp handlers.cpp"   # hotpath.cpp: a SAXPY/reduction kernel + the message-dispatch loop;
+                                 # handlers.cpp: the dispatch targets, in a SEPARATE TU so LTO has a
+                                 # boundary to remove (single-TU, the -flto row would show nothing)
 for FLAGS in \
   "-O0" \
   "-O2" \
@@ -64,12 +66,12 @@ for FLAGS in \
   "-O3 -march=native -flto" ; do
     g++ -std=c++20 $FLAGS $SRC -o hp
     SIZE=$(size hp | awk 'NR==2{print $1}')        # .text size
-    NS=$(taskset -c 2 ./hp | awk '{print $NF}')     # ns/op the program prints
+    NS=$(taskset -c 2 ./hp | tr '\n' ' ')          # the program prints two lines: numeric=X ns/op, dispatch=Y ns/op
     printf '%-32s text=%-8s %s\n' "$FLAGS" "$SIZE" "$NS"
 done
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, AVX-512), single hot TU, pinned, turbo off (illustrative; the *shape* is the point):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, AVX-512), GCC 13, Linux 6.18, two TUs (kernel + dispatch loop in `hotpath.cpp`, the handlers in `handlers.cpp`), pinned, turbo off (illustrative; the *shape* is the point):
 
 ```
 flags                              .text     numeric kernel   dispatch loop
@@ -115,8 +117,8 @@ The discipline: **don't assume a flag helped — measure each tier on *your* cod
 The highest tier: replace the compiler's *guesses* about hot/cold and branch direction (Ch. 12–13) with *measured* truth from a representative run.
 
 - **PGO (Profile-Guided Optimization) — the three-step build.** (1) Build instrumented (`-fprofile-generate`); (2) run it on a **representative** workload — for trading, a captured market-data replay (Ch. 75) of a realistic session; (3) rebuild with the profile (`-fprofile-use`). Now the compiler *knows* which branches are taken, which calls are hot, which paths are cold — and does accurate hot/cold splitting (Ch. 12), speculative **devirtualization** (Ch. 14), profile-driven inlining, and block layout. PGO is the highest-leverage front-end/layout win on a large branchy binary precisely because it gets the layout right *everywhere*, not just where you annotated.
-- **AutoFDO** is the lower-friction variant: instead of an instrumented build, collect a normal `perf` profile from production and feed it back (`-fauto-profile`) — less accurate than instrumented PGO but no special build to deploy, so it's continuously refreshable from live traffic.
-- **BOLT (Binary Optimization and Layout Tool)** goes *after* the linker: it takes the final linked binary plus a `perf` profile and **re-lays-out basic blocks and functions** for I-cache/I-TLB locality and straight hot paths (Ch. 12) — recovering several percent *on top of* an already-PGO'd, LTO'd binary, because it optimizes the actual layout the front-end sees. Order matters and they stack: **`-O3 -march` → LTO → PGO → BOLT**, each adding on top.
+- **AutoFDO** is the lower-friction variant: instead of an instrumented build, collect an **LBR** profile in production (`perf record -b -e cycles:u`), convert it (`create_gcov` from the AutoFDO toolkit → `-fauto-profile=` for GCC; `create_llvm_prof`/`llvm-profgen` → `-fprofile-sample-use=` for Clang — the better-maintained path) and rebuild — less accurate than instrumented PGO but no special build to deploy, so it's continuously refreshable from live traffic.
+- **BOLT (Binary Optimization and Layout Tool)** goes *after* the linker: it takes the final linked binary plus a `perf` profile and **re-lays-out basic blocks and functions** for I-cache/I-TLB locality and straight hot paths (Ch. 12) — recovering several percent *on top of* an already-PGO'd, LTO'd binary, because it optimizes the actual layout the front-end sees. Two prerequisites it will not forgive: link with relocations preserved (`-Wl,--emit-relocs`, binary unstripped) or `llvm-bolt` cannot reorder functions, and feed it LBR samples (`perf record -e cycles:u -j any,u -- ./app`, then `perf2bolt -p perf.data -o perf.fdata ./app`, then `llvm-bolt ./app -o app.bolt -data=perf.fdata -reorder-blocks=ext-tsp -reorder-functions=hfsort -split-functions`). Order matters and they stack: **`-O3 -march` → LTO → PGO → BOLT**, each adding on top.
 - **The catch — representative profiles.** PGO/AutoFDO/BOLT are only as good as the profile. A profile from idle/synthetic traffic mis-marks hot/cold and can *pessimize* the real hot path (Ch. 12 pitfall). Profile with realistic captured sessions (Ch. 75), including market-open bursts; refresh profiles as the strategy/code changes. This is the strongest practical reason to capture production traffic.
 
 ## 22.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
@@ -131,7 +133,9 @@ The highest tier: replace the compiler's *guesses* about hot/cold and branch dir
 - **Letting flags drift across the codebase.** Different TUs built with different `-march`/FP/`-fno-exceptions` settings can violate ODR or interact badly (e.g. a `noexcept`/exception mismatch, ABI differences). Centralize the optimization flag policy; document per-TU exceptions deliberately.
 - **Ignoring the asm.** The recurring sin of Part III: trusting a flag did what its name suggests. `-march=native` doesn't guarantee vectorization (aliasing — Ch. 21); LTO doesn't guarantee the inline you wanted. Confirm in the disassembly (Ch. 4).
 
-## 22.6 Exercises & checklist → *(see Appendix D for the flag reference)*
+## 22.6 Exercises & checklist
+
+*(The full categorized flag reference is Appendix D.)*
 
 **Exercises**
 

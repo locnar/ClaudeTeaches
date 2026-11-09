@@ -41,7 +41,7 @@ A modern x86 core is a little dataflow machine wearing a sequential-ISA costume.
 
 The pieces that matter for performance:
 
-- **Superscalar:** multiple execution units (ports), so several µops execute *per cycle*. Different ports do different things (some do integer ALU, some loads, some stores, some FP/ vector); "port pressure" means too many µops competing for the same port.
+- **Superscalar:** multiple execution units (ports), so several µops execute *per cycle*. Different ports do different things (some do integer ALU, some loads, some stores, some FP/vector); "port pressure" means too many µops competing for the same port.
 - **Out-of-order:** the scheduler issues any µop whose inputs are ready, regardless of program order. A stalled instruction doesn't block independent younger ones — the core *finds* parallelism you didn't explicitly write.
 - **Register renaming:** the 16 architectural registers are mapped onto a much larger physical register file, eliminating *false* dependencies (two instructions reusing `rax` for unrelated values don't actually serialize). This is why *true* (data) dependencies are the real constraint — the hardware removes the fake ones for you.
 - **In-order retirement:** results commit in program order (for precise exceptions and a consistent architectural state), but that's bookkeeping behind the scenes; the *execution* already happened out of order.
@@ -76,7 +76,7 @@ Every `s += a[i]` reads the `s` produced by the previous iteration. Each FP add 
 serial chain (latency-bound):   add ──4cy──► add ──4cy──► add ──4cy──►   ~4 cy / element
    (the core's other add units sit idle, no independent work to feed them)
 
-split into 4 chains (throughput-bound):
+split into 4 chains (4x the parallelism, still one 4-cycle chain per accumulator):
    add0 ─► add0 ─►        4 independent chains interleave; the core issues
    add1 ─► add1 ─►        ~1 add/cycle across them ──►  ~1 cy / element (≈4x; 8 chains → ~0.5 cy)
    add2 ─► add2 ─►
@@ -146,6 +146,8 @@ fp_arith_inst_retired.scalar_double   8.19 G            8.19 G         <- identi
 
 Read it the Ch. 2 way: **same instructions, same (near-zero) misses, same (near-zero) mispredicts — and 4× the speed.** The only thing that changed is the *dependency structure*. `chains=1` is latency-bound at one FP-add-latency per element (4 cyc ≈ 1.4 ns); `chains=4` keeps four adds in flight — four adds per 4 cycles, **one add per cycle, half of the two FP-add ports' peak** — and runs ~4× faster; eight independent chains would saturate both ports (§11.4.2). (The vectorizer flags matter for the *measurement*, not the technique: left on, GCC 13 turns the four-accumulator loop into `vaddpd ymm` — one packed add per four elements — so `scalar_double` would read ~0 for `chains=4` and "same instructions" would be false; §11.5 shows that codegen.) The PMU fingerprint of a dependency-chain bottleneck is exactly this: **low IPC, clean memory, clean branches** — top-down would call it Back-End → Core-Bound. When you see that signature, look for a serial chain to break.
 
+To see the *port pressure* half of the story, add the per-port dispatch counters Ice Lake exposes — `perf stat -e uops_dispatched.port_0,uops_dispatched.port_1,uops_dispatched.port_2_3` — or feed the loop to `llvm-mca -mcpu=icelake-server` (§11.5) for its resource-pressure view. The FP adds can go to port 0 or port 1 (two per cycle); the expected picture is those two ports ~12% busy for `chains=1` (one add per 4 cycles) and ~50% busy for `chains=4` (one per cycle), with the load ports 2/3 barely loaded in both — idle ports, not a starved memory system, are the diagnosis.
+
 ---
 
 ## 11.4 Techniques
@@ -154,11 +156,11 @@ Read it the Ch. 2 way: **same instructions, same (near-zero) misses, same (near-
 
 The general technique behind the specific trick: **find the longest dependency chain on the hot path and shorten it by exposing independent work.** Ways to do it:
 
-- **Multiple accumulators** (§11.4.2) — the workhorse for reductions (sum, dot product, min/ max, hash combine, checksum): use several independent accumulators and combine at the end.
+- **Multiple accumulators** (§11.4.2) — the workhorse for reductions (sum, dot product, min/max, hash combine, checksum): use several independent accumulators and combine at the end.
 - **Reassociate the computation** so independent sub-expressions can run in parallel. `((a+b) +c)+d` is a chain of 3; `(a+b)+(c+d)` is depth 2 with two independent adds — the tree form halves the critical path. (For FP this needs `-ffast-math` or manual rewriting — §11.5, Ch. 27.)
 - **Interleave independent work** — if two computations are independent, software-interleave their instructions so the core has something to chew on while each waits. (Batch processing several order-book updates / several chains at once, c.f. Ch. 10's batched prefetch.)
 - **Lift loop-carried dependencies out** — a value recomputed each iteration from the last (running index, pointer, accumulator) is a chain; where possible compute it from the loop counter (`base + i*stride`) so iterations are independent.
-- **Reduce per-link latency** — pick lower-latency instructions where the result feeds the next op (e.g. avoid a `div` in a chain — ~20–40 cyc each — by reciprocal-multiply; Ch. 28).
+- **Reduce per-link latency** — pick lower-latency instructions where the result feeds the next op (e.g. avoid a `div` in a chain — `divsd` ~13 cycles and `idiv r64` ~14–18 on Ice Lake, 40–95 cycles for a 64-bit integer divide on Skylake-era cores — by reciprocal-multiply; Ch. 28).
 
 The mental procedure: ask *"what is the longest chain of 'this needs that's result' on my hot path?"* — that's your critical path — then either shorten it or split it into independent chains the out-of-order engine can overlap.
 
@@ -210,7 +212,7 @@ The asm makes the latency-vs-throughput distinction undeniable. All three snippe
 
 `vaddsd` is *scalar* double-add. Eight per iteration, all chained through `xmm0` — **unrolled but still latency-bound.** This is the proof that unrolling ≠ breaking the chain (§11.4.2). The compiler *can't* reassociate, because IEEE FP addition isn't associative and `-O2` must preserve your program's exact result (Ch. 27).
 
-**Four accumulators, `-O2`.** By writing independent accumulators, *you* gave the compiler license to treat the lanes as independent — and it vectorizes the chains into packed adds:
+**Four accumulators, `-O2`.** By writing independent accumulators, *you* gave the compiler license to treat the lanes as independent — and it vectorizes the chains into packed adds (this listing is GCC 13's output; Clang 18 SLP-vectorizes the same source into two 128-bit `vaddpd xmm` accumulators combined with `vshufpd` — same lesson, different shape):
 
 ```asm
         vaddpd  ymm0, ymm0, ymmword ptr [rdi + 8*rax]    ; sum4: 4 doubles added at once,
@@ -219,7 +221,7 @@ The asm makes the latency-vs-throughput distinction undeniable. All three snippe
         vaddsd  xmm1, xmm0, xmm1                          ;       at the very end
 ```
 
-`vaddpd ymm` — *packed* double, four independent additions per instruction — **throughput-bound**, the ~4× win measured in §11.3.
+`vaddpd ymm` — *packed* double, four independent lanes per instruction, so each 4-cycle link of the chain now completes four elements: ~1 element/cycle, the ~4× win measured in §11.3. Note that it is *still one latency chain* (one `ymm0` accumulator, one add in flight per 4 cycles); only with ~8 vector accumulators — which `-ffast-math` produces next — does the loop become genuinely throughput-bound.
 
 **Single accumulator, `-O2 -ffast-math`.** Allow reassociation and the compiler does the splitting *itself*, vectorizing into multiple independent `ymm` accumulators (verified — `ymm0`, `ymm1`, `ymm2`, …):
 
@@ -242,7 +244,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 - **Optimizing a chain that isn't the bottleneck.** If you're memory-bound (Ch. 7) or mispredict-bound (Ch. 13), breaking dependency chains does nothing — top-down first (Ch. 2). Accumulator splitting is the cure for the *Core-Bound, latency* signature specifically.
 - **Counting instructions instead of finding the critical path.** "Fewer instructions" can be *slower* if they form a longer chain; "more instructions" (SIMD, split accumulators) can be faster (Ch. 4's warning, made precise). Reason about the dependency graph, then measure.
 - **Ignoring loop-carried dependencies you didn't notice.** A running pointer, a `prev` reference, a conditional that feeds the next iteration — hidden chains. Recompute from the index where possible to make iterations independent (§11.4.1).
-- **`div`/`sqrt` in a dependency chain.** A 20–40-cycle `div` on the critical path dominates everything; hoist it, replace with reciprocal-multiply, or restructure so it's off the chain (Ch. 27–28).
+- **`div`/`sqrt` in a dependency chain.** A 13–18-cycle `div` (40–95 on Skylake-era cores) on the critical path dominates everything; hoist it, replace with reciprocal-multiply, or restructure so it's off the chain (Ch. 27–28).
 
 ---
 
@@ -274,13 +276,13 @@ The lesson in three listings: **the dependency structure, not the instruction co
 - Intel, *64 and IA-32 Architectures Optimization Reference Manual* — the out-of-order engine, ports, reorder buffer, and reduction/ILP guidance; AMD's *Software Optimization Guide* for AMD cores.
 - J. L. Hennessy and D. A. Patterson, *Computer Architecture: A Quantitative Approach* — pipelining, hazards, ILP, and dependency/critical-path analysis from first principles.
 - A. Yasin, *"A Top-Down Method for Performance Analysis"* (Ch. 2) — locating the Core-Bound vs Memory-Bound vs Bad-Speculation quadrant before applying these techniques.
-- The `llvm-mca` (machine-code analyzer) and Intel IACA/uiCA documentation — static throughput and dependency analysis of a hot loop's asm (a §11.5 power tool).
+- `llvm-mca` (machine-code analyzer), Intel IACA (discontinued) and uiCA (Abel & Reineke, Saarland University; uica.uops.info) documentation — static throughput and dependency analysis of a hot loop's asm (a §11.5 power tool).
 
 ## 11.9 Additional Reading
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical chapters on ILP, dependency chains, and using `llvm-mca`/`uiCA` to read a loop's critical path.
-- T. Mattson / various CppCon talks on data-parallel reductions and "the surprising speed of splitting your accumulators."
-- Ch. 12 (*Instruction Cache & Front-End*) — the front-end that must feed this back-end; Ch. 29 (*SIMD*) — accumulator splitting taken to its vector conclusion; Ch. 27 (*Fixed/Floating- Point*) — the `-ffast-math`/reassociation correctness trade-offs invoked in §11.5.
+- A. Fog, *Optimizing Software in C++*, the loop-carried-dependency-chain and multiple-accumulator sections — the canonical write-up of §11.4.2.
+- Ch. 12 (*Instruction Cache & Front-End*) — the front-end that must feed this back-end; Ch. 29 (*SIMD*) — accumulator splitting taken to its vector conclusion; Ch. 27 (*Fixed/Floating-Point*) — the `-ffast-math`/reassociation correctness trade-offs invoked in §11.5.
 - **Appendix E** — the cycle costs of FP/integer ops and the branch-mispredict penalty that frame "latency-bound."
 
 ---

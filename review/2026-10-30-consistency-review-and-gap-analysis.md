@@ -461,6 +461,7 @@ What remains outside this review's reach:
 - **The 212 book-wide-check findings** (stale cross-references, chain, numbers, glossary, appendices C/D/H/I) were produced by single agents and not re-verified; the headline ones were re-checked by hand and the rest should be read with the ~3 % refutation rate of the verified set in mind.
 - **Refuted findings are kept in the tables** with the verifier's reason, so the author can overrule either side.
 - The review did not attempt to fix anything; §3 gives the recipe for the one mechanical fix (the fenced-block renumber), and the gap analysis in §10 is a planning input, not a commitment.
+- **P2-2 part 1 (Ch. 0–26), 2026-11-09:** 154 fixed / 142 already fixed / 9 left — see the findings file header.
 
 ---
 

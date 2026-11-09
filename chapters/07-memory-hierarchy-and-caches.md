@@ -51,7 +51,7 @@ Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each 
 Two structural facts shape everything:
 
 - **Each level is roughly an order of magnitude larger and slower than the one above.** The hierarchy exists because fast memory is small and expensive; the design bet is that programs exhibit **locality**, so a small fast cache captures most accesses.
-- **L1 and L2 are private to a core; L3 is shared across the socket.** This sharing is what makes inter-core communication possible (Ch. 34–35) and also what makes coherence traffic and *false sharing* (Ch. 33) a thing. It also means another busy core on the socket can evict your data from L3 — a noisy-neighbor tail source (Ch. 6, 16).
+- **L1 and L2 are private to a core; L3 is shared across the socket.** This sharing is what makes inter-core communication possible (Ch. 34–35) and also what makes coherence traffic and *false sharing* (Ch. 33) a thing. It also means another busy core on the socket can evict your data from L3 — a noisy-neighbor tail source that core pinning alone does not cure (Ch. 6, 16; partitioning the L3 with CAT is Ch. 44).
 
 The two forms of locality the hierarchy rewards:
 
@@ -68,7 +68,7 @@ The cache does not deal in bytes. Its unit of transfer and tracking is the **cac
 2. **Alignment matters.** A 64-byte object straddling two lines costs two line fetches and two cache slots; the same object aligned to a line costs one. This is the lever behind Ch. 9 (alignment & padding) and Ch. 33 (false sharing).
 3. **Bandwidth is counted in lines.** When you reason about whether the prefetcher or the memory bus can keep up, the currency is lines/second, not bytes or elements.
 
-**Associativity** governs *where* a line may live. A cache is divided into **sets**; a given memory address maps (by its middle address bits) to exactly one set, and within that set may occupy any of *N* **ways** (an *N-way set-associative* cache; e.g. L1 is often 8-way). The trap this creates is the **conflict miss**: if your access pattern repeatedly touches addresses that map to the *same set* — classically, striding by a large power of two (4 KiB, 2 MiB) — you can thrash a single set, evicting lines you still need, *even though the cache as a whole has plenty of free space elsewhere*. A power-of-two-strided loop or a power-of-two-sized 2D array can run far slower than a "+1" version for exactly this reason (§7.5, §7.3). The defense is to avoid pathological power-of-two strides and alignments — sometimes deliberately *padding* an array to a non-power-of-two row width.
+**Associativity** governs *where* a line may live. A cache is divided into **sets**; a given memory address maps (by its middle address bits) to exactly one set, and within that set may occupy any of *N* **ways** (an *N-way set-associative* cache; e.g. L1 is often 8-way). The trap this creates is the **conflict miss**: if your access pattern repeatedly touches addresses that map to the *same set* — classically, striding by a large power of two (4 KiB, 2 MiB) — you can thrash a single set, evicting lines you still need, *even though the cache as a whole has plenty of free space elsewhere*. A power-of-two-strided loop or a power-of-two-sized 2D array can run far slower than a "+1" version for exactly this reason (§7.5; exercise 3 in §7.6). The defense is to avoid pathological power-of-two strides and alignments — sometimes deliberately *padding* an array to a non-power-of-two row width.
 
 ### 7.2.3 Coherence and the MESI protocol
 
@@ -159,7 +159,7 @@ This single table *is* §7.2.1, measured. Read it the Ch. 1–2 way:
 
 - **The plateaus reveal the cache sizes.** Latency is flat while the working set fits a level, then jumps at each capacity boundary — the cliff edges sit right at ~L1, ~L2, ~L3 sizes. You just measured your machine's cache hierarchy with a 20-line program. The L1 plateau is the floor the hardware allows: a dependent `idx = next[idx]` cannot go faster than the L1d load-to-use latency, **5 cycles on Ice Lake** (4 on Skylake-class cores) — 1.72 ns at 2.9 GHz. If you see less, the chain was broken (or turbo was on).
 - **The cliffs are the cost of a miss.** Each step up (1.7→5→20→100 ns) is the latency of the *next* level. The ~100 ns DRAM plateau is the "~80-100 ns" number from §7.1 and Appendix E, in your own hands — plus translation: above ~8 MiB on 4 KiB pages the chase also misses the STLB (~2 K entries ≈ 8 MiB of reach — Ch. 15) and pays a page walk on nearly every access, so the DRAM plateau is **DRAM + page walk**. Re-run the buffer on 2 MB pages (`madvise(MADV_HUGEPAGE)`, Ch. 15) and it drops toward ~85-90 ns: the difference *is* the walk.
-- **This is the *latency-exposed* worst case** (dependent pointer chase, no prefetch). Replace the chase with a *sequential* scan and the DRAM-sized case drops back toward L1-like throughput — because the prefetcher (§7.2.4) hides the latency. That contrast, measured, is the entire argument for cache-friendly access. Confirm both with `perf stat -e LLC-load-misses,L1-dcache-load-misses` (Ch. 2): the chase shows miss-per-access at large sizes; the sequential scan does not.
+- **This is the *latency-exposed* worst case** (dependent pointer chase, no prefetch). Replace the chase with a *sequential* scan and the DRAM-sized case drops back toward L1-like throughput — because the prefetcher (§7.2.4) hides the latency. Ch. 2's `perf_demo` measured exactly that contrast on this machine: the same 134 M dependent loads over a 256 MiB table ran ~53× faster in sequential order than in shuffled order (IPC 0.67 vs 0.0125), and exercise 2 below asks you to reproduce it with this sweep. That contrast, measured, is the entire argument for cache-friendly access. Confirm both with `perf stat -e LLC-load-misses,L1-dcache-load-misses` (Ch. 2): the chase shows miss-per-access at large sizes; the sequential scan does not.
 
 ---
 
@@ -174,7 +174,7 @@ Concretely, for the hot path:
 - **Count the bytes touched per event**, not the total data size. A 1 GiB order book is fine *if* a single update touches only a few cache-resident lines (the top-of-book and the affected level). What kills you is a working *set* — the lines touched per event — that exceeds a cache level.
 - **Shrink the per-event footprint.** Smaller structs (Ch. 9), hot/cold splitting so only hot fields are resident (Ch. 8), and removing pointer indirection (each pointer hop is a potential extra line and a prefetch-defeating dependency) all reduce the lines touched.
 - **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 67) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
-- **Mind L3 sharing.** L3 is shared across the socket (§7.2.1), so your *effective* L3 budget shrinks under noisy neighbors; isolation (Ch. 6) protects it.
+- **Mind L3 sharing.** L3 is shared across the socket (§7.2.1), so your *effective* L3 budget shrinks under noisy neighbors; core isolation (Ch. 6) does *not* protect it — partitioning the L3 with CAT/resctrl (Ch. 44) does.
 
 The measurement loop: pick the data structure, measure its per-event footprint and its MPKI (Ch. 2), and if it's missing, shrink the footprint or improve locality until it fits.
 
@@ -208,7 +208,7 @@ The unifying idea: **make your access pattern predictable and contiguous**, and 
 
 1. **Map your hierarchy.** Build and run `cache_sweep.cpp`, pinned with turbo off (Ch. 6). Plot ns/access vs size on a log x-axis. Where are the plateaus and cliffs? Compare the cliff sizes to your `lscpu` cache sizes (Ch. 6). Did you find L1, L2, L3, DRAM?
 2. **Prefetcher on vs off.** Replace the random `shuffle` with the identity order (sequential chase) and re-run. How much does the DRAM-sized case speed up? Explain via §7.2.4. Confirm with `perf stat -e L1-dcache-load-misses,LLC-load-misses` that the sequential version misses far less.
-3. **Provoke a conflict miss.** Write a loop summing `a[i]` with stride = 4096 bytes (power of two) over a large array, then with stride = 4096+64. Compare the times and the `LLC-load-misses`. Why is the power-of-two stride slower despite touching *fewer* elements? (§7.2.2.)
+3. **Provoke a conflict miss.** Write a loop summing `a[i]` with stride = 4096 bytes (power of two) over a large array, then with stride = 4096+64. Compare the times and the `LLC-load-misses`. Make several passes over a *fixed* element count so both versions touch the same number of lines. Why is the power-of-two stride slower even though it touches the same number of lines? (§7.2.2.)
 4. **Line, not byte.** Sum every 16th `int` (one per cache line) vs every `int` sequentially, over the same array. The first touches 1/16 the data but isn't 16× faster — why? (You pay per *line*, §7.2.2.) Measure both.
 5. **Footprint matters.** Take a struct with one hot field and many cold ones; sum the hot field across a large array (AoS). Now copy the hot field into its own array and sum that (SoA). Compare times and L1 miss rate. You've just motivated Ch. 8.
 
@@ -234,7 +234,7 @@ The unifying idea: **make your access pattern predictable and contiguous**, and 
 
 ## 7.8 Additional Reading
 
-- I. Wright / S. Robison and various CppCon talks on data-oriented design and "mechanical sympathy" (Mike Acton, *"Data-Oriented Design and C++,"* CppCon 2014) — the practical mindset that Ch. 8 formalizes.
+- CppCon talks on data-oriented design and "mechanical sympathy" — Mike Acton, *"Data-Oriented Design and C++"* (CppCon 2014) and Stoyan Nikolov, *"OOP Is Dead, Long Live Data-oriented Design"* (CppCon 2018) — the practical mindset that Ch. 8 formalizes.
 - B. Gregg, *Systems Performance*, 2nd ed. — measuring memory/cache behavior with `perf` and PMU in production.
 - The `perf c2c` (cache-to-cache) tool documentation — pinpointing false sharing and HITM coherence traffic (Ch. 33).
 - **Appendix E — Latency Numbers Every Trading Developer Should Know** — the consolidated, annotated cost table behind §7.1; and **Appendix A** for ARM/Graviton cache-line and hierarchy differences.
