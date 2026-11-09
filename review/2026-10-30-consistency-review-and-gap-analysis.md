@@ -662,3 +662,4 @@ If the author wants the smallest set of additions that closes the gaps they name
 - `review/2026-10-30-stale-crossrefs.md` — the mechanically detected stale cross-references (fenced: near-certain; prose: heuristic).
 - `review/2026-10-30-gap-verification.md` — the skeptical coverage pass over the 92 merged items: verdict, grep evidence, where the closest existing coverage is, refined placement and priority reasoning.
 - `review/2026-10-30-gap-proposals-raw.txt` — the 163 raw gap proposals from the fourteen lenses (title, placement, scope bullets, claimed existing coverage, grep evidence), keyed by the source tags used in §10.
+- **P2-2 part 4 (appendices, front matter, book-wide), 2026-11-09:** 87 fixed / 109 already fixed / 2 left — see the findings file header.

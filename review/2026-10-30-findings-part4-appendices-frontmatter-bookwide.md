@@ -1,5 +1,22 @@
 # Full finding list (part4-appendices-frontmatter-bookwide) — automated review of the book (25 of 25 chunks reviewed, 25 verified)
 
+**Status (2026-11-09): processed** (work-queue item P2-2 part 4, branch `work/item-13-part4`) — **87 rows fixed, 109 already fixed by earlier items, 2 left** (listed below) among the confirmed/verifier-added medium+low rows; Appendix L's one `high` row was verified fixed. The 110 `book-wide check` rows that fall in the appendices/front matter were processed the same way (28 fixed, 82 already fixed); those that touch chapter bodies are listed under *left for a final pass* with the grep that finds each.
+
+Per section (fixed / already fixed / left): A 9/0/0 · B 6/2/0 · C 8/2/0 · D 10/11/0 · E 5/11/0 · F 2/17/0 · G 0/9/0 · H 4/26/0 · I 10/14/0 · J 7/3/0 · K 4/0/0 · L 4/6/0 · CLAUDE.md 8/0/0 · README.md 5/7/1 · tools/book-pdf/README.md 5/1/1. Book-wide rows in these files (fixed / already): C 3/1 · D 5/7 · E 3/6 · F 7/15 · G 0/10 · H 0/27 · I 4/9 · J 3/2 · K 2/2 · README 0/2 · L 1/1.
+
+Rows left:
+- `chapters/README.md:384` (README row 9, low) — the `28.2 Mental model: BMI/BMI2 (popcnt, lzcnt/tzcnt, …)` label mislabels POPCNT/LZCNT as BMI; the README line mirrors the chapter heading `chapters/28-bit-manipulation-integer-tricks.md:19`, which a sibling item owns — fix the heading first, then re-mirror.
+- `tools/book-pdf/README.md:91` (tools row 7, low) — the "500+ pages" estimate; no TeX engine is installed in this environment (pandoc only), so the figure could not be measured. Run the build once and put the measured page count in.
+
+Book-wide rows left for a final pass (chapter bodies; not edited here):
+- Ch. 33 still says `hardware_destructive_interference_size` "handles x86's 64 and ARM's 128" while GCC 12/13 on AArch64 defines it as 256 (Appendix A row 1): `grep -n "ARM's 128\|128-byte lines" chapters/33-*.md` (lines 137, 160, 182).
+- Ch. 41 null-syscall band vs Appendix E's "~50–100 ns mitigations off / ~150–400 ns on" (E row 18): `grep -n "null syscall" chapters/41-*.md` and `grep -n "hundreds of ns" chapters/01-*.md`.
+- Ch. 7 §7.1 heading / Ch. 6 teaser ratio vs Appendix E (E row 17): `grep -n "× an L1 hit" chapters/0[67]-*.md chapters/README.md` (README:104 now says ~55×; confirm Ch. 7:11 and the Ch. 6 teaser agree).
+- Ch. 11 §11.2 never names the ROB that Appendix F points at (F row 35): `grep -n "ROB\|reorder buffer" chapters/11-*.md` (only the diagram label and a reference).
+- Two unnumbered `###` headings that the PDF preprocessor now emits `{.unnumbered}` (tools row 4) — optionally number them in the source and add them to the README outline: `grep -n "^### [A-Z]" chapters/19-*.md chapters/36-*.md` (19:213, 36:148).
+- Terms the glossary now defines but no chapter mentions (F row 31): `grep -c "MoldUDP" chapters/54-*.md` (0 — J.5 now covers it), `grep -c "SR-IOV" chapters/62-*.md chapters/70-*.md` (0), `grep -c "EEVDF" chapters/45-*.md` (0).
+- Appendix G now cites talks/books no chapter cites (G rows 18–19): `grep -c "constexpr ALL\|Pikus" chapters/18-*.md` (0) — add to Ch. 18's Additional Reading if G is to stay a pure consolidation.
+
 Each row is one reviewer finding (technical-accuracy lens or editorial lens) with the adversarial verifier's ruling. **Verdict**: `confirmed` (verifier re-read the passage and agrees), `refuted` (kept for transparency — the verifier explains why the text is fine), `duplicate` (same issue as another row), `uncertain`, `verifier-added` (found by the verifier itself), or `book-wide check` (from the eight cross-cutting agents, which were not separately verified). **Sev** is the verifier's severity when it ruled, else the reviewer's. Line numbers are approximate.
 
 
