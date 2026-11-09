@@ -52,7 +52,7 @@ The model: **independent host clocks drift, so cross-host timestamp comparison r
 
 ## 66.3 Measure it: PTP offset/jitter; true wire-to-wire latency
 
-Two measurements: the **PTP synchronization quality** (how well-synced are the clocks — the offset/jitter to the grandmaster), and the **true wire-to-wire latency** it unlocks (comparing hardware timestamps across hosts). The first validates the sync; the second is what you bought it for.
+Two measurements: the **PTP synchronization quality** (how well-synced are the clocks — the offset/jitter to the grandmaster), and the **true wire-to-wire latency** it unlocks (comparing hardware timestamps across hosts). The first validates the sync; the second is what you bought it for. The *independent* version of the second — a passive tap feeding a PTP-disciplined capture card, so the wire is timed without the host's cooperation — is Ch. 95 §95.4.5 and Ch. 68 §68.4.4 (where a switch SPAN port's timestamp error is measured against the tap's).
 
 ```
    # PTP sync quality (linuxptp):

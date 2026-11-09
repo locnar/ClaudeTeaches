@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 89 §89.2.2 (the deterministic state machine — `apply(state, input)`; this chapter produces the single ordered input stream it presupposes) and §89.3 (single-host restart time — the baseline a replica beats), Ch. 94 (the journal and snapshot + replay catch-up — the sequenced stream *is* the journal), Ch. 40–41 (one-ring broadcast with sequence barriers; the hop-cost model — the sequencer is one more hop), Ch. 57 and Ch. 61 (shm rings and reliable multicast — the two fan-out transports; A/B arbitration is what the sequencer's feed input has already done), Ch. 42 (the slow-replica policy), Ch. 47 §47.2.3 (timer fires as events), Ch. 66 (hardware timestamps — how the added hop is measured), Ch. 73 §73.4.1 (Aeron Cluster — the off-the-shelf comparison), Ch. 90–91 (the gate decisions and order transitions that become sequenced events).
 >
-> **Leads into:** Ch. 98 (spike forensics — a replica's divergence digest is the first forensic input), Ch. 99–100 (the sequencer's own health is a host and network telemetry concern), Ch. 104 (the capstone's architecture gains the sequencer and a replica). Not in this chapter: leader leases, fencing tokens and split-brain prevention on the *order path* — that is a separate failover topic (Appendix F defines *fencing token*); this chapter scopes to producing one order, consuming it identically in many places, and standing a replica up in place of a dead primary.
+> **Leads into:** Ch. 98 (spike forensics — a replica's divergence digest is the first forensic input), Ch. 99–100 (the sequencer's own health is a host and network telemetry concern), Ch. 104 (the capstone's architecture gains the sequencer and a replica). Not in this chapter: leader leases, fencing tokens and split-brain prevention on the *order path* — that is Ch. 97 (Appendix F defines *fencing token*); this chapter scopes to producing one order, consuming it identically in many places, and standing a replica up in place of a dead primary.
 
 ---
 
@@ -56,7 +56,7 @@ Every consumer is `state = apply(state, event)` over the stream (Ch. 89 §89.2.2
 - **Hot standby is a replica with its outputs discarded.** It holds the gateway's in-flight table (Ch. 91) and the risk accumulators (Ch. 90) to the bit; on failover it is told to start emitting (one control event *in the stream*, so every replica agrees on the exact `seq` at which emission moved) and takes over the venue session (logon with the true sequence numbers — Ch. 91 §91.4.4). RTO is dominated by the venue session, not by state.
 - **Warm standby is journal shipping**: the sequenced log (which is the journal) streamed to another host or site; the standby applies it as it arrives or on demand. Its RPO is the shipping lag; its RTO is the catch-up — §96.3 measures the fold at ~3 ns/event, so even a minute's backlog at 100 k events/s is ~20 ms of replay.
 - **Cold restore is Ch. 89 §89.3's path**, kept for the failures the others cannot survive (a bad deploy that corrupts every replica identically — determinism replicates bugs perfectly).
-- **The single-emitter rule**: at any instant exactly one replica of the gateway emits to the venue; everything else is suppressed. Enforcing that across a partition (leases, fencing tokens, the venue's own session exclusivity) is the failover topic this chapter leaves aside; within one host and one sequencer it is the control event's position in the stream.
+- **The single-emitter rule**: at any instant exactly one replica of the gateway emits to the venue; everything else is suppressed. Enforcing that across a partition (leases, fencing tokens, the venue's own session exclusivity) is Ch. 97; within one host and one sequencer it is the control event's position in the stream.
 
 ### 96.2.4 The sequencer as the single point of failure
 
@@ -214,4 +214,4 @@ Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's poi
 
 ---
 
-*Next: Ch. 97 — Failover Without Split-Brain: Leases, Fencing & Session Takeover on the Order Path.*
+*Next: Ch. 97 — Failover Without Split-Brain: Leases, Fencing & Session Takeover on the Order Path: the question this chapter left open — when may the standby gateway start *sending*? Failure detection over two independent paths, a lease on a monotonic clock, the epoch as a fencing token checked on every message, the venue's own cancel-on-disconnect and session exclusivity, and a measured detect → promote → first accepted order of ~1.8 ms on the VM with a 2 ms lease, with a resumed zombie's stale-token orders fenced.*

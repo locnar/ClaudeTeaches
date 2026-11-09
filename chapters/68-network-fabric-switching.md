@@ -46,7 +46,7 @@ The mental model: **a switch is a latency component with a *distribution*, and t
 
 You cannot reason about the fabric from datasheets; you measure it, and measuring the *network* requires **hardware timestamps and synchronized clocks** (Ch. 66), because software timestamps are perturbed by the very host you're trying to exclude from the measurement.
 
-- **Per-hop switch latency** — with a NIC hardware timestamp (Ch. 63, 66) on both ingress and egress of a switch (or a passive tap on each side, Ch. 94), measure the time a frame spends *in* the switch. Compare a store-and-forward vs cut-through switch, and measure how each scales with **frame size** (store-and-forward grows with size; cut-through stays flat) — this single test reveals the switch's class regardless of its spec sheet. Representative (figures pending real runs):
+- **Per-hop switch latency** — with a NIC hardware timestamp (Ch. 63, 66) on both ingress and egress of a switch (or a passive tap on each side, Ch. 95), measure the time a frame spends *in* the switch. Compare a store-and-forward vs cut-through switch, and measure how each scales with **frame size** (store-and-forward grows with size; cut-through stays flat) — this single test reveals the switch's class regardless of its spec sheet. Representative (figures pending real runs):
 
 | Switch type | 64-byte frame | 1500-byte frame | Under microburst |
 |---|---|---|---|
@@ -65,7 +65,7 @@ The lessons: measure per-hop with hardware timestamps (software timing includes 
 ### 68.4.1 Choosing switching technology and minimizing hops
 
 - **Cut-through on the hot path.** For any switch on the tick-to-trade path, choose **cut-through** (Arista 7130/7150, Cisco Nexus low-latency, Exablaze) over store-and-forward — flat, frame-size-independent, sub-microsecond latency. The CRC-propagation trade-off (§68.2) is acceptable on clean colo links; monitor error counters to confirm the links are clean (FEC/CRC/optics DOM and the switch-side discards — Ch. 100 §100.4.4).
-- **Layer-1 for fan-out and replication.** Where you're *distributing* a signal (a market-data feed to multiple strategy hosts, a tap to multiple capture/analytics consumers — Ch. 94, or an order feed to redundant systems), use a **layer-1 replicator** (Arista 7130 Connect, Cisco Nexus 3550-F L1) — a few nanoseconds, no buffering, deterministic. This is how one feed reaches many consumers without a switching-latency penalty per consumer.
+- **Layer-1 for fan-out and replication.** Where you're *distributing* a signal (a market-data feed to multiple strategy hosts, a tap to multiple capture/analytics consumers — Ch. 95, or an order feed to redundant systems), use a **layer-1 replicator** (Arista 7130 Connect, Cisco Nexus 3550-F L1) — a few nanoseconds, no buffering, deterministic. This is how one feed reaches many consumers without a switching-latency penalty per consumer.
 - **Minimize hop count.** Every hop is a switch latency *and* a queuing point (§68.5). Lay out the path (and choose your colo cross-connects — Appendix K) to traverse the **fewest switches** between the exchange handoff and your NIC, and between your NIC and the order gateway. One cut-through hop beats three; a direct layer-1 cross-connect beats a switched path where topology allows.
 - **Consistent link speeds — but budget FEC and PHY type.** Keep link speeds uniform along the path (a speed change forces a store-and-forward-style buffer at the boundary), and match the exchange's handoff speed — but do not assume faster is lower-latency for the small frames that dominate trading traffic: 25/100 G links normally run RS-FEC, which adds ~250 ns per link at 25 G (~100 ns at 100 G; CL74 FC-FEC ~80 ns; none at 10 G), far more than the serialization saved on a 64-byte frame (51 ns at 10 G vs 20 ns at 25 G) — which is why many HFT fabrics still run 10 G, or 25 G with FEC off where the link is clean enough. Never 10GBASE-T on the hot path (~2.5 µs/link of PHY coding); use SFP+ DAC or fibre.
 
@@ -80,10 +80,34 @@ The lessons: measure per-hop with hardware timestamps (software timing includes 
 
 Fabric hardware does more than forward — it can timestamp, replicate, and tap, offloading work from the host:
 
-- **Switch/fabric hardware timestamping (ties Ch. 63, 66).** Low-latency switches and layer-1 devices can **timestamp every packet** as it passes, with nanosecond (or sub-ns) precision, and even append the timestamp to the frame. This gives you a fabric-level, host-independent latency measurement and capture-time source (Ch. 94) — the switch tells you exactly when each packet crossed, disciplined by PTP (Ch. 66).
-- **Replication for capture and redundancy.** A layer-1 replicator or a switch's mirror/SPAN (Ch. 94) copies the feed to capture/analytics hosts *without* adding latency to the production path — the compliance-grade capture (Ch. 94) taps the wire at the fabric, below and beside the trading host. This is why capture belongs at the fabric, not in the application (§94.4.1).
+- **Switch/fabric hardware timestamping (ties Ch. 63, 66).** Low-latency switches and layer-1 devices can **timestamp every packet** as it passes, with nanosecond (or sub-ns) precision, and even append the timestamp to the frame. This gives you a fabric-level, host-independent latency measurement and capture-time source (Ch. 95) — the switch tells you exactly when each packet crossed, disciplined by PTP (Ch. 66).
+- **Replication for capture and redundancy.** A layer-1 replicator or a switch's mirror/SPAN (Ch. 95 §95.2.1, §68.4.4) copies the feed to capture/analytics hosts *without* adding latency to the production path — the compliance-grade capture (Ch. 95) taps the wire at the fabric, below and beside the trading host. This is why capture belongs at the fabric, not in the application (Ch. 95 §95.2.1).
 - **Multicast replication in the switch (Ch. 61).** The market-data feed is *multicast*: an L2 switch replicates each frame to every port that has **joined** the group — it learns the joins by **IGMP snooping** (with an IGMP querier on the VLAN — without one the snooped entries age out and the feed goes dark on every host ~260 s later; Ch. 62), so a late/missing join means the first packets after startup never arrive (the warm-up concern of Ch. 53) and an *un*snooped switch **floods** the group to every port, swamping unrelated hosts; across L3 the join is PIM. Replication is per output port and costs the egress queue on each — one more reason the A and B lines (Ch. 60–61) should take disjoint switches so a single replication point cannot drop both.
-- **Aggregation taps.** A tap-aggregation layer collects taps from many links into capture infrastructure (Ch. 94), timestamped at the fabric — the observability backbone (Ch. 104) for a trading system, built from switch/tap hardware rather than host CPU.
+- **Aggregation taps.** A tap-aggregation layer collects taps from many links into capture infrastructure (Ch. 95), timestamped at the fabric — the observability backbone (Ch. 104) for a trading system, built from switch/tap hardware rather than host CPU.
+
+### 68.4.4 Passive measurement: taps vs SPAN, timestamped mirrors and latency appliances
+
+The fabric is also where the firm's *independent* latency measurement lives (Ch. 95 §95.4.5): a passive tap on the feed link and on the order link, into a PTP-disciplined capture card or a latency appliance, gives wire-to-wire tick-to-trade, per-hop latency and feed loss without asking the trading host anything. The one design decision is **where the copy is made**, and it decides the measurement's error:
+
+```
+   copy made by                        adds to the production path   what the copy loses                                       timestamp error of the copy
+   ─────────────────────────────────   ───────────────────────────   ────────────────────────────────────────────────────────   ──────────────────────────────────────────
+   passive optical splitter (tap)      ~0 (a few dB of optical       nothing: every bit, both directions, at line rate          fixed propagation offset (~5 ns/m of fibre);
+     + layer-1 replicator (§68.2)        budget; no electronics)                                                                 jitter = the capture card's (≤ ~10 ns hw stamp)
+   switch SPAN / mirror port           ~0 on the mirrored traffic    frames when the mirror egress is oversubscribed (two        the mirror egress QUEUE: µs of load-dependent
+                                       (the copy is made at the        10G ports mirrored to one 10G port = guaranteed loss      delay during exactly the bursts being measured;
+                                       switch's ingress or egress)     at the open), often without a visible counter;            frames reordered relative to the production
+                                                                        truncation, VLAN tag rewriting, ERSPAN encapsulation     port; no per-frame hardware stamp unless the
+                                                                                                                                  switch itself stamps (next row)
+   switch with hardware timestamping   ~0; the stamp is appended as   nothing up to the mirror's capacity                         the switch's clock (PTP-disciplined): ~ns
+     (timestamped mirror: Arista 7130    a trailer or ERSPAN field                                                                 accuracy, but the stamp marks the switch's
+     MetaWatch, Cisco Nexus, Metamako)                                                                                           ingress, not the wire the tap would see
+   capture/analytics appliance         ~0 (fed from a tap or a        nothing up to line rate; the appliance's own drop           ≤ ~10 ns (PTP) / sub-ns (White Rabbit, PPS —
+     (Napatech/Endace card; Corvil-,     timestamped mirror)            counters are the proof                                     Ch. 66 §66.4.3) on both directions, so one-way
+     Pico-class analytics)                                                                                                         and wire-to-wire numbers are directly computable
+```
+
+**Measure SPAN against the tap** before trusting either: tap one link into capture port A and mirror the same link into capture port B; replay a captured microburst across the link (Ch. 95 §95.4.3) and compare per-frame arrival stamps and counts. The *representative* result on a store-and-forward 10G switch is a SPAN copy that arrives 1–5 µs after the tap's copy at the median, tens of µs behind inside a burst, and short of some frames when two mirrored ports exceed the mirror port's capacity — a measurement the tap would attribute to the *host*. The method is the deliverable; the numbers are per switch and per firmware, and they belong in the readiness evidence (Appendix M). What to compute from the tap, and how the tap's numbers reconcile with the application's ledger (Ch. 85), is Ch. 95 §95.4.5; the regulator's view of timestamp accuracy (RTS 25) is why the tap's clock discipline is a compliance item (Ch. 66).
 
 ## 68.5 Pitfalls & anti-patterns: store-and-forward, oversubscription, and hidden hops
 
@@ -113,7 +137,7 @@ Fabric hardware does more than forward — it can timestamp, replicate, and tap,
 - [ ] The hot path is **not oversubscribed**; buffer policy suits the traffic (shallow + no oversubscription for market data) (§68.4.2, §68.5).
 - [ ] Per-hop and **one-way** latency are measured with **hardware timestamps and synchronized clocks** (Ch. 66) — never RTT/2 on an asymmetric path (§68.3).
 - [ ] The fabric's **latency distribution under a market-open burst** (Ch. 60) is measured, not just the idle median (§68.3).
-- [ ] **Fan-out / replication** uses layer-1 devices; **capture** taps the wire at the fabric (Ch. 94) without adding hot-path latency (§68.4.3).
+- [ ] **Fan-out / replication** uses layer-1 devices; **capture** taps the wire at the fabric (Ch. 95) without adding hot-path latency (§68.4.3); SPAN is measured against a tap before it is trusted (§68.4.4).
 - [ ] **Fabric/switch hardware timestamping** (Ch. 66) feeds latency monitoring and capture (Ch. 94–104) (§68.4.3).
 - [ ] The **actual physical path** (Appendix K — colocation) is traced — no hidden hops, mismatched speeds, or asymmetric detours (§68.5).
 

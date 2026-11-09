@@ -907,6 +907,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 68.4.1 Choosing switching technology and minimizing hops
   - 68.4.2 Fabric layout, buffering, and microburst handling
   - 68.4.3 Switch-based replication, timestamping, and taps
+  - 68.4.4 Passive measurement: taps vs SPAN, timestamped mirrors and latency appliances
 - 68.5 Pitfalls & anti-patterns: store-and-forward, oversubscription, and hidden hops
 - 68.6 Exercises & checklist
 
@@ -1320,12 +1321,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 94.6 Exercises & checklist
 
 ### [95. Line-Rate Capture, Timing-Faithful Replay & Passive Wire Measurement](95-line-rate-capture-timing-faithful-replay.md)
-- 95.1 Why it matters: TODO
-- 95.2 Mental model: TODO
-- 95.3 Measure it: TODO
+- 95.1 Why it matters: the open is the only realistic test, and you only get one a day
+- 95.2 Mental model
+  - 95.2.1 Capture-point fidelity: what each point loses
+  - 95.2.2 The host capture stack: rings, blocks and fan-out
+  - 95.2.3 Timestamps and formats
+  - 95.2.4 Replay is a timing problem, not a copying problem
+- 95.3 Measure it: the host capture stack under a burst, and the replayer's timing error
 - 95.4 Techniques
-  - 95.4.1 TODO
-- 95.5 Pitfalls & anti-patterns: TODO
+  - 95.4.1 A `TPACKET_V3` capture ring
+  - 95.4.2 Proving the capture lossless
+  - 95.4.3 Timing-faithful replay onto the wire
+  - 95.4.4 Validating replay fidelity with the tap
+  - 95.4.5 Passive wire measurement: what to compute from the tap
+  - 95.4.6 What this chapter takes from Ch. 94
+- 95.5 Pitfalls & anti-patterns
 - 95.6 Exercises & checklist
 
 ### [96. The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers](96-sequencer-total-order-replicated-consumers.md)
@@ -1347,12 +1357,22 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 96.6 Exercises & checklist
 
 ### [97. Failover Without Split-Brain: Leases, Fencing & Session Takeover on the Order Path](97-failover-without-split-brain-leases-fencing.md)
-- 97.1 Why it matters: TODO
-- 97.2 Mental model: TODO
-- 97.3 Measure it: TODO
+- 97.1 Why it matters: two emitters under one session is worse than the outage
+- 97.2 Mental model
+  - 97.2.1 The invariant and where it is enforced
+  - 97.2.2 Failure detection over two paths
+  - 97.2.3 Leases, epochs and fencing tokens
+  - 97.2.4 The venue's safety nets
+  - 97.2.5 The takeover timeline
+- 97.3 Measure it: detect → lease → logon → first accepted order, and a zombie fenced
 - 97.4 Techniques
-  - 97.4.1 TODO
-- 97.5 Pitfalls & anti-patterns: TODO
+  - 97.4.1 The lease word and the fencing token
+  - 97.4.2 The two-path detector
+  - 97.4.3 The takeover sequence: cancel first, then trade
+  - 97.4.4 Zombies: bounded pauses and stepping down
+  - 97.4.5 Where the token is checked when the venue cannot
+  - 97.4.6 Off-the-shelf: consensus beside the path
+- 97.5 Pitfalls & anti-patterns
 - 97.6 Exercises & checklist
 
 ### [98. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](98-latency-spike-forensics-anomaly-triggered-diagnostics.md)
