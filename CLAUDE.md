@@ -461,26 +461,26 @@ Code & content guidelines:
   - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup.
   - **II — CPU Microarchitecture** (7–17).
-  - **III — Compile-Time & Language Mechanics** (18–22).
-  - **IV — Memory Management** (23–26).
-  - **V — Numerics & Data Parallelism** (27–29).
-  - **VI — Concurrency** (30–42): …the Disruptor, threading topologies & the hot loop (Ch. 38, added
+  - **III — Compile-Time & Language Mechanics** (18–23).
+  - **IV — Memory Management** (24–27).
+  - **V — Numerics & Data Parallelism** (28–30).
+  - **VI — Concurrency** (31–43): …the Disruptor, threading topologies & the hot loop (Ch. 38, added
     2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 39, P3-4), coroutines, `std::execution`,
     correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (43–50): context switching, timers & deadlines without jitter
+  - **VII — OS, Scheduling & Isolation** (44–51): context switching, timers & deadlines without jitter
     (Ch. 44, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
     residual noise (Ch. 49, added 2026-11-09 P3-1), warming.
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (51–56): native I/O, io_uring, zero-copy fast path,
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (52–57): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
-  - **IX — Market Data, NIC & Fabric** (57–65): decoding, reliable multicast, multicast membership &
+  - **IX — Market Data, NIC & Fabric** (58–66): decoding, reliable multicast, multicast membership &
     dark-feed detection (Ch. 56, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (66–70): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (67–71): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (71–75): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (72–76): PCIe, GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (73–77, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (81–95): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (82–96): logging, in-band latency tracing
     (Ch. 82, added 2026-11-09 P3-2), application telemetry (Ch. 83, P3-1), security, hot reload, process
     topology, the pre-trade risk gate & kill-switch path (Ch. 87, P3-4), idempotent order entry &
     order-state recovery (Ch. 88, P3-4), crash handling & post-mortem (Ch. 89, P3-2), capture/replay, the

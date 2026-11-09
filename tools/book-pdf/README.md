@@ -52,12 +52,12 @@ Example: `TOC_DEPTH=2 MONOFONT="DejaVu Sans Mono" ./build.sh ~/Desktop/book.pdf`
 chapters/*.md ──► preprocess.py ──► build/book.md ──► pandoc (+filters,+LaTeX) ──► PDF
 ```
 
-- **`preprocess.py`** concatenates the files in reading order (preface, Ch. 1–95,
+- **`preprocess.py`** concatenates the files in reading order (preface, Ch. 1–96,
   Appendices A–L; discovered from the `chapters/` directory, not hard-coded) and fixes them up for LaTeX:
   - emits each **Part divider once** (the source repeats the Part header in every file);
   - rewrites `# Chapter N — Title` → `# Title` and strips manual section numbers
     (`## 48.4 …` → `## …`) so **LaTeX auto-numbers** them — the numbers come out identical
-    to the manual ones, so in-prose cross-references like "§52.4.1" stay correct; a `##`/`###`
+    to the manual ones, so in-prose cross-references like "§53.4.1" stay correct; a `##`/`###`
     heading that carries *no* manual number is emitted `{.unnumbered}` so it cannot shift the
     numbering of the headings after it;
   - emits the preface unnumbered and switches the appendices to letter numbering

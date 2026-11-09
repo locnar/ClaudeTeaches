@@ -49,6 +49,7 @@ STEPS = [
     ("insert", 86),  # Ch. 87 pre-trade-risk-gate-kill-switch
     ("insert", 87),  # Ch. 88 idempotent-order-entry-order-state-recovery
     ("insert", 90),  # Ch. 91 sequencer-total-order-replicated-consumers
+    ("insert", 19),  # Ch. 20 compile-time-protocol-decoders
     # INSERT_STEPS_END
 ]
 def old2new(n):
