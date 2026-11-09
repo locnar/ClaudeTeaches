@@ -61,6 +61,8 @@ These mitigations exist for a real reason: they defend against information leaka
 
 ## 6.3 Measure it: jitter before/after tuning
 
+*Toolchain and machine: Appendix L.3.*
+
 The right way to *see* system jitter — independent of any application — is **`cyclictest`** (from `rt-tests`), the standard tool for measuring scheduling/wake-up latency. It sleeps a thread for a fixed interval, then measures how late the wake-up actually was versus the intended time; the distribution of that lateness *is* the machine's jitter floor. (Note the kinship with Ch. 1: `cyclictest` reports min/avg/**max**, and the **max** is the number that matters — it's the worst stall a perfectly-timed thread would suffer from the OS and hardware alone.)
 
 ```bash
@@ -69,7 +71,7 @@ The right way to *see* system jitter — independent of any application — is *
 sudo cyclictest --smp -p99 -m -i 10 -h 200 -D 60s
 ```
 
-Run it twice — once on the box as shipped, once after applying the §6.4 tuning — and compare the **max** and the tail of the histogram. Representative results, reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.x (illustrative — your hardware and kernel decide the real numbers; the *shape* of the improvement is the point):
+Run it twice — once on the box as shipped, once after applying the §6.4 tuning — and compare the **max** and the tail of the histogram. Representative results, reference machine **Intel Xeon Gold 6326** (Ice Lake-SP), Linux 6.18 (illustrative — your hardware and kernel decide the real numbers; the *shape* of the improvement is the point):
 
 ```
                                    min      avg      max
@@ -114,7 +116,7 @@ cat /sys/devices/system/cpu/cpu0/topology/thread_siblings_list   # CPU0's SMT si
 lstopo --of console   # hwloc's ASCII topology map: cores, caches, NUMA, PCIe/NIC
 ```
 
-`lscpu --extended` is the one that saves you: it shows, per logical CPU, the physical `CORE`, `SOCKET`, and NUMA `NODE`. From it you learn, e.g., that CPUs `0` and `32` are the two SMT siblings of physical core 0 — so if you pin your hot thread to CPU 0, you must leave CPU 32 idle (or put only housekeeping on it) to avoid sibling contention (§6.2.2, Ch. 43). `lstopo` renders the whole hierarchy graphically, including **which NUMA node your NIC hangs off** (Ch. 16, 66) — critical, because you want your feed-handler thread and its NIC on the *same* node to avoid cross-socket latency. **Pin based on this map, never on raw CPU numbers.** A guess here silently places your hot thread on a sibling or a remote node and you spend a week chasing a "code" regression that was a pinning mistake.
+`lscpu --extended` is the one that saves you: it shows, per logical CPU, the physical `CORE`, `SOCKET`, and NUMA `NODE`. From it you learn, e.g., that CPUs `0` and `16` are the two SMT siblings of physical core 0 on our 16-core single-socket box (`0` and `32` on the dual-socket 2× 6326 of Ch. 16 — which is exactly why you read the map instead of assuming `+N`) — so if you pin your hot thread to CPU 0, you must leave CPU 16 idle (or put only housekeeping on it) to avoid sibling contention (§6.2.2, Ch. 43). `lstopo` renders the whole hierarchy graphically, including **which NUMA node your NIC hangs off** (Ch. 16, 66) — critical, because you want your feed-handler thread and its NIC on the *same* node to avoid cross-socket latency. **Pin based on this map, never on raw CPU numbers.** A guess here silently places your hot thread on a sibling or a remote node and you spend a week chasing a "code" regression that was a pinning mistake.
 
 ### 6.4.3 Building a quiet machine; selectively disabling mitigations on isolated boxes
 
@@ -124,7 +126,7 @@ With firmware set and topology known, the OS-level knobs that build a quiet core
 - **Idle:** cap C-states via cmdline `intel_idle.max_cstate=1 processor.max_cstate=1` (as Appendix C.2), at runtime via PM QoS (hold `/dev/cpu_dma_latency` open with value 0 — what `tuned latency-performance` does), or per-core via the `cpuidle` sysfs (`cpuN/cpuidle/stateM/disable`) / a busy-poll design (Ch. 41, 46). `idle=poll` is a different beast: it replaces the idle loop with a spin (making the `max_cstate` caps moot), burns power, and with SMT on keeps an "idle" sibling issuing instructions on the hot thread's core (Ch. 43) — the kernel documents it as not recommended.
 - **Core isolation:** `isolcpus=`, `nohz_full=`, `rcu_nocbs=` on the hot cores remove them from the scheduler's general pool, stop the periodic timer tick, and offload RCU callbacks — the core runs *your* thread and almost nothing else (Ch. 45).
 - **Interrupts:** stop `irqbalance` and **steer IRQs off** the hot cores (`/proc/irq/*/smp_affinity`), so no device interrupt lands on your hot thread (Ch. 42).
-- **Huge pages / THP:** disable *transparent* huge pages (their background compaction is a jitter source) and use *explicit* huge pages instead to cut TLB misses (Ch. 15).
+- **Huge pages / THP:** disable *transparent* huge pages (their fault-time compaction and background collapse are jitter sources) and use *explicit* huge pages instead to cut TLB misses (Ch. 15).
 - **Memory:** `mlockall` to prevent paging (Ch. 23, 26); tune `vm.*` to keep the kernel off your back.
 - **Mitigations:** on a **carefully-justified, isolated, single-tenant** box, evaluate `mitigations=off` (or per-vuln flags) against its *measured* cost (§6.3) — and **document the security decision** (Ch. 72). Default to leaving them on; turning them off is a deliberate, measured, accountable choice, never a reflex.
 
@@ -215,4 +217,4 @@ A non-zero SMI rate on an isolated core — or `hwlat` reporting multi-µs gaps 
 
 ---
 
-*Next: Ch. 7 — The Memory Hierarchy & Caches, where Part II begins and we descend into the microarchitecture: why DRAM is ~200× an L1 hit, and how cache lines, associativity, and coherence shape every data structure you'll write.*
+*Next: Ch. 7 — The Memory Hierarchy & Caches, where Part II begins and we descend into the microarchitecture: why DRAM is ~55× an L1 hit (two orders of magnitude), and how cache lines, associativity, and coherence shape every data structure you'll write.*

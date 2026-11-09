@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native` (no fast-math), pinned, turbo off (illustrative; the *ratio* is the point):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native` (no fast-math), pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                        ns / op        notes
@@ -150,7 +150,7 @@ When bit-exact reproducibility matters — **deterministic replay** (Ch. 75, 76)
 
 ## 27.5 Verify the codegen: FP flags and instruction selection
 
-FP flags change *which instructions* the compiler emits, and that's verifiable. Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -march=x86-64-v3`).
+FP flags change *which instructions* the compiler emits, and that's verifiable. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -march=x86-64-v3`).
 
 **FMA contraction (`a*b+c`).** With `-ffp-contract=fast` (or `-ffast-math`), the compiler fuses to one `vfmadd`; with `-ffp-contract=off`, it emits separate `mul` then `add` (one extra rounding — a *different result*):
 

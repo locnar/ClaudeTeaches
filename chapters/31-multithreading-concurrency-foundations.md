@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, each thread pinned to its own core by the listing, turbo off (illustrative; the *curve shape* is the point). Both columns execute the identical `lock xadd` per operation — an earlier draft's sharded loop incremented a register and was folded by the compiler into one store, so its column measured thread start-up:
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, each thread pinned to its own core by the listing, turbo off (illustrative; the *curve shape* is the point). Both columns execute the identical `lock xadd` per operation — an earlier draft's sharded loop incremented a register and was folded by the compiler into one store, so its column measured thread start-up:
 
 ```
    M (cores)   shared atomic (one line)      sharded (per-thread padded line)

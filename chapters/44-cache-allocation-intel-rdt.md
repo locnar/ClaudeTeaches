@@ -46,6 +46,8 @@ The model to hold: **a CLOS is a lease on cache ways and bandwidth; you give the
 
 ## 44.3 Measure it: a noisy neighbor vs a partitioned cache
 
+*Toolchain and machine: Appendix L.3.*
+
 The effect to measure is **hot-path tail latency with and without a cache-thrashing neighbor, before and after partitioning.** Set up: the hot thread on an isolated core (Ch. 42) doing repeated lookups over a working set sized to fit L3 (an order book, Ch. 25); a "noisy neighbor" on another core streaming a large buffer (bigger than L3) to evict everything. Measure the hot path's latency distribution (HdrHistogram, Ch. 3) and its L3 miss rate (`perf`, Ch. 2) in three conditions. Representative shape (single-socket Xeon Gold 6326, Ice Lake-SP, 24 MiB L3 — 1.5 MiB/core × 16, 12-way, 2 MiB per way; figures pending real runs):
 
 | Condition | Hot-path L3 miss rate | p50 | p99.9 | Notes |

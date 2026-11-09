@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *ratio* is the point):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                           chained (unordered_map)    flat (open-addressing)

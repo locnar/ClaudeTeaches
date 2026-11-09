@@ -46,6 +46,8 @@ The mental model: **a sender pipeline is a hand-written state machine (Ch. 37) t
 
 ## 39.3 Measure it: sender pipeline overhead vs a hand-written state machine
 
+*Toolchain and machine: Appendix L.3.*
+
 The measurement that matters: **does a sender pipeline cost more than the hand-written equivalent** (a raw state machine — Ch. 37, or a raw function chain)? Build the same small pipeline (decode → transform → emit) three ways — hand-written inline, C++20 coroutine (Ch. 38), and a `std::execution` sender pipeline on an inline scheduler — and measure per-operation latency (Ch. 3, careful with dead-code elimination) and check for allocation. Representative (recent Clang/GCC with `stdexec`/library support, `-O2`; figures pending real runs):
 
 | Implementation | Per-op latency | Allocation | Notes |

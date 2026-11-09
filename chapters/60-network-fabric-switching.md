@@ -26,12 +26,12 @@ A switch moves a frame from an input port to an output port. *When* it starts fo
    CUT-THROUGH:         [read dest header] -> [start forwarding immediately, tail still arriving]
                         latency ≈ header time + fixed switching (independent of frame size)
    LAYER-1 (physical):  [electrical/optical cross-connect, no packet parsing]
-                        latency ≈ propagation only (sub-nanosecond to a few ns)
+                        latency ≈ propagation only (~4-5 ns port-to-port)
 ```
 
 - **Store-and-forward** — the switch receives the *entire* frame, verifies its CRC, then forwards. Latency includes **serialization of the whole frame** (a 1500-byte frame at 10 Gbps is ~1.2 µs just to clock in), so latency **grows with frame size** and the switch always adds that delay. Standard for enterprise switches; too slow and too variable for the hot path. Its one virtue: it drops corrupt frames (CRC checked before forwarding).
 - **Cut-through** — the switch reads only the destination in the header and *starts forwarding while the rest of the frame is still arriving*. Latency is ≈ the header read time + a fixed switching latency, **independent of frame size** — often tens to low-hundreds of nanoseconds. This is the HFT switch (Arista 7130/Metamux, Cisco Nexus low-latency, Exablaze/Cisco Nexus 3550, Metamako). The trade-off: it may forward a frame that later fails CRC (it started forwarding before seeing the tail), so a corrupt frame propagates one hop — acceptable when links are clean and latency is king.
-- **Layer-1 switches** — a *physical-layer* cross-connect (essentially a very fast, software-controlled patch panel / signal replicator) that forwards the electrical/optical signal with **no packet parsing at all**. Latency is sub-nanosecond to a few nanoseconds — effectively just propagation. Used for **fan-out and replication** (one input to many outputs, e.g. distributing a market-data feed or a tap to many consumers) and for the lowest-latency point-to-point paths. Products like Arista 7130 (Metamux/Metaconnect) and Exablaze/Cisco layer-1 devices. They don't "switch" in the routing sense; they cross-connect and replicate at line speed.
+- **Layer-1 switches** — a *physical-layer* cross-connect (essentially a very fast, software-controlled patch panel / signal replicator) that forwards the electrical/optical signal with **no packet parsing at all**. Latency is a few nanoseconds (~4–5 ns port-to-port on current products — less than the propagation delay of a metre of fibre) — effectively just propagation. Used for **fan-out and replication** (one input to many outputs, e.g. distributing a market-data feed or a tap to many consumers) and for the lowest-latency point-to-point paths. Products like Arista 7130 (Metamux/Metaconnect) and Exablaze/Cisco layer-1 devices. They don't "switch" in the routing sense; they cross-connect and replicate at line speed.
 
 Two more concepts:
 
@@ -41,6 +41,8 @@ Two more concepts:
 The mental model: **a switch is a latency component with a *distribution*, and the technology choice (store-and-forward vs cut-through vs layer-1) sets both its median and its behavior under a burst.** For the hot path you want cut-through (or layer-1 where you're just fanning out), the fewest hops, and consistent link speeds.
 
 ## 60.3 Measure it: per-hop and one-way latency with hardware timestamps
+
+*Toolchain and machine: Appendix L.3.*
 
 You cannot reason about the fabric from datasheets; you measure it, and measuring the *network* requires **hardware timestamps and synchronized clocks** (Ch. 58), because software timestamps are perturbed by the very host you're trying to exclude from the measurement.
 
@@ -62,7 +64,7 @@ The lessons: measure per-hop with hardware timestamps (software timing includes 
 ### 60.4.1 Choosing switching technology and minimizing hops
 
 - **Cut-through on the hot path.** For any switch on the tick-to-trade path, choose **cut-through** (Arista 7130/7150, Cisco Nexus low-latency, Exablaze) over store-and-forward — flat, frame-size-independent, sub-microsecond latency. The CRC-propagation trade-off (§60.2) is acceptable on clean colo links; monitor error counters to confirm the links are clean.
-- **Layer-1 for fan-out and replication.** Where you're *distributing* a signal (a market-data feed to multiple strategy hosts, a tap to multiple capture/analytics consumers — Ch. 75, or an order feed to redundant systems), use a **layer-1 replicator** (Arista 7130 Metamux/Metaconnect, Exablaze) — sub-nanosecond, no buffering, deterministic. This is how one feed reaches many consumers without a switching-latency penalty per consumer.
+- **Layer-1 for fan-out and replication.** Where you're *distributing* a signal (a market-data feed to multiple strategy hosts, a tap to multiple capture/analytics consumers — Ch. 75, or an order feed to redundant systems), use a **layer-1 replicator** (Arista 7130 Metamux/Metaconnect, Exablaze) — a few nanoseconds, no buffering, deterministic. This is how one feed reaches many consumers without a switching-latency penalty per consumer.
 - **Minimize hop count.** Every hop is a switch latency *and* a queuing point (§60.5). Lay out the path (and choose your colo cross-connects — Appendix K) to traverse the **fewest switches** between the exchange handoff and your NIC, and between your NIC and the order gateway. One cut-through hop beats three; a direct layer-1 cross-connect beats a switched path where topology allows.
 - **Consistent, high link speeds.** Keep link speeds uniform and high (25/100 G) along the path to minimize serialization delay (§60.2); a single slower segment reintroduces serialization latency. Match the exchange's handoff speed.
 

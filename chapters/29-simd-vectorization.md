@@ -84,7 +84,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz, AVX-512), GCC 13 with the per-row flags above, Linux 6.x, pinned, turbo off (illustrative; the strict row is the same source without `-ffast-math`, so the reduction must stay in order — Ch. 27). The kernel is `noinline` and each rep passes an asm barrier: an earlier draft let GCC 13 outer-loop-vectorize the *REPS* loop of an inlined, loop-invariant `dot`, so the strict build timed the same as the vector ones:
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz, AVX-512), GCC 13 with the per-row flags above, Linux 6.18, pinned, turbo off (illustrative; the strict row is the same source without `-ffast-math`, so the reduction must stay in order — Ch. 27). The kernel is `noinline` and each rep passes an asm barrier: an earlier draft let GCC 13 outer-loop-vectorize the *REPS* loop of an inlined, loop-invariant `dot`, so the strict build timed the same as the vector ones:
 
 ```
    build / width                                   ns / elem     speedup    note
@@ -140,7 +140,7 @@ Wider is *not* automatically better — the width choice is a measured trade aga
 
 ## 29.5 Verify the codegen: vector instruction selection
 
-Whether a loop vectorized — and to what width — is visible in the asm, and it's the verification that the technique fired. Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -O3`).
+Whether a loop vectorized — and to what width — is visible in the asm, and it's the verification that the technique fired. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O3`).
 
 **Scalar (didn't vectorize) vs packed.** A reduction without FP-reassociation permission stays scalar (`...ss`/`...sd`, one lane); with `-ffast-math`/`-march` it goes packed (`...ps`/`...pd`, N lanes):
 

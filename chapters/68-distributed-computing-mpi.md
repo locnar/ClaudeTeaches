@@ -61,7 +61,7 @@ The fundamental MPI cost is the **message** — its latency (small messages, dom
    # Compare transports: TCP vs RDMA/InfiniBand (§68.4.2) — and rank placement (§68.4.3).
 ```
 
-Representative results — a cluster with InfiniBand/RoCE (RDMA — Ch. 63) vs TCP/Ethernet (illustrative; the *transport gap* and *small-message floor* are the point):
+Representative results (toolchain and machine: Appendix L.3) — a cluster with InfiniBand/RoCE (RDMA — Ch. 63) vs TCP/Ethernet (illustrative; the *transport gap* and *small-message floor* are the point):
 
 ```
    point-to-point latency:           RDMA/InfiniBand (Ch.63)    TCP/Ethernet (Ch.47)

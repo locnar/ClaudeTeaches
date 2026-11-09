@@ -10,7 +10,7 @@
 
 ## 13.1 Why it matters: a mispredict costs ~15–20 cycles
 
-A modern core does not wait to find out which way a branch goes. By the time a conditional jump is *resolved* — its condition actually computed — the front-end (Ch. 12) has already fetched, decoded, and the back-end (Ch. 11) has already *speculatively executed* dozens of instructions down the path it *predicted*. When the prediction is right, this is free: the branch costs essentially nothing and the pipeline never hiccups. When it's wrong, the core must **squash** all that speculative work, flush the pipeline, resteer the front-end to the correct address, and refill — a penalty of roughly **15–20 cycles** on current Intel/AMD cores. At ~3 GHz that's ~5–7 ns of pure waste, *per mispredict*, doing nothing.
+A modern core does not wait to find out which way a branch goes. By the time a conditional jump is *resolved* — its condition actually computed — the front-end (Ch. 12) has already fetched, decoded, and the back-end (Ch. 11) has already *speculatively executed* dozens of instructions down the path it *predicted*. When the prediction is right, this is free: the branch costs essentially nothing and the pipeline never hiccups. When it's wrong, the core must **squash** all that speculative work, flush the pipeline, resteer the front-end to the correct address, and refill — a penalty of roughly **15–20 cycles** on current Intel/AMD cores. At the 2.9 GHz reference clock (Appendix L.3) that's ~5–7 ns of pure waste, *per mispredict*, doing nothing.
 
 Put that in tick-to-trade terms. A feed handler's hot loop might branch on every message: *is this an add or a cancel? is the price inside the book? is this our symbol? did the sequence number gap?* If one of those branches is **data-dependent and unpredictable** — its direction effectively random with respect to the predictor's history — you pay the full mispredict penalty on a large fraction of messages. A single 50/50 unpredictable branch in the hot path can add several nanoseconds to *every* tick, and worse, it adds them to the **tail**: mispredicts cluster on exactly the unusual inputs (the wide market, the burst, the malformed packet) that you most need to handle fast. The whole book's north-star — p99/p99.9 (Ch. 1) — is precisely where bad speculation bites.
 
@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 with the flags above, Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
+Profile both with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 with the flags above, Linux 6.18, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                                  sorted (predictable)   shuffled (unpredictable)
@@ -186,7 +186,7 @@ The unifying idea: an unpredictable branch is a bet the predictor keeps losing. 
 
 ## 13.5 Verify the codegen: `cmov` vs branch emission
 
-Whether the compiler emits a *branch* or a *`cmov`* for `(a > b) ? a : b` is the central codegen question of this chapter, and it's verifiable. All snippets below are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
+Whether the compiler emits a *branch* or a *`cmov`* for `(a > b) ? a : b` is the central codegen question of this chapter, and it's verifiable. All snippets below are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
 **A select the compiler makes branchless.** `std::max` of two ints compiles to a compare and a `cmov` — no branch, nothing to mispredict:
 

@@ -110,7 +110,7 @@ int main() {
 }
 ```
 
-Profile with `perf stat`, and use the **uncore/offcore** counters that distinguish local from remote DRAM (names vary by platform; on Ice Lake-SP look for `mem_load_l3_miss_retired.remote_dram` vs `...local_dram`, or the uncore `UNC_M_*`/offcore-response remote events). Representative results — reference machine **2× Xeon Gold 6326** (dual-socket Ice Lake-SP), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x with `kernel.numa_balancing=0` (so the kernel cannot migrate the chased pages mid-run) and the buffer on 2 MB pages as the listing requests (check `AnonHugePages` in `/proc/<pid>/smaps_rollup`), pinned, turbo off (illustrative; the *ratio* is the point):
+Profile with `perf stat`, and use the **uncore/offcore** counters that distinguish local from remote DRAM (names vary by platform; on Ice Lake-SP look for `mem_load_l3_miss_retired.remote_dram` vs `...local_dram`, or the uncore `UNC_M_*`/offcore-response remote events). Representative results — reference machine **2× Xeon Gold 6326** (dual-socket Ice Lake-SP), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18 with `kernel.numa_balancing=0` (so the kernel cannot migrate the chased pages mid-run) and the buffer on 2 MB pages as the listing requests (check `AnonHugePages` in `/proc/<pid>/smaps_rollup`), pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                                           local (CPU0→mem0)   remote (CPU1→mem0)

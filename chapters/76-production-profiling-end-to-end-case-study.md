@@ -40,22 +40,24 @@ The two halves and how they connect:
 
 ## 76.3 Measure it: a full tick-to-trade walkthrough
 
-The capstone measurement: decompose the **end-to-end tick-to-trade latency distribution** into stage contributions, naming the chapter that governs each stage. Measured wire-to-wire with PTP hardware timestamps (Ch. 58) at the boundaries, as a distribution (HdrHistogram, Ch. 3), under a market-open microburst (Ch. 53). Representative budget for a *software* (kernel-bypass) path on a tuned box (Xeon Gold 6326, isolated/`nohz_full`, Solarflare/Onload; figures pending real runs):
+*Toolchain and machine: Appendix L.3.*
+
+The capstone measurement: decompose the **end-to-end tick-to-trade latency distribution** into stage contributions, naming the chapter that governs each stage. Measured wire-to-wire with PTP hardware timestamps (Ch. 58) at the boundaries, as a distribution (HdrHistogram, Ch. 3), under a market-open microburst (Ch. 53). Representative budget for a *software* (kernel-bypass) path on a tuned box (Xeon Gold 6326, isolated/`nohz_full`, Solarflare ef_vi — explicit bypass, Ch. 62; toolchain and machine: Appendix L.3; figures pending real runs):
 
 | Stage | What happens | Governing chapters | ~p50 | ~p99.9 (the tail that matters) |
 |---|---|---|---:|---:|
-| **Wire → NIC → userspace** | packet arrives, kernel-bypass RX (poll-mode) | Ch. 55, 62 | ~250 ns | ~400 ns |
+| **Wire → NIC → userspace** | packet arrives, kernel-bypass RX (poll-mode) | Ch. 55, 62 | ~700 ns | ~1 µs |
 | **Decode / normalize** | parse ITCH/SBE off the wire, zero-copy | Ch. 53, 28 | ~80 ns | ~200 ns |
 | **Book update / strategy** | update order book, run decision (state machine) | Ch. 25, 74, 8–13 | ~150 ns | ~500 ns |
 | **Pre-trade risk** | limit/position/kill-switch check | Ch. 72, 74 | ~40 ns | ~120 ns |
-| **Order encode → TX** | build order message, kernel-bypass TX | Ch. 53, 62 | ~120 ns | ~250 ns |
-| **End-to-end tick-to-trade** | wire-in to wire-out | (all) | **~640 ns** | **~1.5 µs** |
+| **Order encode → TX** | build order message, kernel-bypass TX | Ch. 53, 62 | ~500 ns | ~700 ns |
+| **End-to-end tick-to-trade** | wire-in to wire-out | (all) | **~1.5 µs** | **~2.5 µs** |
 
 Read it the way the whole book taught:
 
-- **The p99.9 is ~2.3× the p50, and the tail is not spread evenly** — the strategy/book stage contributes most of the tail (cache misses on a cold book entry — Ch. 7/25, a branch mispredict on a rare path — Ch. 13, the occasional NUMA-remote access — Ch. 16). The *mean* would point you at the NIC stage (the largest p50); the *tail* points you at the strategy stage. **Optimize the tail's dominant stage, not the mean's** (Ch. 1) — this single reframing is the book's thesis, made concrete.
-- **Each stage's improvement traces to a Part.** The NIC stage is ~250 ns because of kernel bypass (Ch. 62) instead of ~5-15 µs kernel stack (Ch. 47) — Part VIII. The decode is ~80 ns because it's zero-copy and branch-light (Ch. 53, 28) — Parts V/VIII. The book update's *tail* is controlled by cache-aware layout (Ch. 8/25) — Part II/IV. The whole budget is the book, composed.
-- **The next order of magnitude is hardware** (Ch. 69): an FPGA inline path collapses this ~640 ns software budget to ~tens-to-low-hundreds of ns wire-to-wire *with a flat tail* (p99 ≈ p50) — Part XI's latency tier. The decomposition tells you *which* stages to move to fabric (decode + risk + encode — the deterministic, simple, hot ones) and which to keep in software (the complex, evolving strategy — Ch. 69.4.3).
+- **The p99.9 is ~1.7× the p50, and the tail is not spread evenly** — the strategy/book stage contributes most of the tail (cache misses on a cold book entry — Ch. 7/25, a branch mispredict on a rare path — Ch. 13, the occasional NUMA-remote access — Ch. 16). The *mean* would point you at the NIC stage (the largest p50); the *tail* points you at the strategy stage. **Optimize the tail's dominant stage, not the mean's** (Ch. 1) — this single reframing is the book's thesis, made concrete.
+- **Each stage's improvement traces to a Part.** The NIC stage is ~700 ns because of kernel bypass (Ch. 62) instead of ~5-15 µs kernel stack (Ch. 47) — Part VIII. The decode is ~80 ns because it's zero-copy and branch-light (Ch. 53, 28) — Parts V/VIII. The book update's *tail* is controlled by cache-aware layout (Ch. 8/25) — Part II/IV. The whole budget is the book, composed.
+- **The next order of magnitude is hardware** (Ch. 69): an FPGA inline path collapses this ~1.5 µs software budget to ~tens-to-low-hundreds of ns wire-to-wire *with a flat tail* (p99 ≈ p50) — Part XI's latency tier. The decomposition tells you *which* stages to move to fabric (decode + risk + encode — the deterministic, simple, hot ones) and which to keep in software (the complex, evolving strategy — Ch. 69.4.3).
 - **Decompose continuously, not once.** The per-stage histograms run in production (§76.2) so the decomposition is *live* — you see the tail shift stage-to-stage as conditions change, and you catch a regression as a stage's p99.9 creeping up *before* it becomes an incident.
 
 This table *is* the book: every stage is a Part, every number is a technique, and the discipline of decomposing the *distribution* into stages and attacking the *tail's* dominant stage is everything Chapter 1 promised.

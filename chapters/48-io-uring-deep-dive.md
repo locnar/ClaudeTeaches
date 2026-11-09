@@ -77,7 +77,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off, high-rate small-message I/O (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off, high-rate small-message I/O (illustrative):
 
 ```
    model                          syscalls / I/O    p50 latency    throughput     note

@@ -20,7 +20,7 @@ That single fact reorganizes everything:
 - **The mean is irrelevant; the tail is the product.** If your tick-to-trade path is 1.2 µs on average but spikes to 40 µs once every ten thousand events, you will lose the races that happen during those spikes — and those races cluster exactly when the market is most active and most profitable. The 40 µs *is* your latency, for business purposes.
 - **Determinism beats peak speed.** A path that is reliably 2.0 µs ± 0.1 µs is worth more than one that is 1.5 µs on a good day and 25 µs on a bad one. You can build a strategy around a number you can trust. You cannot build one around a number that occasionally betrays you.
 
-Carl Cook's CppCon talk title puts it exactly: *"When a Microsecond Is an Eternity."* At a tick-to-trade budget measured in hundreds of nanoseconds to low single-digit microseconds, a single L3 cache miss (≈ 50–80 ns; Ch. 7), one minor page fault, one unlucky branch mispredict (Ch. 13), or one trip through the kernel's scheduler can be the difference between the fill and the miss. The rest of this book is a catalogue of where those nanoseconds hide. This chapter is about the discipline that makes the hunt worth doing: **always reason about the distribution, never the mean.**
+Carl Cook's CppCon talk title puts it exactly: *"When a Microsecond Is an Eternity."* At a tick-to-trade budget measured in hundreds of nanoseconds to low single-digit microseconds, a single L3 miss to DRAM (≈ 80–100 ns; Ch. 7), one minor page fault, one unlucky branch mispredict (Ch. 13), or one trip through the kernel's scheduler can be the difference between the fill and the miss. The rest of this book is a catalogue of where those nanoseconds hide. This chapter is about the discipline that makes the hunt worth doing: **always reason about the distribution, never the mean.**
 
 A note on scope and honesty up front. Not every system in a trading firm lives on the tick-to-trade hot path. Risk calculations, backtesting, and research (Ch. 67–68) are throughput problems and should be engineered as such. The latency mindset is a tool you apply where the payoff is a deadline — applying it everywhere is its own kind of waste. Knowing *which* tier a piece of code lives in is the first design decision, and we return to it in §1.4.2.
 
@@ -87,12 +87,12 @@ The discipline is to treat that end-to-end number as a **budget** and to allocat
 
 | Stage | Rough budget | Book chapters |
 |---|---:|---|
-| Wire → NIC → host memory (DMA, kernel bypass) | 250–800 ns | Ch. 55, 62, 66 |
+| Wire → NIC → host memory (DMA, kernel bypass) | 0.5–1 µs | Ch. 55, 62, 66 |
 | Feed decode / book update | 100–400 ns | Ch. 25, 53 |
 | Strategy / signal logic | 50–300 ns | Ch. 8–14, 18–21 |
 | Risk checks & order encode | 50–200 ns | Ch. 27, 53, 72 |
-| Host memory → NIC → wire | 250–800 ns | Ch. 55, 62, 66 |
-| **Tick-to-trade total** | **≈ 0.7–2.5 µs** | the whole book |
+| Host memory → NIC → wire | 0.4–0.8 µs | Ch. 55, 62, 66 |
+| **Tick-to-trade total** | **≈ 1–3 µs** | the whole book |
 
 Two lessons live in this table. First, **no single stage dominates** — there is no one trick that wins; competitiveness is the sum of dozens of disciplined decisions, which is why the book has 76 chapters. Second, the I/O stages (wire in, wire out) are a large fraction of the budget, which is why kernel bypass, NIC offloads, and even FPGAs (Ch. 62, 69) exist: at some point the only way to cut the budget is to stop touching the general-purpose CPU and OS at all. A pure-software path that does everything right still spends most of its time getting bytes on and off the wire.
 
@@ -241,10 +241,10 @@ The tail is not random — every spike has a mechanism. The rest of the book is,
 | Jitter source | Typical signature | Where it's fought |
 |---|---|---|
 | Cache / TLB miss | tens of ns to ~100 ns spikes | Ch. 7–10, 15 |
-| Branch mispredict | ~10–20 ns, data-dependent | Ch. 13–14 |
-| Page fault (minor/major) | µs (minor) to ms (major) | Ch. 23, 26 |
+| Branch mispredict | ~15–20 cycles (≈ 5–7 ns), data-dependent | Ch. 13–14 |
+| Page fault (minor/major) | ~0.3–1 µs (minor) to ms (major) | Ch. 23, 26 |
 | Heap allocation (`malloc`) | µs spikes, unbounded tail | Ch. 23–24 |
-| System call | ~hundreds of ns + pollution | Ch. 41, 47 |
+| System call | ~50–400 ns (mitigation-dependent) + cache/TLB pollution | Ch. 41, 47 |
 | Context switch / preemption | µs–ms; correlated with load | Ch. 41, 42, 43, 45 |
 | Interrupt (IRQ) | µs; correlated with NIC traffic | Ch. 42, 55 |
 | Lock contention | unbounded; load-dependent | Ch. 31–34 |

@@ -42,6 +42,8 @@ The mental model: **A/B fills most holes for free; retransmission fills small re
 
 ## 54.3 Measure it: gap rates, recovery latency, and hot-path impact
 
+*Toolchain and machine: Appendix L.3.*
+
 Three quantities: **how often gaps happen**, **how long recovery takes**, and — the one that matters most — **whether recovery touches the hot path.**
 
 - **Gap rate, especially at the open (Ch. 53).** Instrument the feed handler to count gaps (per line and post-arbitration) and correlate with load. Representative pattern (figures pending real runs): steady-state post-A/B gap rate near zero (A/B fills almost everything); at market open (microburst), the raw per-line drop rate spikes (NIC ring overflow, fabric queuing — Ch. 53/60) and the *post-arbitration* gap rate rises when both lines drop together. The open is where recovery is exercised — measure it there, not in the quiet mid-session.

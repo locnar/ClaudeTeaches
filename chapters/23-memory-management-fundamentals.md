@@ -33,12 +33,12 @@ This chapter is the foundation for that discipline. It separates the two costs t
      └─ IF the heap must grow OR the page is untouched:
           kernel involvement:  mmap/brk syscall (grow the mapping)       ~hundreds of ns
           PAGE FAULT on first touch of each new page (Ch. 15):
-             minor fault:  map a zero page / existing page        ~hundreds of ns - ~1 µs
+             minor fault:  map a zero page / existing page        ~0.3-1 µs (4 KiB, zeroing included)
              major fault:  bring page from disk/swap              ~ms  (catastrophic; avoid entirely)
 ```
 
 - **Lazy allocation / first-touch (Ch. 15).** `malloc`/`mmap` return *virtual* address space; the kernel doesn't back it with physical memory until you **first touch** (write) each page — at which point a **page fault** traps into the kernel to wire up a physical frame. So the cost of "allocating" a big buffer is split: a little at `malloc`, then a fault *per page* spread across your first writes. A buffer you allocated but never warmed will fault *on the hot path* the first time you use it (§23.4.2).
-- **Minor vs major faults.** A **minor fault** (map a fresh zero page or an already-resident page) is ~hundreds of ns to ~1 µs. A **major fault** (page must be read from disk/swap) is *milliseconds* — catastrophic; on a latency box you `mlockall` and disable swap (Ch. 26, Appendix C) so majors never happen.
+- **Minor vs major faults.** A **minor fault** (map a fresh zero page or an already-resident page) is ~0.3–1 µs for a 4 KiB page, zeroing included (several µs for a zeroed 2 MiB THP page). A **major fault** (page must be read from disk/swap) is *milliseconds* — catastrophic; on a latency box you `mlockall` and disable swap (Ch. 26, Appendix C) so majors never happen.
 - **Allocator internals (glibc `malloc`/tcmalloc/jemalloc).** Modern allocators use **per-thread caches/arenas** (so the common path is lock-free or low-contention), **size classes** (rounding requests to bucket sizes — internal fragmentation), and free-list management. They're good at the common case but still have tails (cache miss in the allocator's own metadata, arena lock contention under multi-threaded load, slow-path refill from the OS). `free` has cost too (coalescing, returning to the right list). The allocator is fast *on average* and unpredictable *at the tail* — exactly wrong for the hot path.
 
 **Why `delete`/`free` also matters.** Deallocation isn't free either (coalescing, lock, cache effects), and a hot path that allocates *and frees* per message pays both. The steady-state-zero-allocation rule covers both directions.
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.x (THP = `madvise`, so `fresh` runs on 4 KiB pages), pinned, turbo off (illustrative; the *shape of the distribution* is the point; every sample includes two ~20 ns `clock_gettime` reads):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.18 (THP = `madvise`, so `fresh` runs on 4 KiB pages), pinned, turbo off (illustrative; the *shape of the distribution* is the point; every sample includes two ~20 ns `clock_gettime` reads):
 
 ```
                            p50        p99        p99.9       max          minor-faults (perf)

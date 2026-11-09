@@ -54,6 +54,8 @@ The whole game is keeping hot-path work at **boundary 1, terminal**, and using *
 
 ## 70.3 Measure it: DPU-offload latency vs host path
 
+*Toolchain and machine: Appendix L.3.*
+
 The measurement that matters is **does the DPU shorten or lengthen the path** for the work you're considering — and it must be **end-to-end wire-to-wire** (Ch. 58's PTP hardware timestamps), never "time on the DPU" in isolation, for the same reason GPU kernel-only timing lies (Ch. 67).
 
 Three scenarios, representative numbers (Bluen-class ARM DPU + 100 GbE, wire-to-wire via PTP-timestamped tap; FPGA-DPU row for contrast; reference figures pending real runs):
@@ -61,7 +63,7 @@ Three scenarios, representative numbers (Bluen-class ARM DPU + 100 GbE, wire-to-
 | Path | What happens | Wire-to-wire latency | Verdict |
 |---|---|---|---|
 | **Host kernel stack** (Ch. 47) | wire → NIC → PCIe → kernel → app | ~5-15 µs | baseline |
-| **Host kernel bypass** (Ch. 62) | wire → NIC → PCIe → userspace poll | ~1-2 µs | the software floor |
+| **Host kernel bypass** (Ch. 62) | wire → NIC → PCIe → userspace poll | ~0.5-1 µs | the software floor |
 | **DPU ARM-core inline filter, terminal** (drop/redirect on NIC) | wire → DPU ARM → reply/drop, host never sees it | **~2-5 µs** | wins *vs host* for the dropped/redirected packets (host work eliminated), but ARM software is slower than host bypass per-packet |
 | **DPU ARM-core, then forward to host** | wire → DPU ARM → **PCIe** → host app | ~6-16 µs | **added a hop** — slower than host bypass; the DPU is a detour |
 | **FPGA-DPU inline pipeline, terminal** (Ch. 69) | wire → fabric → emit, wire-to-wire | **~tens-to-low-hundreds of ns** | the latency tier — same as Ch. 69 |

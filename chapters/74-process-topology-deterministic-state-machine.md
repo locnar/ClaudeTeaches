@@ -84,7 +84,7 @@ If fault containment is the goal, the metric is **how fast you recover** — and
 | **Warm** (Ch. 46) | pre-touch pages, prime caches/TLB/predictors, shadow traffic | the warm-up you skip = a cold-start tail on the first real tick |
 | **Live** | back to full-speed correct decisions | — |
 
-Representative shape (figures pending real runs): a crash-only process whose state lives in shared memory and that warms before going live can recover in **~hundreds of ms to low seconds**; the *dangerous* number is the **tail** — a restart that has to rebuild state from a long journal, or that skips warming and takes cold-start stalls on its first ticks (Ch. 46), can be far slower exactly when conditions are worst.
+Representative shape (toolchain and machine: Appendix L.3; figures pending real runs): a crash-only process whose state lives in shared memory and that warms before going live can recover in **~hundreds of ms to low seconds**; the *dangerous* number is the **tail** — a restart that has to rebuild state from a long journal, or that skips warming and takes cold-start stalls on its first ticks (Ch. 46), can be far slower exactly when conditions are worst.
 
 The lessons:
 

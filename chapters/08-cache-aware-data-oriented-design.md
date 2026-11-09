@@ -2,7 +2,7 @@
 
 # Chapter 8 — Cache-Aware & Data-Oriented Design
 
-> **Prerequisites:** Ch. 7 (*The Memory Hierarchy & Caches*) — you know cache lines are 64 bytes, that you pay per line, that sequential access is prefetcher-friendly, and that DRAM is ~80× an L1 hit. Ch. 1–6 methodology throughout (distributions, PMU, honest benchmarks, a quiet box).
+> **Prerequisites:** Ch. 7 (*The Memory Hierarchy & Caches*) — you know cache lines are 64 bytes, that you pay per line, that sequential access is prefetcher-friendly, and that DRAM is ~55× an L1 hit — two orders of magnitude. Ch. 1–6 methodology throughout (distributions, PMU, honest benchmarks, a quiet box).
 >
 > **Leads into:** Ch. 9 (object layout, alignment & padding) makes the *individual struct* as small and line-friendly as this chapter makes the *collection*; Ch. 10 (software prefetch) is the fallback when layout alone can't help. The order-book case study (Ch. 25) is the full-scale version of §8.3–§8.4 here. SoA is also the enabling layout for SIMD (Ch. 29).
 
@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-The program times only the 20 steady-state sweeps — allocation and first-touch faulting of the 256 MiB book (8× heavier for AoS, and 60-85% of a whole-process `time` on this listing) stay outside the clock (Appendix L). Profile each with `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses` (Ch. 2; whole-process counts — the setup is in them, so read the *ratios*). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, Linux 6.x, pinned, turbo off (illustrative; reproduce on your box):
+The program times only the 20 steady-state sweeps — allocation and first-touch faulting of the 256 MiB book (8× heavier for AoS, and 60-85% of a whole-process `time` on this listing) stay outside the clock (Appendix L). Profile each with `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses` (Ch. 2; whole-process counts — the setup is in them, so read the *ratios*). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, Linux 6.18, pinned, turbo off (illustrative; reproduce on your box):
 
 ```
                           AoS (stride 64)        SoA (dense 8B)

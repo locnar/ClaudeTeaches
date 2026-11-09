@@ -8,23 +8,23 @@
 
 ---
 
-## 7.1 Why it matters: DRAM is ~200× an L1 hit
+## 7.1 Why it matters: DRAM is ~55× an L1 hit, ~250 cycles away
 
-Here is the single fact that governs more hot-path performance than any other in this book: **the CPU has not waited the same number of cycles for memory in over twenty years.** A core that retires several instructions per nanosecond must, on a last-level cache miss, *stop and wait roughly 50–100 nanoseconds* for DRAM to answer — on the order of **200 instructions' worth of idle time**, per miss. The arithmetic in your hot path is essentially free; **where your data lives, and in what order you touch it, is the program.**
+Here is the single fact that governs more hot-path performance than any other in this book: **the CPU has not waited the same number of cycles for memory in over twenty years.** A core that retires several instructions per nanosecond must, on a last-level cache miss, *stop and wait roughly 80–100 nanoseconds* for DRAM to answer — some **250 cycles, several hundred instructions' worth of idle time**, per miss. The arithmetic in your hot path is essentially free; **where your data lives, and in what order you touch it, is the program.**
 
-Order-of-magnitude costs on a modern x86-64 server core (reference machine **Intel Xeon Gold 6326**, Ice Lake-SP; these are the numbers Appendix E develops and that you should commit to memory):
+Order-of-magnitude costs on a modern x86-64 server core (reference machine **Intel Xeon Gold 6326**, Ice Lake-SP, turbo off at 2.9 GHz — Appendix L.3; these are the numbers Appendix E develops and that you should commit to memory):
 
-| Access | Latency | ≈ cycles @ ~3 GHz | Relative to L1 |
+| Access | Latency | ≈ cycles @ 2.9 GHz | Relative to L1 |
 |---|---:|---:|---:|
-| L1 data cache hit | ~1.5 ns (4–5 cyc) | 4–5 | 1× |
-| L2 hit | ~4 ns | ~14 | ~4× |
-| L3 (LLC) hit | ~15–20 ns | ~45–60 | ~15× |
-| Local DRAM (LLC miss) | ~80 ns | ~240 | ~80× |
-| NUMA-remote DRAM | ~130–140 ns | ~400 | ~130× |
+| L1 data cache hit | ~1.7 ns | 5 | 1× |
+| L2 hit | ~5 ns | ~14 | ~3× |
+| L3 (LLC) hit | ~15–25 ns | ~45–70 | ~10–14× |
+| Local DRAM (LLC miss) | ~80–100 ns | ~230–290 | ~50–60× |
+| NUMA-remote DRAM | ~130–180 ns | ~380–520 | ~80–100× |
 
-(Some texts quote the L1-to-DRAM ratio as "~200×" using a faster core clock and a 1-cycle L1; the exact multiplier shifts with frequency, but the lesson — **two-plus orders of magnitude** — does not.)
+(The multiplier moves with the clock and the L1 design: ~55× on this 5-cycle-L1 Ice Lake core, ~80–100× on a 4-cycle-L1 Skylake-class core at ~1 ns per hit, and some texts quote "~200×" from a faster clock and a 1-cycle L1 — but the lesson, **two orders of magnitude**, does not.)
 
-This is why Ch. 1's tail is so often a *memory* tail. A hot path that hits L1 every time runs at a tight, predictable ~1 ns/access; the same code that occasionally misses to DRAM gets an 80 ns spike *per miss*, and a handful of those land you in the p99.9. Ch. 2's `perf_demo` already showed it: identical instructions, ~50× the cycles, purely from access pattern. The order book (Ch. 25) lives or dies here — a book update that touches one cache-resident price level is a different animal from one that chases pointers across DRAM.
+This is why Ch. 1's tail is so often a *memory* tail. A hot path that hits L1 every time runs at a tight, predictable ~1.7 ns/access; the same code that occasionally misses to DRAM gets an ~80–100 ns spike *per miss*, and a handful of those land you in the p99.9. Ch. 2's `perf_demo` already showed it: identical instructions, ~50× the cycles, purely from access pattern. The order book (Ch. 25) lives or dies here — a book update that touches one cache-resident price level is a different animal from one that chases pointers across DRAM.
 
 The good news is that the hardware is *trying to help you*: caches keep recently-used data close, and prefetchers guess what you'll need next. The bad news is that they help only if your **access pattern cooperates** — sequential, predictable, locally-clustered. The entire craft of cache-aware programming (Ch. 7–10) is arranging your data and your accesses so the hardware's bets pay off. This chapter builds the mental model; the next three spend it.
 
@@ -142,7 +142,7 @@ int main() {
 }
 ```
 
-Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base: 48 KiB L1d, 1.25 MiB L2 per core, 24 MiB L3 shared across the socket — 1.5 MiB slice per core), GCC 13 `-O2 -std=c++20`, Linux 6.x, 4 KiB pages, pinned, turbo off (illustrative; the *plateaus and cliffs* are the point, not the exact ns):
+Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base: 48 KiB L1d, 1.25 MiB L2 per core, 24 MiB L3 shared across the socket — 1.5 MiB slice per core), GCC 13 `-O2 -std=c++20`, Linux 6.18, 4 KiB pages, pinned, turbo off (illustrative; the *plateaus and cliffs* are the point, not the exact ns):
 
 ```
        4 KiB     1.72 ns/access     ┐

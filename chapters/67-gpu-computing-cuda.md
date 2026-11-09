@@ -69,7 +69,7 @@ __global__ void saxpy(float* y, const float* x, float a, int n) {
 //   compare to a CPU SIMD version (Ch.29) for the same work.
 ```
 
-Representative results — a mid-range GPU over PCIe Gen4 x16, vector op (illustrative; the *gap* is the point):
+Representative results (toolchain and machine: Appendix L.3) — a mid-range GPU over PCIe Gen4 x16, vector op (illustrative; the *gap* is the point):
 
 ```
    problem size      CPU (SIMD, Ch.29)   GPU kernel-only   GPU end-to-end (w/ transfer)   verdict

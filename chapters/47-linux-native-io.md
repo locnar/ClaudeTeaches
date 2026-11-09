@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), loopback TCP, pinned, `TCP_NODELAY` on, turbo off (illustrative; **real NIC RTTs are higher** — Ch. 55 — loopback isolates the *software* cost):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), loopback TCP, pinned, `TCP_NODELAY` on, turbo off (illustrative; **real NIC RTTs are higher** — Ch. 55 — loopback isolates the *software* cost):
 
 ```
    model (loopback TCP echo round-trip)     p50        p99        notes
@@ -101,7 +101,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), l
    epoll (blocking epoll_wait)              ~5 µs      ~20 µs     epoll_wait sleeps → switch + cold (Ch.41,46)
    epoll + busy-poll (net.core.busy_poll)   ~3 µs      ~7 µs      busy-poll avoids the block/wake switch
    (preview) io_uring polled (Ch.48)        ~2.5 µs    ~5 µs      fewer syscalls
-   (preview) kernel bypass (Ch.62)          ~1 µs      ~2 µs      no kernel stack — the real HFT path
+   (preview) kernel bypass (Ch.62)          ~0.5-1 µs  ~1-2 µs    no kernel stack — the real HFT path
 
    even busy-polled, the kernel stack is MICROSECONDS — the floor is bypass (Ch.62).
 ```

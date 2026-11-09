@@ -101,7 +101,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 *The hardware reality under all the code — caches, pipelines, branches, the TLB, NUMA, and time.*
 
 ### [7. The Memory Hierarchy & Caches](07-memory-hierarchy-and-caches.md)
-- 7.1 Why it matters: DRAM is ~200× an L1 hit
+- 7.1 Why it matters: DRAM is ~55× an L1 hit, ~250 cycles away
 - 7.2 Mental model
   - 7.2.1 Latencies by level (L1/L2/L3/DRAM)
   - 7.2.2 Cache lines, sets, and associativity

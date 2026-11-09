@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++23 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *shape* is the point). The mode is resolved to a template parameter *before* the clock starts: an earlier draft had `strcmp(mode, …)` inside the per-message loop, and its two PLT calls per message (~1-2 ns, biased by match order) swamped the ~0.3 ns being compared — the harness measured itself (Ch. 3, Appendix L).
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++23 -march=native`, Linux 6.18, pinned, turbo off (illustrative; the *shape* is the point). The mode is resolved to a template parameter *before* the clock starts: an earlier draft had `strcmp(mode, …)` inside the per-message loop, and its two PLT calls per message (~1-2 ns, biased by match order) swamped the ~0.3 ns being compared — the harness measured itself (Ch. 3, Appendix L).
 
 ```
                           bad/1000 = 0       bad/1000 = 1        bad/1000 = 50
@@ -171,7 +171,7 @@ When you don't need runtime type identification, remove its cost:
 
 ## 20.5 Verify the codegen: unwinding tables and landing pads
 
-The costs of §20.2 are visible in the binary, and the verification settles where they live. Snippets are **verified** Clang/GCC output (`--target=x86_64-linux-gnu -O2`).
+The costs of §20.2 are visible in the binary, and the verification settles where they live. Snippets are **verified** Clang 18.1 / GCC 14.2 output (Appendix L.3; `--target=x86_64-linux-gnu -O2`).
 
 **The happy path with a `try` is genuinely free.** A non-throwing call inside `try` emits the *same* straight-line code as without it — the error handling is off to the side:
 

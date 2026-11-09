@@ -39,6 +39,8 @@ The unifying idea: **zero-copy makes the NIC DMA to/from the *final* buffer, eli
 
 ## 49.3 Measure it: copy cost, the zero-copy threshold, and RX latency
 
+*Toolchain and machine: Appendix L.3.*
+
 Three measurements: what the copy *costs*, where zero-copy TX *pays off* (it has fixed overhead), and the zero-copy RX benefit.
 
 - **The copy cost.** Measure send/receive latency and CPU for a copying path vs zero-copy at increasing message sizes, and watch memory bandwidth (Ch. 16) and cache misses (Ch. 7) from the copy. Representative (Linux, modern NIC; figures pending real runs): for large messages the copy is a real fraction of the send/receive time and a large fraction of the CPU and memory bandwidth; for small messages it's negligible.

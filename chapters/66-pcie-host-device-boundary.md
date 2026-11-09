@@ -73,7 +73,7 @@ Measure the two PCIe costs that govern offload: the **device-register round-trip
    #   or a NIC/DPDK bulk transfer), compute GB/s; compare to the link's theoretical (lanes × gen).
 ```
 
-Representative results — Gen4 x16 device, illustrative (the *asymmetry* and the *round-trip floor* are the point):
+Representative results (toolchain and machine: Appendix L.3) — Gen4 x16 device, illustrative (the *asymmetry* and the *round-trip floor* are the point):
 
 ```
    operation                              latency / bandwidth      note

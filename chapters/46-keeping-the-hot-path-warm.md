@@ -110,7 +110,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; 1.25 MiB L2, 24 MiB L3), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, 4 KiB pages (THP = `madvise`), isolated core, turbo off (illustrative; convert cycles→ns at 2.9 GHz). The working set is 2 MiB on ~500 pages — larger than L2, so "warm" means L3-resident with the TLB and predictors trained; an earlier draft's index formula repeated every 16 steps and touched 16 lines of *one* L1 set, so its "512 KB working set" was really 1 KiB:
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; 1.25 MiB L2, 24 MiB L3), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, 4 KiB pages (THP = `madvise`), isolated core, turbo off (illustrative; convert cycles→ns at 2.9 GHz). The working set is 2 MiB on ~500 pages — larger than L2, so "warm" means L3-resident with the TLB and predictors trained; an earlier draft's index formula repeated every 16 steps and touched 16 lines of *one* L1 set, so its "512 KB working set" was really 1 KiB:
 
 ```
    WARM (tight loop):          p50 ~3,000 cycles   (~1.0 µs)   256 L3 hits, overlapped; TLB warm — the number you benchmarked
@@ -136,7 +136,7 @@ The primary warming technique: continuously run synthetic messages through the *
 
 The setup-time warming that complements continuous shadow traffic — done at startup and maintained:
 
-- **Pre-fault and `mlock` all pages (Ch. 23, 26).** Touch every page of the hot path's memory (order book, pools, ring buffers, code) at startup so the first access never **page-faults** (Ch. 23 — a major fault is milliseconds, a minor fault hundreds of ns), and `mlock`/`mlockall` so they stay resident (no swap/reclaim). This warms the *page tables and residency*; shadow traffic keeps the *cache* warm. Both are needed: pre-faulting stops the fault, shadow traffic stops the cache miss.
+- **Pre-fault and `mlock` all pages (Ch. 23, 26).** Touch every page of the hot path's memory (order book, pools, ring buffers, code) at startup so the first access never **page-faults** (Ch. 23 — a major fault is milliseconds, a minor fault ~0.3–1 µs), and `mlock`/`mlockall` so they stay resident (no swap/reclaim). This warms the *page tables and residency*; shadow traffic keeps the *cache* warm. Both are needed: pre-faulting stops the fault, shadow traffic stops the cache miss.
 - **Pre-establish connections (Ch. 51).** Open the TCP/session connections to venues *before* trading starts (and keep them alive), so the first real order doesn't pay connection setup (handshake — multiple RTTs) or run into TCP **slow-start** with a cold congestion window. Send periodic keep-alive / heartbeat traffic (Ch. 51, FIX heartbeats — Ch. 53) to keep the window grown and the path warm — connection-level shadow traffic. (Some venues' connections idle-timeout or reset `cwnd`; heartbeats prevent that.)
 - **Warm the NIC RX/TX path (Ch. 55, 62).** The first packet after idle can be slower (driver/NIC state cold, interrupt coalescing, busy-poll not primed). Continuous shadow RX/TX (or the venue's heartbeat/snapshot traffic) keeps the NIC path warm; kernel-bypass busy-polling (Ch. 62) keeps the RX ring actively polled.
 - **Pre-touch / pre-compute lookup state.** Pre-populate caches of derived data (symbol→info maps — Ch. 25, tick tables — Ch. 27) and touch them so they're resident; pre-warm any lazily-initialized state so the first real message doesn't trigger initialization on the hot path.

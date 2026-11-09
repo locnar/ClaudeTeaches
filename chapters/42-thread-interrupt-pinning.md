@@ -91,7 +91,7 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x (`isolcpus`/`nohz_full` as stated per row, THP = `madvise`), turbo off (illustrative; the *tail* is the point — convert cycles to ns at 2.9 GHz). The sample buffer is faulted in *before* the loop: an earlier draft `reserve()`d it, and the first-touch page fault every 1,024 samples put a ~1-2 µs spike in every row's tail no matter how quiet the core was.
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18 (`isolcpus`/`nohz_full` as stated per row, THP = `madvise`), turbo off (illustrative; the *tail* is the point — convert cycles to ns at 2.9 GHz). The sample buffer is faulted in *before* the loop: an earlier draft `reserve()`d it, and the first-touch page fault every 1,024 samples put a ~1-2 µs spike in every row's tail no matter how quiet the core was.
 
 ```
                                    p50    p99    p99.9    p99.99    max        what's in the tail

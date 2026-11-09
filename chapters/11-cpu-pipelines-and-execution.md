@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile each with `perf stat -e cycles,instructions,fp_arith_inst_retired.scalar_double,L1-dcache-load-misses,branch-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; FP add 4-cycle latency, 2/cycle throughput), GCC 13 `-O2 -march=native -fno-tree-vectorize -fno-tree-slp-vectorize` (no fast-math), Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
+Profile each with `perf stat -e cycles,instructions,fp_arith_inst_retired.scalar_double,L1-dcache-load-misses,branch-misses`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; FP add 4-cycle latency, 2/cycle throughput), GCC 13 `-O2 -march=native -fno-tree-vectorize -fno-tree-slp-vectorize` (no fast-math), Linux 6.18, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
                               chains=1 (serial)      chains=4 (split)
@@ -189,7 +189,7 @@ This is also exactly what auto-vectorization does *for* you when allowed (§11.5
 
 ## 11.5 Verify the codegen: latency vs throughput of the hot loop
 
-The asm makes the latency-vs-throughput distinction undeniable. All three snippets below are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
+The asm makes the latency-vs-throughput distinction undeniable. All three snippets below are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
 **Single accumulator, `-O2` (no `-ffast-math`).** The compiler *does* unroll the loop ×8 — but every add targets the same `xmm0`, so it's one serial chain eight links deep:
 

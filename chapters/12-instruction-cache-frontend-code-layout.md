@@ -154,7 +154,7 @@ frontend_retired.l1i_miss,frontend_retired.itlb_miss,\
 L1-dcache-load-misses,branch-misses  ./frontend
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP: 32 KiB L1i, ~2.25 K-µop DSB, 16 B/cycle legacy fetch), GCC 13 `-O2 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *direction* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP: 32 KiB L1i, ~2.25 K-µop DSB, 16 B/cycle legacy fetch), GCC 13 `-O2 -march=native`, Linux 6.18, pinned, turbo off (illustrative; the *direction* is the point):
 
 ```
                                    lean (1 handler, table)   bloat (256 specialised copies)
@@ -229,6 +229,8 @@ These belong to Ch. 22 (the build toolchain) in full; the point *here* is that f
 ---
 
 ## 12.5 Verify the codegen: hot/cold section placement
+
+*Toolchain and machine: Appendix L.3.*
 
 The hot/cold split of §12.4.2 is visible — and verifiable — in the asm and the section table. Take the dispatcher pattern:
 

@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *distribution shape* is the point; ns per alloc+free pair, each sample a burst of 64):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.18, pinned, turbo off (illustrative; the *distribution shape* is the point; ns per alloc+free pair, each sample a burst of 64):
 
 ```
               p50        p99        p99.9       max          notes

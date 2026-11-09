@@ -69,7 +69,7 @@ for FLAGS in \
 done
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, AVX-512), single hot TU, pinned, turbo off (illustrative; the *shape* is the point):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, AVX-512), single hot TU, pinned, turbo off (illustrative; the *shape* is the point):
 
 ```
 flags                              .text     numeric kernel   dispatch loop

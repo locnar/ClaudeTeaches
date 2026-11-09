@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, pinned, turbo off (illustrative). Two harness points (Appendix L): the mode is a template parameter chosen *before* the clock starts (an earlier draft had `strcmp(mode, …)` inside the loop — two PLT calls per element against a 1-cycle instruction), and the test words have their first set bit at a *random* position (an earlier draft's `rng() | 1` put it at bit 0 every time, so the "scan" never looped and all three modes measured the same add):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, pinned, turbo off (illustrative). Two harness points (Appendix L): the mode is a template parameter chosen *before* the clock starts (an earlier draft had `strcmp(mode, …)` inside the loop — two PLT calls per element against a 1-cycle instruction), and the test words have their first set bit at a *random* position (an earlier draft's `rng() | 1` put it at bit 0 every time, so the "scan" never looped and all three modes measured the same add):
 
 ```
                     ns / op       notes
@@ -138,7 +138,7 @@ Packing multiple values into one word and extracting them — pervasive in wire 
 
 ## 28.5 Verify the codegen: intrinsic emission
 
-The whole premise is "one instruction," so verify the compiler emitted it. Snippets are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3` for BMI/BMI2).
+The whole premise is "one instruction," so verify the compiler emitted it. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3` for BMI/BMI2).
 
 **`std::countr_zero` → `tzcnt`, `std::popcount` → `popcnt`.** The standard `<bit>` functions compile to the single instruction (with `-march` enabling the ISA):
 

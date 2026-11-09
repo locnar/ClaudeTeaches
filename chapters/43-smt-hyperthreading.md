@@ -58,9 +58,9 @@ The decisive measurement: run your latency-sensitive thread on a logical CPU and
 ```cpp
 // smt.cpp — measure a thread's performance with its SMT sibling idle vs busy.
 // Build: g++ -O2 -std=c++20 -march=native smt.cpp -o smt -pthread
-// Find sibling of CPU 2:  cat /sys/devices/system/cpu/cpu2/topology/thread_siblings_list  (e.g. "2,34")
-// Run:  taskset -c 2 ./smt            (sibling 34 idle)
-//       (in another shell) taskset -c 34 ./smt_load    (sibling busy — a port/cache hog)
+// Find sibling of CPU 2:  cat /sys/devices/system/cpu/cpu2/topology/thread_siblings_list  (e.g. "2,18" on this 16-core box)
+// Run:  taskset -c 2 ./smt            (sibling 18 idle)
+//       (in another shell) taskset -c 18 ./smt_load    (sibling busy — a port/cache hog)
 //       then re-run  taskset -c 2 ./smt   and compare
 #include <cstdio>
 #include <cstdint>
@@ -91,11 +91,11 @@ int main() {
 // smt_load: a sibling hog — tight loop hammering execution ports + cache (compile similarly).
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, HT enabled), pinned, turbo off (illustrative; *interference varies hugely by workload*):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16C/32T with HT enabled — CPU 2's sibling is CPU 18), pinned, turbo off (illustrative; *interference varies hugely by workload*):
 
 ```
    hot thread on CPU 2:                p50 cycles   p99    p99.9    note
-   sibling (CPU 34) IDLE (halted)      ~10,000      ~10,400 ~11,000  near full-core resources
+   sibling (CPU 18) IDLE (halted)      ~10,000      ~10,400 ~11,000  near full-core resources
    sibling BUSY (port/cache hog)       ~17,000      ~22,000 ~35,000  ~1.7-2x slower + jittier — SMT steals!
    HT OFF (whole core, BIOS)           ~9,200       ~9,400  ~9,600   fastest + flattest (no sibling wake-ups)
 
@@ -110,9 +110,9 @@ Read it: with the **sibling busy**, the hot thread runs **~1.7-2× slower and ma
 
 You can't manage siblings without knowing *which* logical CPUs are siblings — pinning (Ch. 42) requires it:
 
-- **Read the sibling map.** `/sys/devices/system/cpu/cpuN/topology/thread_siblings_list` gives the logical CPUs sharing CPU N's physical core (e.g. `2,34` means logical 2 and 34 are siblings). `lscpu -e` (CORE column) and `lstopo` (hwloc) show the full logical→physical→core→socket mapping. `/proc/cpuinfo` (`core id` + `physical id`) is the raw data.
+- **Read the sibling map.** `/sys/devices/system/cpu/cpuN/topology/thread_siblings_list` gives the logical CPUs sharing CPU N's physical core (e.g. `2,18` means logical 2 and 18 are siblings — the single-socket 6326's `n`/`n+16` layout; the dual-socket Ch. 16 box reads `2,34`). `lscpu -e` (CORE column) and `lstopo` (hwloc) show the full logical→physical→core→socket mapping. `/proc/cpuinfo` (`core id` + `physical id`) is the raw data.
 - **The typical layout.** On a dual-socket / N-physical-core box with HT, logical CPUs are often numbered so that `0..N-1` are the first thread of each core and `N..2N-1` are the siblings (so CPU 2's sibling is `2+N`) — but **don't assume the numbering**; read `thread_siblings_list` (vendors/BIOS differ, and it's bitten many people who hard-coded `+N`).
-- **Pin with siblings in mind (Ch. 42).** When you pin the hot thread to logical CPU 2, you now *know* its sibling is (e.g.) 34 — so you can leave 34 idle, or put only light housekeeping there, or ensure the OS/IRQs don't use it. Pinning correctly *requires* the sibling map.
+- **Pin with siblings in mind (Ch. 42).** When you pin the hot thread to logical CPU 2, you now *know* its sibling is (e.g.) 18 — so you can leave 18 idle, or put only light housekeeping there, or ensure the OS/IRQs don't use it. Pinning correctly *requires* the sibling map.
 - **Discover at startup, don't hard-code.** A robust app reads the topology at startup (parse `thread_siblings_list`, or use hwloc) and pins accordingly — so it works across machines with different layouts. Hard-coded CPU numbers break when you change hardware or BIOS settings.
 
 ### 43.4.2 Leaving the sibling idle vs housekeeping-only
@@ -138,7 +138,7 @@ The strategic decision — and it's genuinely a *decision*, measured per workloa
 
 - **Two hot threads on sibling logical CPUs (the cardinal SMT sin).** Pinning two latency-critical threads to logical CPUs that are *siblings* (same physical core) makes them **fight** for the same ports/cache/predictors — each runs ~half-speed and jittery (§43.3), the worst of both worlds. **Always pin hot threads to separate *physical* cores** (check `thread_siblings_list` — §43.4.1); two hot threads on one core is a self-inflicted ~2× latency hit.
 - **Pinning the hot thread but ignoring the sibling.** A pinned hot thread whose sibling runs *anything* busy (another app, a kernel thread, an IRQ, a housekeeping task the OS placed there) suffers the §43.3 interference. Pinning the hot logical CPU is only half — **manage the sibling** (idle + isolated, or light-only — §43.4.2).
-- **Assuming the sibling numbering (`+N`).** Hard-coding "CPU 2's sibling is CPU 34" without reading `thread_siblings_list` breaks on different hardware/BIOS layouts → you "idle" the wrong CPU and leave the real sibling busy. **Read the topology** (§43.4.1).
+- **Assuming the sibling numbering (`+N`).** Hard-coding "CPU 2's sibling is CPU 18" without reading `thread_siblings_list` breaks on different hardware/BIOS layouts → you "idle" the wrong CPU and leave the real sibling busy. **Read the topology** (§43.4.1).
 - **Leaving HT on for a pure latency box.** If the box does *only* latency-critical work (no throughput jobs that benefit from HT), leaving HT on just risks the OS (or an IRQ) waking a sibling and re-partitioning the core (§43.2) — **turn HT off** for the cleanest latency. HT's benefit requires throughput work to exploit it.
 - **IRQs on the sibling (Ch. 42).** Routing IRQs off the hot logical CPU but *not* its sibling still pollutes the shared core's caches. Route IRQs off **both** logical CPUs of every hot physical core.
 - **Forgetting AVX downclocking is core-shared (Ch. 29).** Heavy AVX-512 on the sibling can *downclock the whole physical core* (Ch. 29), slowing the hot thread even if the sibling isn't otherwise contending. Another reason to keep the sibling quiet (or AVX-free) on a hot core.

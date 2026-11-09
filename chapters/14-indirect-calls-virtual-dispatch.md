@@ -69,6 +69,8 @@ The upshot: **`std::function` in a hot loop is an anti-pattern** (§14.6). It's 
 
 ## 14.3 Measure it: virtual vs CRTP dispatch microbenchmark
 
+*Toolchain and machine: Appendix L.3.*
+
 The experiment compares four dispatch mechanisms doing the *same* trivial work, over the same data, varying only *how the call is dispatched*: (a) a `virtual` call with a **monomorphic** call site, (b) a `virtual` call with a **megamorphic** site (types interleaved unpredictably), (c) `std::function`, and (d) **CRTP** / static dispatch (no indirection). The trivial work makes the *dispatch cost* — not the callee's work — the variable.
 
 ```cpp
@@ -222,7 +224,7 @@ The decision: dispatching to genuinely different *code* over a closed set → pr
 
 ## 14.5 Verify the codegen: devirtualized call sites
 
-Whether a call is a direct/inlined call or an opaque indirect jump is visible in the asm, and it's the verification that the technique fired. Snippets below are **verified** Clang output (`--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
+Whether a call is a direct/inlined call or an opaque indirect jump is visible in the asm, and it's the verification that the technique fired. Snippets below are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
 
 **An indirect virtual call (not devirtualized).** Through a base pointer the compiler can't know the type — it loads the vptr, indexes the vtable, and does an indirect `call`:
 

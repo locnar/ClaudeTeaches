@@ -125,7 +125,7 @@ int main() {
 }
 ```
 
-Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -march=native`, Linux 6.x, 4 KiB pages, pinned, turbo off (illustrative; the **shape** — a steep knee, then a plateau — is the lesson, not the exact ns):
+Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -march=native`, Linux 6.18, 4 KiB pages, pinned, turbo off (illustrative; the **shape** — a steep knee, then a plateau — is the lesson, not the exact ns):
 
 ```
 PD=   0   110.0 ns/elem     <- baseline: every gather is a latency-exposed DRAM miss + page walk
@@ -172,6 +172,8 @@ The rules from §10.2.3, operationally: write **full cache lines, sequentially**
 ---
 
 ## 10.5 Verify the codegen: prefetch and `movnt` emission
+
+*Toolchain and machine: Appendix L.3.*
 
 Prefetch and non-temporal stores are **hints** the compiler can drop or alter, and the *locality hint* must map to the instruction you intended — so verify with the asm (Ch. 4).
 

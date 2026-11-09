@@ -38,9 +38,11 @@ The mental model: **TCP has a dozen throughput/fairness heuristics, and on a ded
 
 ## 52.3 Measure it: the delayed-ACK stall, cold start, and offload latency
 
+*Toolchain and machine: Appendix L.3.*
+
 - **The Nagle/delayed-ACK stall.** Run Ch. 51's `nodelay.cpp` (a request-response order flow: small request, small reply) over a TCP socket *without* `TCP_NODELAY`, and measure the latency distribution (Ch. 3). The stall needs **write-write-read** — a request emitted as two small writes while the previous one is unacknowledged (Ch. 51 §51.3): with that framing *every* exchange hits the delayed-ACK timer (**~40 ms**); a one-write-per-request client never does. Real order-entry code sits in between — a header/body split here, a batched pair of orders there — which is why the production symptom is **bimodal**: a fine median with a 40 ms mode in the tail. Enable `TCP_NODELAY` and the 40 ms mode vanishes:
 
-| Config (loopback, Linux 6.x) | p50 | p99.9 | Notes |
+| Config (loopback, Linux 6.18) | p50 | p99.9 | Notes |
 |---|---|---|---|
 | **Default (Nagle on), request = 2 writes** | ~**40 ms** | ~45 ms | Nagle holds the body; receiver delays the ACK — every exchange |
 | **Default (Nagle on), request = 1 write** | ~25 µs | ~200 µs | nothing unacked when the write happens: no stall (the misleading quick test) |
