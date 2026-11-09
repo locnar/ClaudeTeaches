@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 §1.4.2 (the hot/warm/cold latency tiers, qualitative until now), Ch. 3 and Appendix L (the benchmarking discipline this chapter extends across languages), Ch. 18 §18.4.2 (the `constexpr` tick-size table rebuilt here in Rust and Zig), Ch. 79–82 (asm, Rust, the boundary and the managed runtimes — the evidence this chapter decides with), Ch. 94 (the capture every kernel here replays).
 >
-> **Leads into:** Part XIII (the operations Part, where the control-plane, telemetry and research components live in whatever language this chapter's table puts them in), Ch. 100 (the capstone's tick-to-trade budget, now with a language axis), Appendix B (the summary and tier table that point back here), Appendix L.5 (the cross-language protocol in checklist form).
+> **Leads into:** Part XIII (the operations Part, where the control-plane, telemetry and research components live in whatever language this chapter's table puts them in), Ch. 101 (the capstone's tick-to-trade budget, now with a language axis), Appendix B (the summary and tier table that point back here), Appendix L.5 (the cross-language protocol in checklist form).
 
 ---
 
@@ -71,7 +71,7 @@ The harness is one script per toolchain that: pins (`taskset -c N`), builds with
 | **Hot — wire to wire** | 100s of ns; p99.9 in low µs | C++, C, Rust, Zig (6.8–8.2 ns; cold 1.2–2.3× — Ch. 53 warming) | AOT, layout and allocation under full control, no runtime disturbance; the Part II–IV code is expressible | feed handler, book, strategy, risk gate, order encoder, NIC/bypass driver glue (Ch. 60, 28, 70) |
 | **Hot, inherited** | same | Java/.NET **only** garbage-free + warmed + collector proven idle (Ch. 82 §82.3's GCFREE line: 2 ns decode, p99.9 8–15 µs, zero collections) | every allocation is a tail; warm-up must cover every live branch; the JIT may still deoptimise | LMAX/Chronicle/Aeron-style engines; the cost is the discipline, measured continuously |
 | **Warm — 10s of µs, ms tolerated** | 10–100 µs; occasional ms | Go, OCaml (12–19 ns kernels; GC STW ≤ 1 ms if allocation is controlled), Java/.NET with concurrent collectors (ZGC/C4/server GC: sub-ms stops, ms-scale allocation-stall tails) | the runtime's worst disturbance fits the tail budget | OMS, position/risk aggregation, market-data fan-out to internal consumers, gateways to slow venues, hot-reload control (Ch. 88) |
-| **Cold — seconds** | anything | Python, Julia, any JVM/.NET service, shells | productivity wins; the hot code it needs is *bound in*, not rewritten (Ch. 94 §94.4.6) | research, backtesting, reporting, monitoring dashboards (Ch. 98–99), deployment, UIs |
+| **Cold — seconds** | anything | Python, Julia, any JVM/.NET service, shells | productivity wins; the hot code it needs is *bound in*, not rewritten (Ch. 94 §94.4.6) | research, backtesting, reporting, monitoring dashboards (Ch. 99–100), deployment, UIs |
 | **Below software** | 10s–100s of ns, deterministic | HDL / HLS (Ch. 77), P4/DOCA (Ch. 78) | no instruction stream at all | inline feed handling, pre-trade risk in fabric, timestamping |
 
 Two rules apply across rows. **A component is placed by its measured worst case on this protocol, not its best** — Java's 12.7 ns steady state qualifies it for nothing; its 4.5 ms p99.99 under allocation disqualifies it from the hot tier and its 8–15 µs garbage-free p99.9 re-qualifies it, conditionally. **The boundary between tiers is Ch. 81's waist or Ch. 57's shared memory, never a per-message call into a runtime**; the research tier runs the production decoder through the waist (Ch. 94 §94.4.6), and the hot tier publishes to the warm tier through a shared ring (Ch. 57), so that no tier's disturbance crosses into the one below it.
@@ -135,7 +135,7 @@ The system that results has a C++ (or Rust) hot tier — one process per role (C
 
 ### 83.4.6 Parity testing across languages
 
-The digest in §83.3 is the cross-language regression test: every implementation of the kernel, in every language, must fold every message's result to the same 64 bits over the same capture, and a CI job runs them all (the research tier's Python included — through the waist and, for the pure-Python reference, in a nightly job). Ch. 100 §100.4.1's golden-capture gate extends naturally: the C++ core's golden output is also the golden output for the Java risk service's view of the book, and a divergence is a bug in one of them *or* a layout drift at the waist (Ch. 81 §81.4.1), found before the trade.
+The digest in §83.3 is the cross-language regression test: every implementation of the kernel, in every language, must fold every message's result to the same 64 bits over the same capture, and a CI job runs them all (the research tier's Python included — through the waist and, for the pure-Python reference, in a nightly job). Ch. 101 §101.4.1's golden-capture gate extends naturally: the C++ core's golden output is also the golden output for the Java risk service's view of the book, and a divergence is a bug in one of them *or* a layout drift at the waist (Ch. 81 §81.4.1), found before the trade.
 
 ### 83.4.7 Three worked placements
 
@@ -190,7 +190,7 @@ Checklist for a cross-language decision:
 - Appendix H — the C++23/26 features whose absence or presence appears in the scorecard's language-mechanics rows.
 - Carl Cook, *When a Microsecond Is an Eternity* (CppCon 2017) — a trading firm's hot-path C++ practice, the implicit standard §83.4.2's hot tier is measured against.
 - Jane Street, *Why OCaml?* and the OCaml performance posts on the Jane Street tech blog; LMAX, *The LMAX Architecture* (Fowler) — two firms' first-hand accounts of a non-C++ language at or near the hot tier.
-- Ch. 94 §94.4.6–§94.4.7 (the research seam and columnar storage: where the cold tier meets the hot one), Ch. 100 (the capstone budget).
+- Ch. 94 §94.4.6–§94.4.7 (the research seam and columnar storage: where the cold tier meets the hot one), Ch. 101 (the capstone budget).
 
 ---
 

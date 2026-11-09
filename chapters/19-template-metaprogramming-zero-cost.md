@@ -365,7 +365,7 @@ No wrapper, no load/store through a stack slot, no extra `mov`: a trivially-copy
 
 - **For any "zero-cost" abstraction on the hot path, diff its asm against the hand-written equivalent.** Same instructions = the claim holds. A stray `call`, extra moves, or a missing inline = it leaked.
 - **Confirm the dispatch inlined** (no `call [rax]`, the §19.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 9).
-- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 100).
+- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 101).
 
 **Four dispatch mechanisms, one instruction.** The §19.4.6 `read<uint64_t>` under tag dispatch, `if constexpr`, SFINAE and concepts (`clang++ -O2 -std=c++23 -march=x86-64-v3`; GCC 13.3 identical bar `endbr64`):
 

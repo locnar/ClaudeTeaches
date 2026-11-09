@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 74 (PCIe — the host-device round-trip that keeps GPUs off the order path), Ch. 32 (SIMD — GPUs are SIMD taken to the extreme), Ch. 1 (latency vs throughput — GPUs are a throughput device), Ch. 26 (pinned memory — for fast transfers), Ch. 7–8 (memory/data layout — GPU memory coalescing).
 >
-> **Leads into:** Ch. 76 (MPI — multi-GPU/multi-node scaling), Ch. 78 (SmartNICs/GPUDirect), Ch. 100 (the batch-tier analytics in the case study). Part XI's first concrete accelerator — the throughput offload for the *off-hot-path* compute (risk, pricing, ML), explicitly *not* the tick-to-trade path.
+> **Leads into:** Ch. 76 (MPI — multi-GPU/multi-node scaling), Ch. 78 (SmartNICs/GPUDirect), Ch. 101 (the batch-tier analytics in the case study). Part XI's first concrete accelerator — the throughput offload for the *off-hot-path* compute (risk, pricing, ML), explicitly *not* the tick-to-trade path.
 
 ---
 

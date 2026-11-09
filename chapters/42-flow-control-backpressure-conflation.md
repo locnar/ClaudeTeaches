@@ -28,7 +28,7 @@ When a producer finds the channel full (or a consumer finds itself behind) there
    DROP-NEWEST         push fails; the new message is lost     the backlog (old)      the LATEST state is what is lost          nothing on a trading path (the
                        (+ counter)                                                                                              newest is the valuable one)
    DROP-OLDEST         overwrite the oldest unread slot        the newest N           consumer may read a torn/overwritten      logs, flight recorders, telemetry
-   (OVERWRITE)         (+ lapped counter)                                             slot unless versioned (Ch. 38)            samples — Ch. 84, 94, 97
+   (OVERWRITE)         (+ lapped counter)                                             slot unless versioned (Ch. 38)            samples — Ch. 84, 94, 98
    CONFLATE            per-key latest-value slot replaces the  latest state per key,  intermediate updates; trade prints and    strategy, risk, GUI — anything
                        queue; dirty set says which changed     bounded staleness      increments must NOT be conflated          that consumes STATE
    SAMPLE / DEGRADE    deliver every k-th, or a coarser form   a bounded rate         resolution                                GUIs, monitoring, non-critical
@@ -40,7 +40,7 @@ Mapped onto the consumers of Ch. 89's topology:
 - **Order gateway (acks, fills, rejects, the venue's session stream):** *nothing may be dropped and nothing may be late.* Policy: size the channel for the worst burst the venue can emit (sequence-numbered, so a gap is detectable — Ch. 91) and BLOCK the *venue* via TCP flow control before the ring, never the strategy. If this channel is ever full, that is a Ch. 90 safe-state trigger, not a policy choice.
 - **Strategy and risk (market data, positions, limits):** *latest state wins.* Policy: CONFLATE per instrument; the only queued items are the ones that are not state (trade prints feeding a volume accumulator are *increments* — they go through a lossless queue or are summed in the slot, never last-write-wins).
 - **Journal / capture (Ch. 94):** *every record, order preserved, arbitrarily late is fine.* Policy: a large ring and an off-path writer; if it fills, DROP-and-flag at the capture layer (Ch. 94 §94.5) and raise the flag as an incident — but never BLOCK the producer.
-- **Logger, flight recorder, telemetry samples (Ch. 84, 86, 97):** *recent is more valuable than complete.* Policy: DROP-OLDEST with a version word so the reader detects a torn slot; the overwritten count is itself a metric.
+- **Logger, flight recorder, telemetry samples (Ch. 84, 86, 98):** *recent is more valuable than complete.* Policy: DROP-OLDEST with a version word so the reader detects a torn slot; the overwritten count is itself a metric.
 - **GUI / monitoring:** *a view, at human rate.* Policy: SAMPLE or CONFLATE at a coarse interval, off the hot box entirely.
 
 The rule the table encodes: **a producer on the tick-to-trade path never blocks and never allocates for a slow consumer; the consumer's class decides whether the channel keeps everything (and is sized for it), keeps the newest, or keeps the latest-per-key.**
@@ -193,7 +193,7 @@ struct ModeMachine {
 
 ### 42.4.5 Retiring the scattered policies
 
-With the taxonomy in place, the earlier chapters' statements become references: Ch. 37 §37.4.1's "the caller handles fullness" is §42.4.1's `OnFull`; Ch. 40 §40.4.1's wrap-gate backpressure is the BLOCK row, legitimate only off the tick-to-trade path; Ch. 84 §84.6's and Ch. 97's overwrite rings are DROP-OLDEST with a version word; Ch. 94 §94.5's drop-and-flag is DROP-NEWEST-as-incident on a `Fail` channel; Ch. 61 §61.4.3's stale-instrument pause is the `Pulled` mode driven from the feed side; Ch. 89 §89.4.4's safe-state is the terminal mode. Each of those sections now carries a one-line pointer here rather than its own restatement.
+With the taxonomy in place, the earlier chapters' statements become references: Ch. 37 §37.4.1's "the caller handles fullness" is §42.4.1's `OnFull`; Ch. 40 §40.4.1's wrap-gate backpressure is the BLOCK row, legitimate only off the tick-to-trade path; Ch. 84 §84.6's and Ch. 98's overwrite rings are DROP-OLDEST with a version word; Ch. 94 §94.5's drop-and-flag is DROP-NEWEST-as-incident on a `Fail` channel; Ch. 61 §61.4.3's stale-instrument pause is the `Pulled` mode driven from the feed side; Ch. 89 §89.4.4's safe-state is the terminal mode. Each of those sections now carries a one-line pointer here rather than its own restatement.
 
 ## 42.5 Pitfalls & anti-patterns
 

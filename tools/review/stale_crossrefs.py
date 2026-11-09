@@ -54,6 +54,7 @@ STEPS = [
     ("insert", 24),  # Ch. 25 build-systems-build-time-hygiene-hermetic-toolchains
     ("insert", 91),  # Ch. 92 order-entry-gateway-session-layer
     ("insert", 94),  # Ch. 95 line-rate-capture-timing-faithful-replay
+    ("insert", 96),  # Ch. 97 failover-without-split-brain-leases-fencing
     # INSERT_STEPS_END
 ]
 def old2new(n):
