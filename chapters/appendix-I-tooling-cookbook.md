@@ -19,6 +19,7 @@ The everyday profiling loop (Ch. 2).
    perf record --call-graph lbr ./app           # LBR-based stacks (Intel; cheapest, shallow)
    perf report                                  # interactive TUI; --stdio for text
    perf report -n --sort=overhead,symbol        # ranked hot symbols with sample counts
+   perf record -F 999 -g -- ./app && perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg   # on-CPU flame graph (Ch. 2 §2.4.2); add -e LLC-load-misses for a miss flame graph
    perf annotate <symbol>                        # per-instruction hotness over the asm (Ch. 4)
    perf list                                    # all events this CPU/kernel exposes
 ```
@@ -33,7 +34,7 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 11, 12).
    perf stat -e cycles,instructions,cache-references,cache-misses,branches,branch-misses ./app   # the classic six (Ch. 2, 13)
    perf stat -e L1-dcache-load-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses ./app   # cache/TLB breakdown (Ch. 7, 15)
    perf stat --topdown ./app                    # top-down: retiring / bad-spec / front-end / back-end
-   perf stat --td-level 2 ./app                 # drill one level deeper (needs recent perf + CPU)
+   perf stat --topdown --td-level 2 ./app       # level-2 breakdown — Sapphire Rapids+ only (Ice Lake-SP: level 1); --td-level does nothing without --topdown; pre-Ice Lake needs -a
    toplev.py -l3 --no-desc ./app                # pmu-tools top-down, level 3 (Andi Kleen's toplev)
 ```
 
@@ -72,15 +73,21 @@ Low-overhead, production-safe tracing (Ch. 61) — attach to a running process w
 
 ```
    bpftrace -e 'tracepoint:syscalls:sys_enter_* { @[probe] = count(); }'   # which syscalls, by count
-   bpftrace -e 'kprobe:finish_task_switch { @[comm] = count(); }'          # context switches by task (Ch. 41)
-   # off-CPU / run-queue latency (scheduler wait) as a histogram, in ns:
-   bpftrace -e 'tracepoint:sched:sched_wakeup { @qt[args->pid] = nsecs }
-                tracepoint:sched:sched_switch /@qt[args->next_pid]/ {
-                  @runq_ns = hist(nsecs - @qt[args->next_pid]); delete(@qt[args->next_pid]); }'
+   bpftrace -e 'tracepoint:sched:sched_switch { @[args.next_comm] = count(); }'   # context switches by task (Ch. 41); kprobe:finish_task_switch* also works (GCC emits it as finish_task_switch.isra.0)
+   # run-queue latency (scheduler wait) as a histogram, in ns. Stamp on wakeup AND on
+   # preemption-while-runnable (prev_state == TASK_RUNNING) — on an isolated core the
+   # preemptions by ksoftirqd/IRQ threads ARE the latency, and a wakeup-only probe misses them:
+   bpftrace -e 'tracepoint:sched:sched_wakeup,tracepoint:sched:sched_wakeup_new { @qt[args.pid] = nsecs }
+                tracepoint:sched:sched_switch {
+                  if (args.prev_state == TASK_RUNNING) { @qt[args.prev_pid] = nsecs; }
+                  $t = @qt[args.next_pid];
+                  if ($t) { @runq_ns = hist(nsecs - $t); delete(@qt, args.next_pid); } }'
+   #   (bpftrace ≥ 0.22: `args.field` and `delete(@map, key)`; older releases spell them `args->field` / `delete(@map[key])`)
    bpftrace -e 'software:page-faults:1 { @[comm] = count(); }'             # page faults by process (Ch. 23)
    # user-space latency of a function via uprobe, histogram in ns:
-   bpftrace -e 'uprobe:./app:on_message { @s[tid] = nsecs }
-                uretprobe:./app:on_message /@s[tid]/ { @ns = hist(nsecs - @s[tid]); delete(@s[tid]); }'
+   bpftrace -e 'uprobe:./app:cpp:on_message { @s[tid] = nsecs }
+                uretprobe:./app:cpp:on_message /@s[tid]/ { @ns = hist(nsecs - @s[tid]); delete(@s, tid); }'
+   #   C++ symbols are mangled: use the `cpp` qualifier (or the mangled name, or `*on_message*`); the function must not be inlined
 ```
 
 **Interpreting (Ch. 61):** eBPF is the right tool for *production* latency questions the PMU can't answer directly — run-queue latency, off-CPU time, syscall counts under real load — at overhead low enough to leave running. Keep the probes off the hot core's critical section; measure the tracing overhead itself (Ch. 61) before trusting production numbers.
@@ -99,6 +106,7 @@ Discovering the machine and placing threads on it (Ch. 16, 42, 43; Appendix C).
    numactl --cpunodebind=0 --membind=0 ./app     # bind cores AND memory to node 0 (Ch. 16)
    cpupower frequency-info                        # governor + current/available frequencies (Ch. 6)
    grep -E 'CPU|<if>' /proc/interrupts           # header + the NIC's IRQ rows: per-CPU counts show where IRQs land (Ch. 42)
+   cyclictest -m -p 80 -a 2 -t 1 -i 200 -d 0 -D 1h   # wake-up latency on isolated core 2 — read the max, not the avg (Ch. 45, App C.5)
 ```
 
 **Interpreting:** `lstopo` is the map you tune against (Ch. 43) — it shows which logical CPUs are SMT siblings and which cores share an L2/L3, so you can leave siblings idle (Ch. 43) and keep a thread and its data on one NUMA node (Ch. 16). These are the runtime counterparts to the boot-time isolation in Appendix C.
@@ -111,7 +119,7 @@ Seeing struct layout and memory behavior (Ch. 9, 15).
    pahole -C OrderBookLevel ./app               # struct layout: offsets, holes, padding, cache lines (Ch. 9)
    pahole --hex -C Order ./app | grep -i hole    # just the padding holes to reclaim
    g++ -Wpadded ...                              # warn where the compiler inserts padding (Ch. 9, App D.7)
-   valgrind --tool=cachegrind ./app             # simulated cache-miss counts per line (no hardware needed)
+   valgrind --tool=cachegrind --cache-sim=yes ./app   # simulated I1/D1/LL miss counts per line (default since Valgrind 3.21 is Ir only)
    cg_annotate cachegrind.out.<pid>             # annotate source with simulated misses
    grep -i huge /proc/<pid>/smaps               # per-mapping huge-page usage (Ch. 15)
    awk '/AnonHugePages/{s+=$2} END{print s" kB"}' /proc/<pid>/smaps   # total THP backing (Ch. 15)
@@ -140,25 +148,26 @@ Inspecting and tuning the RX/TX path (Ch. 51, 53, 55, 56).
 
 ## I.9 Codegen, binaries & sanitizers
 
-Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 38, 72).
+Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 72).
 
 ```
    objdump -d -M intel --no-show-raw-insn ./app          # disassemble (Intel syntax; Ch. 4)
-   objdump -drwC ./app | c++filt                          # demangled disassembly
+   objdump -drwC ./app                                    # demangled disassembly (-C demangles; no c++filt needed)
    g++ -O2 -S -masm=intel -o - x.cpp | c++filt            # asm straight from source (Godbolt-at-home; Ch. 4)
    nm -D --defined-only -C ./app | wc -l                  # exported (dynamic) symbol count (visibility hygiene; App D.4)
-   g++ ... -Wl,--emit-relocs -o app                       # BOLT needs relocations kept to reorder functions (App D.6)
+   g++ ... -fno-reorder-blocks-and-partition -Wl,--emit-relocs -o app   # BOLT needs relocations to reorder functions, and does its own hot/cold splitting (App D.5–D.6)
    perf record -e cycles:u -j any,u ./app                 # LBR data for BOLT
    perf2bolt -p perf.data -o app.fdata ./app              # convert perf profile for BOLT (Ch. 22)
    llvm-bolt ./app -o ./app.bolt -data=app.fdata \
-     -reorder-blocks=ext-tsp -reorder-functions=hfsort    # post-link layout (Ch. 22, App D.6)
+     -reorder-blocks=ext-tsp -reorder-functions=hfsort \
+     -split-functions -split-all-cold -split-eh -dyno-stats   # post-link layout + BOLT's hot/cold split (Ch. 22, App D.6)
    # sanitizers — TEST/CI builds only, never production (App D.7):
    g++ -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined x.cpp && ./a.out
    g++ -O1 -g -fsanitize=thread x.cpp && ./a.out          # data races (Ch. 30-33, 40)
    clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 72)
 ```
 
-**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 38, 72), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (they cost 2–3×, Appendix D.7).
+**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 72), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
 
 ## I.10 References
 
