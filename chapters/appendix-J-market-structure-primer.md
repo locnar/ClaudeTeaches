@@ -1,6 +1,6 @@
 # Appendix J — HFT Market-Structure & Protocol Primer
 
-> **Consolidates the trading framing** the main text assumes but never teaches from scratch — the book targets advanced C++ developers who may be new to electronic trading. It gives the domain vocabulary and mechanics behind the running examples: the order-book case study (Ch. 25 §25.4.5, with the order/level pools of Ch. 24), zero-copy market-data decoding (Ch. 57 — ITCH/OUCH/FIX/SBE/FAST), reliable multicast and A/B feed arbitration (Ch. 58), and the end-to-end tick-to-trade path (Ch. 95). It complements **Appendix F** (Glossary): F *defines* the terms one line at a time; this appendix explains how the pieces *work together*.
+> **Consolidates the trading framing** the main text assumes but never teaches from scratch — the book targets advanced C++ developers who may be new to electronic trading. It gives the domain vocabulary and mechanics behind the running examples: the order-book case study (Ch. 28 §28.4.5, with the order/level pools of Ch. 27), zero-copy market-data decoding (Ch. 60 — ITCH/OUCH/FIX/SBE/FAST), reliable multicast and A/B feed arbitration (Ch. 61), and the end-to-end tick-to-trade path (Ch. 98). It complements **Appendix F** (Glossary): F *defines* the terms one line at a time; this appendix explains how the pieces *work together*.
 
 **How to use this:** read top-down for the onramp, or jump to J.5 for the protocol quick reference. This is *background*, not a performance chapter — no benchmarks; it exists so the trading scenarios in the rest of the book are self-contained and a reader never has to guess what "BBO," "IOC," or "A/B feed" means. Nothing here is legal, regulatory, or trading advice, and market structure varies by asset class, venue, and jurisdiction — the model below is the US-equities / listed-derivatives archetype most HFT literature assumes; adapt to your market.
 
@@ -13,7 +13,7 @@ An **exchange** runs a **matching engine**: a single logical process that accept
 - Orders rest in the book at a **price**; at each price they are queued by **arrival time**.
 - An incoming **aggressive** order matches against the **best** opposite-side price first, and within that price against the **oldest** resting order first. Better price wins; at equal price, earlier wins. This is why *latency* is *edge* — being earlier in the queue at a price is a real, monetizable advantage (the motivation for the entire book).
 - Some venues use **pro-rata** matching (fills allocated proportionally to resting size rather than strictly by time) or a **maker-taker** fee model (the resting "maker" is rebated, the aggressing "taker" pays) — these change the incentives but not the core data structures.
-- Trading is usually **continuous** during the session, bracketed by **auctions** — an **opening** and **closing auction** that cross accumulated orders at a single price. The **open** is the highest-stress moment for a feed handler (Ch. 57's microburst discussion): a burst of activity as the auction resolves and continuous trading begins.
+- Trading is usually **continuous** during the session, bracketed by **auctions** — an **opening** and **closing auction** that cross accumulated orders at a single price. The **open** is the highest-stress moment for a feed handler (Ch. 60's microburst discussion): a burst of activity as the auction resolves and continuous trading begins.
 
 The two sides of the market: the **sell-side** (broker-dealers, investment banks, market makers providing liquidity) and the **buy-side** (asset managers, pension and hedge funds taking liquidity); the exchange is the neutral venue between them, running the matching engine both sides send to. Proprietary trading firms — most HFT — sit outside that pair and trade their own capital: an HFT firm is typically a **market maker** (quoting both sides, earning the spread/rebate) and/or a **taker** (crossing the spread to capture a signal).
 
@@ -23,10 +23,10 @@ The **order book** is the aggregated set of resting buy orders (**bids**) and se
 
 - A **price level** is all resting size at one price on one side. The book is two sorted sequences of levels — bids descending, asks ascending.
 - The **best bid** (highest buy price) and **best ask** (lowest sell price) together are the **top of book** or **BBO** (Best Bid and Offer). The gap between them is the **spread**. The **mid** is their average.
-- **Depth** is the size available beyond the top — level 2, level 3, and deeper. A "deep book" update touches a level away from the top; a "top-of-book" update moves the BBO. This distinction drives data-structure choice (Ch. 25 §25.4.5: array-of-pointers vs. intrusive lists for levels; BBO fast path vs. deep-book path; the pools behind them are Ch. 24).
+- **Depth** is the size available beyond the top — level 2, level 3, and deeper. A "deep book" update touches a level away from the top; a "top-of-book" update moves the BBO. This distinction drives data-structure choice (Ch. 28 §28.4.5: array-of-pointers vs. intrusive lists for levels; BBO fast path vs. deep-book path; the pools behind them are Ch. 27).
 - The **NBBO** (National Best Bid and Offer) is the best bid/ask *across all venues* for a US-equity symbol — a consolidated view a strategy compares its local book against.
 
-**Building the book** from a feed is the feed handler's core job (Ch. 25, 57): apply each incremental message (add / modify / delete / execute) to the right price level, maintaining the sorted levels and the BBO, so downstream strategy code can read a coherent snapshot cheaply (ties Ch. 35's seqlock publication).
+**Building the book** from a feed is the feed handler's core job (Ch. 28, 60): apply each incremental message (add / modify / delete / execute) to the right price level, maintaining the sorted levels and the BBO, so downstream strategy code can read a coherent snapshot cheaply (ties Ch. 38's seqlock publication).
 
 ## J.3 The order lifecycle
 
@@ -35,11 +35,11 @@ An order is a small state machine the **order gateway** / **OMS** (Order Managem
 - **Order types:** a **market** order executes immediately at the best available price(s); a **limit** order rests until it can trade at its price or better; a **stop** order activates when the market reaches a trigger. **Pegged** orders track the BBO; **iceberg**/reserve orders show only part of their size.
 - **Time-in-force (TIF):** **Day** (rests until the close), **IOC** (Immediate-Or-Cancel — take what's available now, cancel the rest), **FOK** (Fill-Or-Kill — all now or nothing), **GTC** (Good-Til-Cancelled). IOC is the workhorse of aggressive HFT strategies.
 - **The state machine:** you send **New** → the venue replies **Ack** (accepted, now working) or **Reject** → the order may receive **partial fills** and then a **full fill** (**Execution** reports), or you send **Cancel** / **Cancel-Replace** (amend price/size) → terminal states are **Filled**, **Cancelled**, **Rejected**, **Expired**. Every transition is a message on the order-entry protocol (J.5).
-- **Self-trade prevention (STP)** stops your own resting order from matching your own aggressing order. **Pre-trade risk** checks (position limits, max order size, price collars — mandated by rules like SEC 15c3-5, Appendix K.4) sit *on* the order path and add latency you must budget (Ch. 95).
+- **Self-trade prevention (STP)** stops your own resting order from matching your own aggressing order. **Pre-trade risk** checks (position limits, max order size, price collars — mandated by rules like SEC 15c3-5, Appendix K.4) sit *on* the order path and add latency you must budget (Ch. 98).
 
-- **The session layer beneath the orders.** Order-entry protocols run over a *session* with its own state machine, independent of any order: **Logon** (with sequence numbers both sides must agree on), **Heartbeat** at a negotiated interval (FIX `HeartBtInt`, tag 108), **TestRequest** when a heartbeat is late (the peer must answer with a Heartbeat echoing the request ID), **ResendRequest**/**SequenceReset** to recover messages lost across a disconnect, and **Logout**. Two missed heartbeats or an unanswered TestRequest means the session is dead at the application level even if TCP is up; venues then apply **cancel-on-disconnect** to your working orders (Appendix K.4). Binary protocols (SoupBinTCP under OUCH, native gateways) carry the same ideas under other names. Monitoring the session layer — heartbeats expected vs received, TestRequests sent and received, sequence mismatches at logon, the age of the oldest unacknowledged order — is Ch. 58 §58.4.4; the gateway failover it triggers is Ch. 86 §86.4.4.
+- **The session layer beneath the orders.** Order-entry protocols run over a *session* with its own state machine, independent of any order: **Logon** (with sequence numbers both sides must agree on), **Heartbeat** at a negotiated interval (FIX `HeartBtInt`, tag 108), **TestRequest** when a heartbeat is late (the peer must answer with a Heartbeat echoing the request ID), **ResendRequest**/**SequenceReset** to recover messages lost across a disconnect, and **Logout**. Two missed heartbeats or an unanswered TestRequest means the session is dead at the application level even if TCP is up; venues then apply **cancel-on-disconnect** to your working orders (Appendix K.4). Binary protocols (SoupBinTCP under OUCH, native gateways) carry the same ideas under other names. Monitoring the session layer — heartbeats expected vs received, TestRequests sent and received, sequence mismatches at logon, the age of the oldest unacknowledged order — is Ch. 61 §61.4.4; the gateway failover it triggers is Ch. 89 §89.4.4.
 
-This state machine is exactly the kind of pure, replayable logic Ch. 86 isolates into a deterministic core, decoupled from I/O.
+This state machine is exactly the kind of pure, replayable logic Ch. 89 isolates into a deterministic core, decoupled from I/O.
 
 ## J.4 Market data: feeds, A/B lines, snapshots vs. increments
 
@@ -47,14 +47,14 @@ Strategies see the market through a **market-data feed** — a stream of message
 
 - **Incremental (delta) feeds** send one message per event (add/modify/delete/execute). They are compact and low-latency but **stateful**: you must apply every message in order to keep a correct book, and a single gap corrupts your book until repaired.
 - **Snapshots** periodically send the full book (or top-N levels) so a late-joining or recovering consumer can *rebuild* state without replaying all history. A feed handler typically boots from a snapshot, then applies increments.
-- **Sequence numbers** on every message let you detect **gaps** (a missing sequence → you dropped a packet). Detection triggers **recovery**: request a retransmission, or rebuild from the next snapshot (Ch. 58).
-- **Multicast and redundant A/B lines:** exchanges disseminate market data over UDP **multicast** (one send, many subscribers — Ch. 55) on **two independent lines, A and B**, carrying identical data over diverse paths. The consumer performs **A/B arbitration**: take whichever line's copy of each sequence number arrives first, using the other to fill gaps. This is the reliability mechanism over unreliable UDP (Ch. 58), and the reason feed handlers are built around sequence-gap detection rather than TCP-style retransmission on the hot path.
+- **Sequence numbers** on every message let you detect **gaps** (a missing sequence → you dropped a packet). Detection triggers **recovery**: request a retransmission, or rebuild from the next snapshot (Ch. 61).
+- **Multicast and redundant A/B lines:** exchanges disseminate market data over UDP **multicast** (one send, many subscribers — Ch. 58) on **two independent lines, A and B**, carrying identical data over diverse paths. The consumer performs **A/B arbitration**: take whichever line's copy of each sequence number arrives first, using the other to fill gaps. This is the reliability mechanism over unreliable UDP (Ch. 61), and the reason feed handlers are built around sequence-gap detection rather than TCP-style retransmission on the hot path.
 
 ## J.5 Protocols: ITCH, OUCH, FIX, SBE, FAST (field-level quick reference)
 
-The wire formats the decoder chapters parse (Ch. 57). Two axes: **market data vs. order entry**, and **binary fixed-layout vs. tag-value text**.
+The wire formats the decoder chapters parse (Ch. 60). Two axes: **market data vs. order entry**, and **binary fixed-layout vs. tag-value text**.
 
-- **ITCH** (Nasdaq, market data) — a compact **binary** protocol; fixed-layout messages, each a leading type byte then packed big-endian fields (`AddOrder`, `OrderExecuted`, `OrderDelete`, `Trade`, …). Ideal for zero-copy parsing: after a bounds check, read the fields in place from the receive buffer with `memcpy`/`std::bit_cast` loads, which fold to a `mov` + `bswap` (Ch. 57 §57.5, Ch. 84) — a bare `reinterpret_cast` to a packed struct is the aliasing/misalignment UB Ch. 21 and Ch. 57 warn against. The archetype the book's decoding examples use. The one message every example decodes, **TotalView-ITCH 5.0 `A` — Add Order (no MPID)**, 36 bytes, all integers big-endian:
+- **ITCH** (Nasdaq, market data) — a compact **binary** protocol; fixed-layout messages, each a leading type byte then packed big-endian fields (`AddOrder`, `OrderExecuted`, `OrderDelete`, `Trade`, …). Ideal for zero-copy parsing: after a bounds check, read the fields in place from the receive buffer with `memcpy`/`std::bit_cast` loads, which fold to a `mov` + `bswap` (Ch. 60 §60.5, Ch. 87) — a bare `reinterpret_cast` to a packed struct is the aliasing/misalignment UB Ch. 23 and Ch. 60 warn against. The archetype the book's decoding examples use. The one message every example decodes, **TotalView-ITCH 5.0 `A` — Add Order (no MPID)**, 36 bytes, all integers big-endian:
 
   | Offset | Size | Field | Encoding |
   |---:|---:|---|---|
@@ -66,15 +66,15 @@ The wire formats the decoder chapters parse (Ch. 57). Two axes: **market data vs
   | 19 | 1 | Buy/Sell Indicator | `'B'` / `'S'` |
   | 20 | 4 | Shares | u32 |
   | 24 | 8 | Stock | 8 ASCII chars, right-padded with spaces |
-  | 32 | 4 | Price | u32 with **4 implied decimals** (`123450` = 12.3450) — the scaled-integer price of Ch. 27 |
+  | 32 | 4 | Price | u32 with **4 implied decimals** (`123450` = 12.3450) — the scaled-integer price of Ch. 30 |
 
-  **Transport framing:** ITCH is carried in **MoldUDP64** packets — a 20-byte header (10-byte session, 8-byte big-endian sequence number of the *first* message in the packet, 2-byte message count), then each message prefixed by a 2-byte length. Those sequence numbers are the ones J.4's gap detection and Ch. 58's recovery work from; a message count of `0xFFFF` is the end-of-session marker, and a separate retransmission-request server refills gaps by sequence range.
+  **Transport framing:** ITCH is carried in **MoldUDP64** packets — a 20-byte header (10-byte session, 8-byte big-endian sequence number of the *first* message in the packet, 2-byte message count), then each message prefixed by a 2-byte length. Those sequence numbers are the ones J.4's gap detection and Ch. 61's recovery work from; a message count of `0xFFFF` is the end-of-session marker, and a separate retransmission-request server refills gaps by sequence range.
 - **OUCH** (Nasdaq, order entry) — ITCH's order-entry sibling; binary fixed-layout order messages (`EnterOrder`, `ReplaceOrder`, `CancelOrder`) and responses (`Accepted`, `Executed`, `Canceled`, `Rejected`). Same zero-copy treatment. Carried over **SoupBinTCP**: a TCP session protocol with login/logout, a 2-byte length + 1-byte type frame around every message, *sequenced* (server→client, replayable from a sequence number on reconnect) vs *unsequenced* (client→server) packets, and 1-second heartbeats in both directions — the session layer J.3's state machine rides on.
-- **FIX** (Financial Information eXchange) — the ubiquitous **tag-value text** protocol: `8=FIX.4.2\x019=...\x0135=D\x01...` — `tag=value` pairs separated by SOH (`0x01`). The tags you meet first: header `8` BeginString, `9` BodyLength, `35` MsgType (`D` NewOrderSingle, `8` ExecutionReport, `F` OrderCancelRequest, `G` Cancel/Replace), `34` MsgSeqNum, `49`/`56` Sender/TargetCompID, `52` SendingTime; body `11` ClOrdID, `55` Symbol, `54` Side (`1` buy / `2` sell), `38` OrderQty, `40` OrdType (`1` market / `2` limit), `44` Price, `59` TimeInForce (`0` Day / `3` IOC / `4` FOK), `39` OrdStatus, `150` ExecType; trailer `10` CheckSum (three-digit byte sum mod 256). Human-readable and flexible but **parse-heavy** (string scanning, integer/decimal conversion — Ch. 57's `from_chars`/branch-free-parse material) — too slow in raw form for the hot path, which is why binary encodings exist.
-- **SBE** (Simple Binary Encoding) — the FIX community's **binary** encoding: a schema (XML) generates fixed-layout message structs with explicit offsets, so decoding is a bounds-checked fixed-offset read (like ITCH) with none of FIX's string parsing. Every message starts with an 8-byte **message header** — `blockLength` u16, `templateId` u16, `schemaId` u16, `version` u16, all little-endian by default — followed by the fixed-size root block at the offsets the schema declares, then any repeating groups (each with a 4-byte group-size header: `blockLength` u16, `numInGroup` u16) and variable-length data fields last; a decoder dispatches on `templateId` and skips unknown fields by `blockLength`. The modern low-latency choice where FIX semantics are required (Ch. 57).
+- **FIX** (Financial Information eXchange) — the ubiquitous **tag-value text** protocol: `8=FIX.4.2\x019=...\x0135=D\x01...` — `tag=value` pairs separated by SOH (`0x01`). The tags you meet first: header `8` BeginString, `9` BodyLength, `35` MsgType (`D` NewOrderSingle, `8` ExecutionReport, `F` OrderCancelRequest, `G` Cancel/Replace), `34` MsgSeqNum, `49`/`56` Sender/TargetCompID, `52` SendingTime; body `11` ClOrdID, `55` Symbol, `54` Side (`1` buy / `2` sell), `38` OrderQty, `40` OrdType (`1` market / `2` limit), `44` Price, `59` TimeInForce (`0` Day / `3` IOC / `4` FOK), `39` OrdStatus, `150` ExecType; trailer `10` CheckSum (three-digit byte sum mod 256). Human-readable and flexible but **parse-heavy** (string scanning, integer/decimal conversion — Ch. 60's `from_chars`/branch-free-parse material) — too slow in raw form for the hot path, which is why binary encodings exist.
+- **SBE** (Simple Binary Encoding) — the FIX community's **binary** encoding: a schema (XML) generates fixed-layout message structs with explicit offsets, so decoding is a bounds-checked fixed-offset read (like ITCH) with none of FIX's string parsing. Every message starts with an 8-byte **message header** — `blockLength` u16, `templateId` u16, `schemaId` u16, `version` u16, all little-endian by default — followed by the fixed-size root block at the offsets the schema declares, then any repeating groups (each with a 4-byte group-size header: `blockLength` u16, `numInGroup` u16) and variable-length data fields last; a decoder dispatches on `templateId` and skips unknown fields by `blockLength`. The modern low-latency choice where FIX semantics are required (Ch. 60).
 - **FAST** (FIX Adapted for STreaming) — a **compression**-oriented FIX encoding (implicit fields, delta/copy operators, bit-mapped presence). Bandwidth-efficient for multicast but requires stateful, branchy decoding — a different trade-off from SBE's flat layout.
 
-**Venue timestamp fields (Ch. 82 §82.4.5).** The fields a feed handler or gateway decodes to attribute the tick-to-trade budget between you, the wire and the matching engine — all on the venue's PTP-disciplined UTC clock unless noted:
+**Venue timestamp fields (Ch. 85 §85.4.5).** The fields a feed handler or gateway decodes to attribute the tick-to-trade budget between you, the wire and the matching engine — all on the venue's PTP-disciplined UTC clock unless noted:
 
 | Venue / protocol | Field | Where | What it stamps |
 |---|---|---|---|
@@ -91,33 +91,33 @@ The wire formats the decoder chapters parse (Ch. 57). Two axes: **market data vs
 | Nasdaq OUCH 5.0 (orders) | `Timestamp` (u64 ns since midnight) | `Accepted`/`Executed`/`Canceled` | engine time |
 | FIX (any) | `52 SendingTime`, `60 TransactTime` | header / body | ms or µs resolution, venue-dependent |
 
-Resolution is not accuracy (a nanosecond field from a software gateway is as good as that host's PTP), egress is not wire, and the venue's clock is guaranteed only within its regulatory tolerance (MiFID II RTS 25: 100 µs / 1 µs granularity for HFT-class activity) — Ch. 82 §82.4.5 gives the symmetry check that validates the comparison before any one-way number is trusted.
+Resolution is not accuracy (a nanosecond field from a software gateway is as good as that host's PTP), egress is not wire, and the venue's clock is guaranteed only within its regulatory tolerance (MiFID II RTS 25: 100 µs / 1 µs granularity for HFT-class activity) — Ch. 85 §85.4.5 gives the symmetry check that validates the comparison before any one-way number is trusted.
 
-**The through-line (Ch. 57):** fixed-layout binary (ITCH/OUCH/SBE) → parse by bounds-checked fixed-offset loads, mind endianness (`std::byteswap`, Appendix H.5) and packing (Ch. 9); tag-value/compressed (FIX/FAST) → branch-light scanning and careful number conversion. All of it treats the wire bytes as **untrusted input** (Ch. 84) — validate lengths before you read.
+**The through-line (Ch. 60):** fixed-layout binary (ITCH/OUCH/SBE) → parse by bounds-checked fixed-offset loads, mind endianness (`std::byteswap`, Appendix H.5) and packing (Ch. 9); tag-value/compressed (FIX/FAST) → branch-light scanning and careful number conversion. All of it treats the wire bytes as **untrusted input** (Ch. 87) — validate lengths before you read.
 
 ## J.6 Roles in a trading system
 
-The functions the process-topology chapter (Ch. 86) maps onto separate processes:
+The functions the process-topology chapter (Ch. 89) maps onto separate processes:
 
 - **Feed handler** — receives market data (J.4), performs A/B arbitration and gap recovery, decodes messages (J.5).
-- **Book builder** — applies decoded messages to maintain order books and the BBO (J.2), publishing snapshots to strategies (Ch. 35).
+- **Book builder** — applies decoded messages to maintain order books and the BBO (J.2), publishing snapshots to strategies (Ch. 38).
 - **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — outside this book's scope, but the thing everything else serves).
 - **Order gateway / OMS** — encodes and sends orders (J.3), tracks their state machine, handles acks/fills/cancels.
 - **Pre-trade risk** — enforces limits on the order path (J.3) before anything reaches the wire.
-- **Sequencer** — a single process (or switch/FPGA) that stamps a total order on every input (ticks, acks, timers, commands, strategy decisions) and fans the sequenced stream out, so that deterministic consumers (Ch. 86) hold bit-identical state and can be replayed exactly from the journal (Ch. 90). Built, measured and failed-over in **Ch. 91**; Ch. 86 §86.4.1's point-to-point rings remain the minimal topology when only one consumer needs each stream.
+- **Sequencer** — a single process (or switch/FPGA) that stamps a total order on every input (ticks, acks, timers, commands, strategy decisions) and fans the sequenced stream out, so that deterministic consumers (Ch. 89) hold bit-identical state and can be replayed exactly from the journal (Ch. 93). Built, measured and failed-over in **Ch. 94**; Ch. 89 §89.4.1's point-to-point rings remain the minimal topology when only one consumer needs each stream.
 
 ## J.7 The tick-to-trade path, end to end
 
-One market event, from wire to wire — the narrative Ch. 95 measures:
+One market event, from wire to wire — the narrative Ch. 98 measures:
 
-1. A packet arrives at the NIC (Ch. 60) — a market-data multicast datagram on line A or B.
-2. The feed handler receives it (kernel stack, io_uring, or bypass — Ch. 51–56, 66–67), performs A/B arbitration and gap check (J.4), and **decodes** the message (J.5, Ch. 57).
-3. The book builder **applies** it, updating the affected price level and the BBO (J.2, Ch. 25).
+1. A packet arrives at the NIC (Ch. 63) — a market-data multicast datagram on line A or B.
+2. The feed handler receives it (kernel stack, io_uring, or bypass — Ch. 54–59, 69–70), performs A/B arbitration and gap check (J.4), and **decodes** the message (J.5, Ch. 60).
+3. The book builder **applies** it, updating the affected price level and the BBO (J.2, Ch. 28).
 4. The strategy sees the changed book, evaluates its signal, and **decides** to act.
 5. Pre-trade **risk** validates the intended order (J.3).
-6. The order gateway **encodes** the order (OUCH/SBE — J.5) and writes it to the wire (Ch. 67 from userspace, Ch. 55 over the kernel TCP stack; the NIC itself, Ch. 60).
+6. The order gateway **encodes** the order (OUCH/SBE — J.5) and writes it to the wire (Ch. 70 from userspace, Ch. 58 over the kernel TCP stack; the NIC itself, Ch. 63).
 
-Each hop has a latency budget; the sum, measured wire-to-wire with hardware timestamps (Ch. 63, Appendix K.5), is the **tick-to-trade** number the whole book exists to minimize (Ch. 1, 95). The physical floor beneath it — colocation, cabling, the exchange link — is Appendix K.
+Each hop has a latency budget; the sum, measured wire-to-wire with hardware timestamps (Ch. 66, Appendix K.5), is the **tick-to-trade** number the whole book exists to minimize (Ch. 1, 98). The physical floor beneath it — colocation, cabling, the exchange link — is Appendix K.
 
 ## J.8 References
 
@@ -128,7 +128,7 @@ Each hop has a latency budget; the sum, measured wire-to-wire with hardware time
 ## J.9 Additional Reading
 
 - **Appendix F** (Glossary) — one-line definitions of every term used here (tick-to-trade, NBBO, IOC, maker/taker, A/B arbitration, …).
-- Ch. 25 §25.4.5 (the order-book case study; its pools in Ch. 24), Ch. 57 (decoding), Ch. 58 (reliable multicast), Ch. 86 (process topology / deterministic state machine), Ch. 95 (tick-to-trade) — where these mechanics become C++.
+- Ch. 28 §28.4.5 (the order-book case study; its pools in Ch. 27), Ch. 60 (decoding), Ch. 61 (reliable multicast), Ch. 89 (process topology / deterministic state machine), Ch. 98 (tick-to-trade) — where these mechanics become C++.
 - **Appendix K** (Exchange Connectivity) — the physical and commercial layer beneath the protocols (colocation, cross-connects, access, entitlements).
 - The exchange operators' own developer portals (Nasdaq, CME, Cboe, NYSE) — the current, authoritative message specs, which supersede any summary here.
 

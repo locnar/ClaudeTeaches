@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 13 (branch *direction* prediction — this chapter is the harder *target* prediction problem for indirect branches), Ch. 12 (the front-end the indirect branch resteers, and the I-cache footprint of many call targets), Ch. 11 (the back-end work squashed on a target mispredict), Ch. 7 (the vtable load is a cache access), Ch. 3–4 (benchmarking, reading asm — §14.3, §14.5).
 >
-> **Leads into:** Ch. 19 (template metaprogramming & zero-cost abstractions — CRTP and policy-based design in full), Ch. 20 (the cost of abstractions — exceptions, `noexcept`, RTTI), Ch. 25 (cache-friendly containers — `std::function` in node-based structures). The `switch`/jump-table thread continues from Ch. 13's lookup tables.
+> **Leads into:** Ch. 19 (template metaprogramming & zero-cost abstractions — CRTP and policy-based design in full), Ch. 21 (the cost of abstractions — exceptions, `noexcept`, RTTI), Ch. 28 (cache-friendly containers — `std::function` in node-based structures). The `switch`/jump-table thread continues from Ch. 13's lookup tables.
 
 ---
 
@@ -59,13 +59,13 @@ A target mispredict costs the same ~15–20-cycle flush as a direction mispredic
 
 `std::function<R(Args...)>` is the most expensive common form of indirect dispatch, and it's worth understanding *why* so you reach for it deliberately:
 
-- **It is an opaque indirection.** `std::function` type-erases the callable behind a vtable-like mechanism (a manager pointer, an invoker pointer, plus storage). Calling it is an empty-check branch and *one* indirect call to a type-specific invoker whose body is the stored callable inlined (in libstdc++ the invoker instantiated for a lambda is literally the lambda's body); a second indirect hop occurs only if what you stored is itself a function pointer. The dispatch cost is therefore comparable to a virtual call — what `std::function` adds is that the call site can never inline the target, plus a heap allocation for callables that overflow its small buffer (Ch. 25).
-- **It may allocate.** A callable larger than the small-buffer optimization (SBO) capacity (a few pointers — typically capturing more than ~2 pointers' worth of state) is **heap-allocated** on construction. On a hot path that constructs `std::function`s, that's a `malloc` (Ch. 23) — a latency catastrophe. Even when SBO applies, the object is larger and copies are non-trivial.
+- **It is an opaque indirection.** `std::function` type-erases the callable behind a vtable-like mechanism (a manager pointer, an invoker pointer, plus storage). Calling it is an empty-check branch and *one* indirect call to a type-specific invoker whose body is the stored callable inlined (in libstdc++ the invoker instantiated for a lambda is literally the lambda's body); a second indirect hop occurs only if what you stored is itself a function pointer. The dispatch cost is therefore comparable to a virtual call — what `std::function` adds is that the call site can never inline the target, plus a heap allocation for callables that overflow its small buffer (Ch. 28).
+- **It may allocate.** A callable larger than the small-buffer optimization (SBO) capacity (a few pointers — typically capturing more than ~2 pointers' worth of state) is **heap-allocated** on construction. On a hot path that constructs `std::function`s, that's a `malloc` (Ch. 26) — a latency catastrophe. Even when SBO applies, the object is larger and copies are non-trivial.
 - **It blocks inlining and bloats.** Like `virtual`, the call target is opaque; the compiler inlines nothing through it. Worse, each distinct callable type instantiates its own manager/invoker, inflating code size (Ch. 12).
 
-The upshot: **`std::function` in a hot loop is an anti-pattern** (§14.6). It's a fine tool for *setup*, configuration, and cold paths where flexibility matters and the call is rare; on the steady-state hot path, prefer a concrete callable type (a template parameter — Ch. 19), a function pointer (lighter, single indirection, no allocation), `std::variant`+visitor (§14.4.3, closed set, no allocation), or CRTP (§14.4.2, no indirection at all). The same caution applies to other type-erased callbacks (e.g. a hand-rolled `void* + fn-ptr`): the erasure that buys flexibility costs an un-inlinable indirect call. The newer standard erasers do not change the dispatch cost but fix the other problems: `std::move_only_function` (C++23, libstdc++ 12+/libc++ 20; `__cpp_lib_move_only_function`) drops the copyability requirement and the empty-check, and `std::function_ref` (C++26, P0792; `__cpp_lib_function_ref`) is a non-owning two-word view — no allocation ever — for passing a callable *down* a call chain; see Appendix H.
+The upshot: **`std::function` in a hot loop is an anti-pattern** (§14.6). It's a fine tool for *setup*, configuration, and cold paths where flexibility matters and the call is rare; on the steady-state hot path, prefer a concrete callable type (a template parameter — Ch. 19), a function pointer (lighter, single indirection, no allocation), `std::variant`+visitor (§14.4.3, closed set, no allocation), or CRTP (§14.4.2, no indirection at all). The same caution applies to other type-erased callbacks (e.g. a hand-rolled `void* + fn-ptr`): the erasure that buys flexibility costs an un-inlinable indirect call. The newer standard erasers do not change the dispatch cost but change everything else, and the design space is worth naming before §14.4.5 measures it. A type-erased callable has three parts — *storage* for the callable (owned inline, owned on the heap, or not owned at all), an *invoke thunk* (one function per erased type that knows how to call it) and, for owning erasers, a *manager* (copy/move/destroy). `std::function` owns, copies, keeps a 16-byte small buffer (libstdc++; 32-byte object) and spills to the heap beyond it. `std::move_only_function` (C++23; libstdc++ 12+, libc++ 20; `__cpp_lib_move_only_function`) drops the copy requirement — so a callable owning a `unique_ptr` or a socket fits — adds `const`/`noexcept`/ref-qualified signatures, makes *calling an empty one UB* (so there is no empty check on the call path), and in libstdc++ 13 keeps a 24-byte buffer in a 40-byte object; `std::copyable_function` (C++26) is the copyable twin with the same fixes. `std::function_ref` (C++26, P0792; `__cpp_lib_function_ref` — not in libstdc++ 13 / libc++ 18, use `tl::function_ref`/`llvm::function_ref` or the twenty-line version in §14.4.5) is **non-owning**: an object pointer and a thunk pointer, two words, never allocates, one indirect call, and is the right type for a callable passed *down* a call chain. A fixed-capacity `inplace_function<Sig, N>` (SG14/`stdext`, not standard) owns inline up to `N` bytes and refuses to compile anything larger. `std::any` is *not* a callable eraser: it erases a *type*, and getting the callable back requires naming that type at the `any_cast` — at which point the call is direct and the "erasure" bought nothing.
 
-**Indirect calls you did not write.** Two more sources of indirect branches sit on most trading hot paths uninvited. First, **PLT stubs**: every call into a shared library — libc, libm, a vendor NIC library — is an indirect `jmp [GOT]` through the procedure-linkage table, and under `-fPIC`'s default *semantic interposition* even calls between functions of the same shared library go through it. `-fno-plt` (call through the GOT directly), `-fno-semantic-interposition`, `-Wl,-Bsymbolic`, or static linking remove them (Ch. 22). Second, **Spectre-v2 mitigations**: code compiled with retpolines (`-mindirect-branch=thunk`) turns every indirect call into a `call`/`ret` trampoline that defeats the indirect predictor by design, and IBRS/eIBRS restrict target speculation across privilege levels (Ch. 6 §6.2.3). Measure both the same way as the rest of this chapter — `br_inst_retired.indirect` tells you how many indirect branches you execute per message; a number far above the dispatch sites you wrote is PLT or thunk traffic.
+**Indirect calls you did not write.** Two more sources of indirect branches sit on most trading hot paths uninvited. First, **PLT stubs**: every call into a shared library — libc, libm, a vendor NIC library — is an indirect `jmp [GOT]` through the procedure-linkage table, and under `-fPIC`'s default *semantic interposition* even calls between functions of the same shared library go through it. `-fno-plt` (call through the GOT directly), `-fno-semantic-interposition`, `-Wl,-Bsymbolic`, or static linking remove them (Ch. 24). Second, **Spectre-v2 mitigations**: code compiled with retpolines (`-mindirect-branch=thunk`) turns every indirect call into a `call`/`ret` trampoline that defeats the indirect predictor by design, and IBRS/eIBRS restrict target speculation across privilege levels (Ch. 6 §6.2.3). Measure both the same way as the rest of this chapter — `br_inst_retired.indirect` tells you how many indirect branches you execute per message; a number far above the dispatch sites you wrote is PLT or thunk traffic.
 
 ---
 
@@ -163,6 +163,23 @@ Read it the Ch. 2 / Ch. 13 way:
 
 The fingerprint to recognize: **high `br_misp_retired.indirect` with low IPC on a dispatch-heavy loop** = megamorphic indirect-call bottleneck. That's the signal §14.4 addresses; a clean (monomorphic) indirect predictor means the call is *not* your problem and CRTP-ifying it buys little.
 
+**The lighter erasers, on the same loop** (§14.4.5; VM-measured — the 4-vCPU Xeon VM of Appendix L.2, GCC 13.3 / Clang 18.1 `-O2 -std=c++23`; a `[[gnu::noinline]] drive(F&&, n)` calling `f(i)` 100 M times with a monomorphic 8-byte-capture lambda):
+
+```
+                                 GCC 13.3     Clang 18.1
+template parameter (lambda)      inlined — the loop folded to closed form
+function pointer                 1.29 ns      1.29 ns      one indirect call, args in registers
+function_ref (two words)         1.04         1.04         one indirect call through the thunk, args in registers
+inplace_function<…, 32>          1.24         1.03         same shape, storage inline
+std::function                    1.04         1.14         empty check + indirect call; argument SPILLED to the stack (§14.5)
+std::move_only_function          1.19         1.03         no empty check; same indirect call
+std::any + any_cast per call     0.41         0.39         one type_info compare, then a DIRECT inlined call — not erasure
+sizeof: function_ref 16  inplace_function<,32> 48  std::function 32  move_only_function 40  std::any 16
+allocation at construction: std::function — 8 B / 16 B capture: none, 24 B: one malloc; move_only_function — 24 B capture: none
+```
+
+Every *indirect* form lands within 1.0–1.3 ns of each other once the target is monomorphic and predicted: the cost is the un-inlinable call, not the wrapper. What distinguishes them is what happens *outside* the call — `std::function` may allocate at construction and spills its argument, `function_ref` can never allocate and can dangle, `move_only_function` can hold what `std::function` cannot — and §14.4.5 chooses by those properties.
+
 ---
 
 ## 14.4 Techniques
@@ -180,7 +197,7 @@ The cheapest win: let the compiler turn the indirect call back into a *direct* (
   ```
   The catch: it only fires when the compiler knows the *concrete* static type at the call site (e.g. through a `AddH*`, not a base `IH*`). Through a base pointer it still can't tell which type — `final` helps the optimizer where the type is statically recoverable.
 - **Speculative devirtualization.** With profile information (or heuristics), the compiler can emit *"if the type is the common one, call it directly (inlined); else fall back to the indirect call."* This converts a near-monomorphic site into a predictable direct call for the hot type, paying the indirect path only for the rare types.
-- **LTO + PGO devirtualization (Ch. 22).** Whole-program LTO lets the compiler see the *entire* class hierarchy and prove a call is monomorphic across the program (e.g. only one override is ever instantiated), devirtualizing calls it couldn't within a single translation unit. PGO supplies the type-frequency profile that drives speculative devirtualization. For a large codebase, **LTO+PGO is the highest-leverage devirtualization lever** because it works without redesigning the dispatch.
+- **LTO + PGO devirtualization (Ch. 24).** Whole-program LTO lets the compiler see the *entire* class hierarchy and prove a call is monomorphic across the program (e.g. only one override is ever instantiated), devirtualizing calls it couldn't within a single translation unit. PGO supplies the type-frequency profile that drives speculative devirtualization. For a large codebase, **LTO+PGO is the highest-leverage devirtualization lever** because it works without redesigning the dispatch.
 
 Devirtualization is the "keep your `virtual` design but pay direct-call prices" option — try it *first*, since it costs no design change. When it can't fire (genuinely open, runtime-varying types), move down the ladder.
 
@@ -233,6 +250,32 @@ The decision: dispatching to genuinely different *code* over a closed set → pr
 
 ---
 
+### 14.4.5 Lighter type erasure: `function_ref`, `move_only_function`/`copyable_function`, in-place functions
+
+When a template parameter is not available — a callback crossing a non-template boundary, a hook table filled at startup, a completion routine handed to an I/O layer (Ch. 54–55) — choose the eraser by *ownership*, because the call cost is the same (§14.3):
+
+- **Passing a callable *down* a call chain: `function_ref`.** Two words (object pointer + thunk), trivially copyable (two registers — Ch. 21 §21.4.5), no allocation ever, no empty state, one `call [thunk]`. C++26's `std::function_ref` (P0792) is not in libstdc++ 13 / libc++ 18; `tl::function_ref`, `llvm::function_ref` or this is what ships today:
+
+  ```cpp
+  template <class Sig> class function_ref;
+  template <class R, class... A> class function_ref<R(A...)> {
+      void* obj_; R (*thunk_)(void*, A...);                       // NOT owned: the callable must outlive the ref
+  public:
+      template <class F> requires (!std::is_same_v<std::remove_cvref_t<F>, function_ref>)
+      function_ref(F&& f) noexcept : obj_(const_cast<void*>(static_cast<const void*>(std::addressof(f)))),
+          thunk_([](void* o, A... a) -> R { return (*static_cast<std::remove_reference_t<F>*>(o))(std::forward<A>(a)...); }) {}
+      R operator()(A... a) const { return thunk_(obj_, std::forward<A>(a)...); }
+  };
+  void for_each_level(const Book&, function_ref<void(const Level&)> f);   // callers pass any lambda; no template in the header
+  ```
+
+  Its one hazard is lifetime: a `function_ref` *stored* in a member or a container outlives the temporary lambda it was built from and dangles (§14.6). P0792 adds `nontype_t<&free_fn>` to bind a free or member function with no object at all. Use it for parameters, never for members.
+- **Storing a callable that owns resources or is move-only: `std::move_only_function` (C++23).** Holds a lambda capturing a `unique_ptr`, a socket or a `std::jthread`; `const`-, `noexcept`- and ref-qualifiable signatures (`move_only_function<void(const Fill&) const noexcept>`), no copy requirement, no empty check on call (calling empty is UB — the type system, not a branch, is the guard). libstdc++ 13 stores up to 24 bytes inline (§14.3: the 24-byte capture that made `std::function` `malloc` did not here); larger captures still allocate — construct at setup. `std::copyable_function` (C++26) when the stored callable must be copied.
+- **Storing with a hard no-allocation guarantee: a fixed-capacity in-place function.** `inplace_function<Sig, N>` (SG14's `stdext::inplace_function`, or forty lines of your own) owns the callable in an `alignas(16) unsigned char buf[N]` and `static_assert`s that anything larger does not compile — the only eraser that turns "this might allocate" into a build error. Same call cost (§14.3). The price is `N` bytes per slot whether used or not, and a copy of `N` bytes when the slot is copied.
+- **`std::function` for configuration and cold paths**, where copyability and convenience matter and the call is rare. **`std::any` for a value whose type is genuinely unknown**, never as a dispatch mechanism: the `any_cast` names the type, so the call is direct (§14.3's 0.4 ns is a `type_info` compare plus an inlined call) — if you know the type, you did not need `any`.
+
+The decision table: *fixed callee* → template parameter (§14.4.2); *passed through* → `function_ref`; *stored, owning* → `move_only_function` (or `inplace_function` when allocation must be impossible); *stored, copyable, cold* → `std::function`. Ch. 22 §22.4.1 restates this for lambdas and ranges callbacks; Ch. 54–55's completion callbacks and Ch. 88 §88.4.4's strategy hooks are the storing cases.
+
 ## 14.5 Verify the codegen: devirtualized call sites
 
 Whether a call is a direct/inlined call or an opaque indirect jump is visible in the asm, and it's the verification that the technique fired. Snippets below are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`).
@@ -273,10 +316,30 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 
 ---
 
+**`function_ref` vs `std::function` at the call site (§14.4.5).** Inside the `drive` loop (`clang++ -O2 -std=c++23`):
+
+```asm
+; function_ref:  two loads, one indirect call, argument in a register
+        mov     rdi, qword ptr [r14]        ; obj_
+        mov     rsi, r12                    ; i
+        call    qword ptr [r14 + 8]         ; thunk_ — the ONLY indirection
+; std::function:  empty check, argument spilled so the invoker can take its address, then the call
+        mov     qword ptr [rsp + 8], r13    ; i → stack (libstdc++'s invoker takes forwarding references)
+        cmp     qword ptr [r14 + 16], 0     ; _M_manager == nullptr ?  (the empty check)
+        je      .throw_bad_function_call
+        mov     rdi, r14
+        lea     rsi, [rsp + 8]              ; &i
+        call    qword ptr [r14 + 24]        ; _M_invoker
+```
+
+Both are one indirect call; the `std::function` adds a predicted branch and a store/reload of every argument. `move_only_function` drops the `cmp`/`je`; `inplace_function` looks like `function_ref` with `obj_` replaced by the address of its own buffer. The template-parameter version has no `call` at all — which is the first thing to grep for.
+
 ## 14.6 Pitfalls & anti-patterns: megamorphic call sites; `std::function` in the loop
 
 - **Megamorphic virtual dispatch on the hot path.** The headline anti-pattern: one `base->handle()` site fed an unpredictable mix of many concrete types (§14.3 `mega`). The BTB is overwhelmed, `br_misp_retired.indirect` spikes, I-cache thrashes (Ch. 12), and each dispatch eats a flush. Fix: CRTP (compile-time), `variant`/visit (closed set), or sort/batch by type to make the site monomorphic.
-- **`std::function` in the inner loop.** Double indirection, no inlining, and *possible heap allocation* on construction (Ch. 23) — the most expensive common dispatch (§14.2.3, §14.3). Reserve it for setup/cold paths; on the hot path use a template parameter, function pointer, `variant`, or CRTP.
+- **`std::function` in the inner loop.** Double indirection, no inlining, and *possible heap allocation* on construction (Ch. 26) — the most expensive common dispatch (§14.2.3, §14.3). Reserve it for setup/cold paths; on the hot path use a template parameter, function pointer, `variant`, or CRTP.
+- **A dangling `function_ref`.** It does not own its callable; a `function_ref` member initialised from a temporary lambda (`hooks.on_fill = [&]{…};`) points at a destroyed closure after the statement ends (§14.4.5). `function_ref` is a *parameter* type; store `move_only_function`/`inplace_function` instead.
+- **`std::any` as a dispatch mechanism.** The `any_cast` must name the type, so the call is direct and the erasure bought a `type_info` compare and a `bad_any_cast` path (§14.3). Erase callables with a callable eraser or, better, a closed `variant`.
 - **Constructing `std::function`/callables on the hot path.** Even ignoring the call cost, *building* a `std::function` may `malloc`. Hoist construction to setup; never create type-erased callables per message.
 - **Assuming `final` always devirtualizes.** It only fires when the compiler can statically recover the concrete type at the call site; through a base pointer it often can't. Verify in the asm (§14.5); if it didn't fire, change the call site, don't assume.
 - **`virtual` on a tiny, hot, monomorphic callee.** Even with perfect BTB prediction, the *lost inlining* of a 2-line function can dominate (§14.2.1, §14.3 `mono` vs `crtp`). If the type is compile-time known, CRTP; if runtime but monomorphic, `final`/LTO to recover the inline.
@@ -294,7 +357,7 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 2. **Make the megamorphic site monomorphic.** Take the `mega` case and **sort** the work by type so each handler runs in a long contiguous run. Re-measure `br_misp_retired.indirect` and ns/call. How close to `mono` does it get, and why (Ch. 13.2.1)?
 3. **`final` and the asm.** Mark the handler classes/methods `final` and call through a *concrete* type. Disassemble (Ch. 4): did the call devirtualize and inline? Now call through `IH*` — does `final` still help? Explain (§14.4.1, §14.5).
 4. **`variant` vs virtual.** Reimplement the closed 4-type set as `std::variant` + `std::visit` in a contiguous `vector<Event>`. Compare ns/call *and* cache behavior (`L1-dcache-load-misses`) against `vector<unique_ptr<IH>>`. Where does the win come from — dispatch, or layout (Ch. 8)?
-5. **`std::function` allocation.** Construct `std::function`s from progressively larger captures and find where SBO stops and heap allocation begins (instrument `operator new`, or read the library's SBO size). Confirm constructing on the hot path is a `malloc` (Ch. 23).
+5. **`std::function` allocation.** Construct `std::function`s from progressively larger captures and find where SBO stops and heap allocation begins (instrument `operator new`, or read the library's SBO size). Confirm constructing on the hot path is a `malloc` (Ch. 26).
 
 **Checklist — indirect dispatch**
 
@@ -303,6 +366,7 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 - [ ] Closed runtime type sets use **`std::variant`/visit** (contiguous, no allocation, no vtable) rather than `vector<unique_ptr<Base>>`.
 - [ ] Where I kept `virtual`, I applied **`final`** and **LTO/PGO** to devirtualize, and **verified in the asm** (Ch. 4) the call became direct/inlined.
 - [ ] **No `std::function` on the hot path** and **no type-erased-callable construction** per message; those live in setup/cold paths.
+- [ ] Callables passed *down* a call chain are **`function_ref`** (never stored); stored callables are **`move_only_function`** or a fixed-capacity in-place function whose capacity is a compile-time fact (§14.4.5).
 - [ ] Megamorphic sites I couldn't redesign I made **monomorphic by sorting/batching by type** so the BTB predicts (Ch. 13).
 - [ ] For tag dispatch, I chose **data lookup** (no indirect branch) when cases map to data, not a jump table, and verified the lowering (§14.5).
 - [ ] I measured **dispatch cost *and* layout/cache effects** (Ch. 7–8), not just the call.
@@ -321,7 +385,7 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 
 - CppCon talks on "the cost of `virtual`," type erasure, and "inheritance is the base class of evil" — design-level treatments of replacing runtime polymorphism on the hot path.
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — indirect-branch mispredict analysis and devirtualization with `perf`/LTO/PGO.
-- Ch. 19 (*Template Metaprogramming & Zero-Cost Abstractions*) — CRTP, policy-based design and static dispatch in full; Ch. 20 (*The Cost of Abstractions*) — exception-unwinding, `noexcept` and RTTI costs in depth; Ch. 25 (*Cache-Friendly Containers*) — `std::function` among the hot-path-hostile STL types (§25.2), and why `vector<unique_ptr<Base>>` is a cache anti-pattern; Ch. 22 (*Build Toolchain*) — LTO/PGO devirtualization.
+- Ch. 19 (*Template Metaprogramming & Zero-Cost Abstractions*) — CRTP, policy-based design and static dispatch in full; Ch. 21 (*The Cost of Abstractions*) — exception-unwinding, `noexcept` and RTTI costs in depth; Ch. 28 (*Cache-Friendly Containers*) — `std::function` among the hot-path-hostile STL types (§28.2), and why `vector<unique_ptr<Base>>` is a cache anti-pattern; Ch. 24 (*Build Toolchain*) — LTO/PGO devirtualization.
 - **Appendix E** — the indirect-branch-mispredict penalty that frames "megamorphic dispatch."
 
 ---

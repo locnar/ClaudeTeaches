@@ -2,9 +2,9 @@
 
 # Chapter 19 — Template Metaprogramming & Zero-Cost Abstractions
 
-> **Prerequisites:** Ch. 18 (compile-time mechanics — `if constexpr`, the template cost model, compile-time evaluation this chapter builds *designs* on), Ch. 14 (indirect dispatch — CRTP here is the by-construction devirtualization that chapter motivated), Ch. 12 §12.4.1 and Ch. 22 §22.2 (inlining — what "zero-cost" actually cashes out as) and Ch. 11 (the back-end ILP that inlining exposes), Ch. 4 (reading asm — §19.5 is the whole proof).
+> **Prerequisites:** Ch. 18 (compile-time mechanics — `if constexpr`, the template cost model, compile-time evaluation this chapter builds *designs* on), Ch. 14 (indirect dispatch — CRTP here is the by-construction devirtualization that chapter motivated), Ch. 12 §12.4.1 and Ch. 24 §24.2 (inlining — what "zero-cost" actually cashes out as) and Ch. 11 (the back-end ILP that inlining exposes), Ch. 4 (reading asm — §19.5 is the whole proof).
 >
-> **Leads into:** Ch. 20 (the cost of abstractions that *aren't* free — exceptions, RTTI — and `std::expected` as the hot-path alternative; `std::function`'s cost was Ch. 14 §14.2.3), Ch. 25 (cache-friendly containers and intrusive/policy designs), Ch. 29 (SIMD via expression templates / static specialization), Ch. 24 (policy-based allocators). The bloat/error-message costs tie back to Ch. 12 and Ch. 18.
+> **Leads into:** Ch. 21 (the cost of abstractions that *aren't* free — exceptions, RTTI — and `std::expected` as the hot-path alternative; `std::function`'s cost was Ch. 14 §14.2.3), Ch. 28 (cache-friendly containers and intrusive/policy designs), Ch. 32 (SIMD via expression templates / static specialization), Ch. 27 (policy-based allocators). The bloat/error-message costs tie back to Ch. 12 and Ch. 18.
 
 ---
 
@@ -50,7 +50,7 @@ class OrderBook : StoragePolicy, LockingPolicy { /* ... */ };   // mix behaviors
 
 Each policy's methods inline; swapping a policy is a compile-time type change, not a runtime branch. (Empty policies cost *nothing* via the empty-base optimization / `[[no_unique_address]]` — Ch. 9.) This is the configurable-yet-zero-cost design: the order book's level storage, locking, and allocation are all choices made at compile time, each compiling to the hand-specialized code.
 
-The cost model carries over unchanged from Ch. 18: these are all **template instantiations** — each combination is a distinct body (good: specialized and inlined; bad: code-size/build-time cost — §19.6). And "zero-cost" cashes out *through the optimizer*: static dispatch enables inlining (Ch. 12 §12.4.1, Ch. 22 §22.2), which enables constant propagation and the ILP of Ch. 11 and scheduling across the old call boundary. The abstraction is free **because** it inlines — which is exactly why §19.5 verifies inlining actually happened.
+The cost model carries over unchanged from Ch. 18: these are all **template instantiations** — each combination is a distinct body (good: specialized and inlined; bad: code-size/build-time cost — §19.6). And "zero-cost" cashes out *through the optimizer*: static dispatch enables inlining (Ch. 12 §12.4.1, Ch. 24 §24.2), which enables constant propagation and the ILP of Ch. 11 and scheduling across the old call boundary. The abstraction is free **because** it inlines — which is exactly why §19.5 verifies inlining actually happened.
 
 ---
 
@@ -162,38 +162,38 @@ template <class L, class R> struct AddExpr {            // represents "L + R", c
 // operator+ returns AddExpr<...>; operator= walks [i] once: d[i] = a[i]+b[i]+c[i]  — single pass
 ```
 
-Where it pays in trading/quant code: vectorized price/risk/signal math (Greeks, P&L vectors, moving-window computations) where the naïve form would allocate and re-traverse temporaries (Ch. 23's allocation cost, Ch. 7–8's extra passes). The expression type encodes the computation in the *type*; the optimizer fuses and (often) vectorizes the single resulting loop (Ch. 29). Trade-offs are real: expression templates are *advanced* metaprogramming — complex to write, brutal error messages (§19.6), `auto` lifetime traps (an expression type can dangle if it outlives its operands), and they only pay when temporaries/extra passes actually dominate. **Prefer a mature library (Eigen/Blaze) over hand-rolling them**; reach for hand-written ones only when a measured temporary/allocation problem justifies the complexity.
+Where it pays in trading/quant code: vectorized price/risk/signal math (Greeks, P&L vectors, moving-window computations) where the naïve form would allocate and re-traverse temporaries (Ch. 26's allocation cost, Ch. 7–8's extra passes). The expression type encodes the computation in the *type*; the optimizer fuses and (often) vectorizes the single resulting loop (Ch. 32). Trade-offs are real: expression templates are *advanced* metaprogramming — complex to write, brutal error messages (§19.6), `auto` lifetime traps (an expression type can dangle if it outlives its operands), and they only pay when temporaries/extra passes actually dominate. **Prefer a mature library (Eigen/Blaze) over hand-rolling them**; reach for hand-written ones only when a measured temporary/allocation problem justifies the complexity.
 
 ### 19.4.3 Policy-based design
 
 Compose a class from orthogonal **policy** parameters, each supplying one behavioral axis, all resolved and inlined at compile time (the `OrderBook<Storage, Locking, Alloc>` of §19.2):
 
-- **Orthogonal axes as type parameters.** Storage layout (flat array vs intrusive list vs hash — Ch. 25), locking (none / spinlock / seqlock — Ch. 32, 35), allocation (arena / pool / pmr — Ch. 24), threading model. Each policy is a small type with the methods the host calls; swapping one is changing a template argument, not editing the host or adding a runtime branch.
+- **Orthogonal axes as type parameters.** Storage layout (flat array vs intrusive list vs hash — Ch. 28), locking (none / spinlock / seqlock — Ch. 35, 38), allocation (arena / pool / pmr — Ch. 27), threading model. Each policy is a small type with the methods the host calls; swapping one is changing a template argument, not editing the host or adding a runtime branch.
 - **Empty policies are truly free — static dependency injection and no-op policies.** A stateless policy (e.g. `NoLock`) contributes no size via the empty-base optimization / `[[no_unique_address]]` (Ch. 9) and its (empty) methods inline to nothing — so a "configurable" design pays zero for the configurability on unused axes. This is *dependency injection resolved at compile time*: the host takes its collaborators as type parameters (`Engine<Logger, RiskGate, Clock>`) and a test or a benchmark substitutes a **null object** — `NullLogger` whose `log(...)` is an empty inline body, `NoRisk` whose `check()` returns `accept` as a constant, `FixedClock` returning a journaled time — with no virtual call, no `if (logger)` and no runtime seam. The production binary instantiates `Engine<BinaryLogger, Gate, TscClock>`; the unit test instantiates `Engine<RecordingLogger, NoRisk, FixedClock>`; both are monomorphic and §19.5 shows the null versions leave no instructions behind.
 - **Compile-time configuration of the hot path.** This is the idiomatic way to build a *family* of specialized hot-path components from one source — a `OrderBook` tuned per venue, a feed handler per protocol, a queue per concurrency model — each compiling to code as tight as a bespoke implementation, with the variation captured in types (testable, named, reusable).
 - **vs runtime configuration.** Policy-based design is compile-time; if the choice must be made at runtime (operator picks at startup), you instantiate the needed combinations and select among them once (a single runtime branch at setup, then the hot path is monomorphic) — *not* a per-call runtime policy. Watch the combinatorial instantiation explosion (§19.6) if axes × options is large.
 
 ### 19.4.4 Strong types and units
 
-Ch. 27 wraps a scaled price in `struct Price { std::int64_t ticks; }` and defers "why this costs nothing" here. The idea is older than C++ (Hungarian notation was an attempt at it) and the trading version is concrete: `Price`, `Qty`, `Notional`, `PriceDelta`, `SymbolId`, `ClOrdId`, `Seq`, `Nanos` are all `int64`/`uint64` at runtime and *all different things*, and the bugs that matter — a price added to a quantity, a tick count where a scaled price was expected, an order id compared with a sequence number, nanoseconds passed as microseconds — are type errors that `int64_t` cannot see. A **strong type** is a single-member wrapper whose *allowed operations* are the only ones defined:
+Ch. 30 wraps a scaled price in `struct Price { std::int64_t ticks; }` and defers "why this costs nothing" here. The idea is older than C++ (Hungarian notation was an attempt at it) and the trading version is concrete: `Price`, `Qty`, `Notional`, `PriceDelta`, `SymbolId`, `ClOrdId`, `Seq`, `Nanos` are all `int64`/`uint64` at runtime and *all different things*, and the bugs that matter — a price added to a quantity, a tick count where a scaled price was expected, an order id compared with a sequence number, nanoseconds passed as microseconds — are type errors that `int64_t` cannot see. A **strong type** is a single-member wrapper whose *allowed operations* are the only ones defined:
 
 ```cpp
 // units.hpp — strong types for the order path. Trivially copyable, one register each, zero cost (§19.5 proves it). C++20.
 #include <compare>
 #include <concepts>
 #include <cstdint>
-struct Price      { std::int64_t ticks; constexpr explicit Price(std::int64_t t) : ticks(t) {} auto operator<=>(const Price&) const = default; };   // scaled integer, Ch. 27
+struct Price      { std::int64_t ticks; constexpr explicit Price(std::int64_t t) : ticks(t) {} auto operator<=>(const Price&) const = default; };   // scaled integer, Ch. 30
 struct PriceDelta { std::int64_t ticks; auto operator<=>(const PriceDelta&) const = default; };
 struct Qty        { std::int64_t v;     constexpr explicit Qty(std::int64_t q) : v(q) {}      auto operator<=>(const Qty&) const = default; };
 struct Notional   { std::int64_t v;     auto operator<=>(const Notional&) const = default; };
 enum class SymbolId : std::uint32_t {};  enum class Seq : std::uint64_t {};                 // ids: an enum class is the cheapest strong type — no arithmetic, no implicit conversion
-struct ClOrdId    { std::uint64_t v; std::uint32_t slot() const { return std::uint32_t(v); } std::uint32_t gen() const { return std::uint32_t(v >> 32); } bool operator==(const ClOrdId&) const = default; };   // Ch. 88
+struct ClOrdId    { std::uint64_t v; std::uint32_t slot() const { return std::uint32_t(v); } std::uint32_t gen() const { return std::uint32_t(v >> 32); } bool operator==(const ClOrdId&) const = default; };   // Ch. 91
 
 // the allowed-operations matrix — everything NOT listed does not compile:
 [[nodiscard]] constexpr PriceDelta operator-(Price a, Price b)      { return {a.ticks - b.ticks}; }   // price − price → delta
 [[nodiscard]] constexpr Price      operator+(Price a, PriceDelta d) { return Price{a.ticks + d.ticks}; }
 [[nodiscard]] constexpr Price      operator-(Price a, PriceDelta d) { return Price{a.ticks - d.ticks}; }
-[[nodiscard]] constexpr Notional   operator*(Price p, Qty q)        { return {p.ticks * q.v}; }       // price × qty → notional (checked variant: Ch. 87 §87.2.3)
+[[nodiscard]] constexpr Notional   operator*(Price p, Qty q)        { return {p.ticks * q.v}; }       // price × qty → notional (checked variant: Ch. 90 §90.2.3)
 [[nodiscard]] constexpr Qty        operator+(Qty a, Qty b)          { return Qty{a.v + b.v}; }
 [[nodiscard]] constexpr Qty        operator-(Qty a, Qty b)          { return Qty{a.v - b.v}; }
 Price      operator+(Price, Price) = delete;                                                            // no price + price
@@ -205,9 +205,9 @@ template <Money M> constexpr M scale_bp(M m, std::int64_t bp) { return M{m.ticks
 static_assert(sizeof(Price) == 8 && std::is_trivially_copyable_v<Price> && std::is_standard_layout_v<Price>);           // the ABI passes it in a register (§19.5)
 ```
 
-- **Explicit construction, defaulted comparison, no implicit conversion.** `explicit Price(int64)` means a raw tick count must be *named* as a price where it enters the typed world (the decoder, Ch. 57 §57.4); `operator<=>() = default` gives the full set of comparisons for free; there is no `operator int64_t`, so a `Price` cannot leak into untyped arithmetic by accident — reach `.ticks` on purpose at the codec and the journal.
-- **The matrix is the design.** Write down what each pair of units may do and define exactly those operators; `= delete` the tempting wrong ones so the compiler's error names the intent. The Ch. 87 gate reads as `if (o.px * o.qty > L.max_notional)` with every operand's unit checked; a transposed argument is a compile error, not a Tuesday.
-- **Ids are `enum class`.** `SymbolId`, `Seq`, a port id: no arithmetic should exist, so the cheapest strong type is an `enum class` with an explicit underlying type — comparable, hashable, switchable, convertible only by `static_cast`. `ClOrdId` is a struct because it *has* operations (slot/gen unpacking — Ch. 88 §88.2.1).
+- **Explicit construction, defaulted comparison, no implicit conversion.** `explicit Price(int64)` means a raw tick count must be *named* as a price where it enters the typed world (the decoder, Ch. 60 §60.4); `operator<=>() = default` gives the full set of comparisons for free; there is no `operator int64_t`, so a `Price` cannot leak into untyped arithmetic by accident — reach `.ticks` on purpose at the codec and the journal.
+- **The matrix is the design.** Write down what each pair of units may do and define exactly those operators; `= delete` the tempting wrong ones so the compiler's error names the intent. The Ch. 90 gate reads as `if (o.px * o.qty > L.max_notional)` with every operand's unit checked; a transposed argument is a compile error, not a Tuesday.
+- **Ids are `enum class`.** `SymbolId`, `Seq`, a port id: no arithmetic should exist, so the cheapest strong type is an `enum class` with an explicit underlying type — comparable, hashable, switchable, convertible only by `static_cast`. `ClOrdId` is a struct because it *has* operations (slot/gen unpacking — Ch. 91 §91.2.1).
 - **`[[nodiscard]]` on every operator** — a computed notional that is dropped is a bug.
 - **Concepts, not SFINAE, to constrain generics** (C++20): `Money` above lets a `clamp`, a `scale_bp` or a serializer accept exactly the unit family it is written for.
 - **Trivially copyable, standard layout, one member** — this is what makes the wrapper free: the Itanium ABI passes such a struct in the same register as its member and the optimizer sees through the constructor; §19.5's asm is the proof. (Members with non-trivial special functions, or two members, change the ABI class and *do* cost — a `Price` with a destructor is passed in memory.)
@@ -215,17 +215,17 @@ static_assert(sizeof(Price) == 8 && std::is_trivially_copyable_v<Price> && std::
 
 ### 19.4.5 Type-state and compile-time state machines
 
-The order lifecycle of Appendix J.3 and the session state machine beneath it (Logon → LoggedOn → Logout) are *runtime* state — a byte in the in-flight table (Ch. 88 §88.2.2), because states are data that must be journaled and replayed. The *API* through which code performs transitions can nevertheless make the illegal ones unrepresentable: **type-state** encodes the state in the type, so that `send()` exists only on a `Session<LoggedOn>` and `on_fill()` only on an `Order<Acked>`.
+The order lifecycle of Appendix J.3 and the session state machine beneath it (Logon → LoggedOn → Logout) are *runtime* state — a byte in the in-flight table (Ch. 91 §91.2.2), because states are data that must be journaled and replayed. The *API* through which code performs transitions can nevertheless make the illegal ones unrepresentable: **type-state** encodes the state in the type, so that `send()` exists only on a `Session<LoggedOn>` and `on_fill()` only on an `Order<Acked>`.
 
 ```cpp
-// typestate.hpp — the state in the type; illegal transitions do not compile. The runtime table still stores the state as a byte (Ch. 88).
+// typestate.hpp — the state in the type; illegal transitions do not compile. The runtime table still stores the state as a byte (Ch. 91).
 struct Disconnected {}; struct LoggedOn {}; struct LoggingOut {};
 template <class State> class Session;
 template <> class Session<Disconnected> { public: [[nodiscard]] Session<LoggedOn> logon(SeqNums ours) &&;   /* no send(): there is nothing to send on */ };
 template <> class Session<LoggedOn>     { public: [[nodiscard]] ClOrdId send(const NewOrder&) &;  [[nodiscard]] Session<LoggingOut> logout() &&; [[nodiscard]] Session<Disconnected> dropped() &&; };
 template <> class Session<LoggingOut>   { public: [[nodiscard]] Session<Disconnected> confirmed() &&; };
 // Session<LoggedOn> s = Session<Disconnected>{}.logon(seqs);  s.send(o);   // ok
-// Session<Disconnected> d; d.send(o);                                      // error: no member 'send' — the bug Ch. 88 §88.5 lists is now a compile error
+// Session<Disconnected> d; d.send(o);                                      // error: no member 'send' — the bug Ch. 91 §91.5 lists is now a compile error
 
 struct Sent {}; struct Acked {}; struct Terminal {};
 template <class S> struct Order;
@@ -244,18 +244,64 @@ constexpr OState TRANSITION[int(OState::N)][int(Event::N)] = {
     /*PartFill */ {X,              OState::PartFilled, OState::Filled, OState::Cancelled, X},
     /*Filled   */ {X, X, X, X, X}, /*Cancelled*/ {X, X, X, X, X}, /*Rejected*/ {X, X, X, X, X} };
 static_assert(TRANSITION[int(OState::Filled)][int(Event::Cancel)] == X, "terminal states accept nothing");
-constexpr OState step(OState s, Event e) { return TRANSITION[int(s)][int(e)]; }       // one table load at runtime (Ch. 13 §13.4.2); X → the Ch. 88 stale/illegal path
+constexpr OState step(OState s, Event e) { return TRANSITION[int(s)][int(e)]; }       // one table load at runtime (Ch. 13 §13.4.2); X → the Ch. 91 stale/illegal path
 ```
 
-- **Rvalue-qualified transitions** (`&&`) consume the old state object, so the stale `Session<Disconnected>` cannot be used after `logon()` — the C++ approximation of a move-only typestate (Rust's borrow checker enforces it fully — Ch. 77).
-- **Type-state is the API; the byte is the data.** Ch. 88's table stores `OState` because it must be journaled, snapshotted and replayed; `on_venue` reconstructs the typed view for the transition and writes the byte back. The two agree because both derive from the one `TRANSITION` table — `static_assert` the typed transitions against it.
-- **Compile-time tables** are the branch-light form of a state machine (Ch. 13 §13.4.2): one load instead of a `switch`, with every illegal cell visible at compile time. For the deterministic core (Ch. 86 §86.2.2) this is the shape `apply()` takes for its protocol states.
+- **Rvalue-qualified transitions** (`&&`) consume the old state object, so the stale `Session<Disconnected>` cannot be used after `logon()` — the C++ approximation of a move-only typestate (Rust's borrow checker enforces it fully — Ch. 80).
+- **Type-state is the API; the byte is the data.** Ch. 91's table stores `OState` because it must be journaled, snapshotted and replayed; `on_venue` reconstructs the typed view for the transition and writes the byte back. The two agree because both derive from the one `TRANSITION` table — `static_assert` the typed transitions against it.
+- **Compile-time tables** are the branch-light form of a state machine (Ch. 13 §13.4.2): one load instead of a `switch`, with every illegal cell visible at compile time. For the deterministic core (Ch. 89 §89.2.2) this is the shape `apply()` takes for its protocol states.
 - **Runtime-selected states still need a `variant`.** When the state is not known at compile time (which it never is for an *incoming* message), the typed objects live inside a `std::variant<Order<Sent>, Order<Acked>, Order<Terminal>>` and `std::visit` dispatches (Ch. 14 §14.4.3) — a jump table, cheap, but the type-state's zero cost applies *within* a known state, not to the dispatch into it.
-- **The honest trade-off**: one class per state multiplies instantiations (§19.6's bloat axis), error messages name `Session<LoggedOn>` rather than "session not logged on", and a state added later touches every specialization. Use type-state for the handful of protocol objects whose misuse is expensive (session, order, the Ch. 38 slot handle) — not for every enum in the program.
+- **The honest trade-off**: one class per state multiplies instantiations (§19.6's bloat axis), error messages name `Session<LoggedOn>` rather than "session not logged on", and a state added later touches every specialization. Use type-state for the handful of protocol objects whose misuse is expensive (session, order, the Ch. 41 slot handle) — not for every enum in the program.
 
 The synthesis of §19.4: encode the *varying design decision* in a type (CRTP for polymorphism, policies for composed behavior and static dependency injection, expression types for fused computation, strong types for units, type-state for protocol objects) so the optimizer sees a concrete program and the abstraction inlines away — then **verify it did**.
 
 ---
+
+### 19.4.6 Concepts and constrained overload sets: compile-time dispatch four ways
+
+§19.2 listed three ways to choose code by *type* with no runtime branch — tag dispatch, `if constexpr`, SFINAE — and C++20 adds the fourth, **concepts**, which is the one the book's "resolve the policy at build time" philosophy (§19.4.3) actually wants: a *named, checkable requirement* on a template parameter. One feed-handler example, written four ways: read a wire field, byte-swapping it if it is an integer and copying it verbatim if it is an 8-character symbol (`struct Sym { char c[8]; }`).
+
+```cpp
+// (1) tag dispatch — overload on a tag chosen by a trait            // (2) if constexpr — one body, dead branch discarded
+namespace tag {                                                      namespace ifc {
+  template <class T> T read_impl(const uint8_t* p, std::true_type)      template <class T> T read(const uint8_t* p) {
+  { T v; std::memcpy(&v, p, sizeof v); return std::byteswap(v); }        static_assert(std::is_integral_v<T> || is_sym_v<T>);
+  template <class T> T read_impl(const uint8_t* p, std::false_type)     T v; std::memcpy(&v, p, sizeof v);
+  { T v; std::memcpy(&v, p, sizeof v); return v; }                       if constexpr (std::is_integral_v<T>) return std::byteswap(v);
+  template <class T> T read(const uint8_t* p)                            else return v;
+  { return read_impl<T>(p, std::bool_constant<std::is_integral_v<T>>{}); } }
+}                                                                    }
+// (3) SFINAE — candidates removed by substitution failure            // (4) concepts — constrained overloads; the more constrained wins
+namespace sfinae {                                                   namespace con {
+  template <class T, std::enable_if_t<std::is_integral_v<T>, int> = 0>  template <class T> concept WireInt = std::integral<T> && sizeof(T) <= 8;
+  T read(const uint8_t* p) { … byteswap … }                              template <class T> concept WireSym = std::is_same_v<T, Sym>;
+  template <class T, std::enable_if_t<is_sym_v<T>, int> = 0>             template <WireInt T> T read(const uint8_t* p) { … byteswap … }
+  T read(const uint8_t* p) { … copy … }                                  template <WireSym T> T read(const uint8_t* p) { … copy … }
+}                                                                    }
+```
+
+All four produce **identical code** — `read<uint64_t>` is one `movbe`, `read<Sym>` one `mov`, for every mechanism, both compilers (§19.5) — and all four cost the **same build time** (400 instantiations: GCC 471–484 ms, Clang 320–344 ms; the spread is noise). They differ in what they do when *misused*, which is the whole point of choosing among them:
+
+- **Tag dispatch** (the C++98 idiom) selects an overload by a trait but **rejects nothing**: `tag::read<double>(p)` compiles — `is_integral_v<double>` is false, so the *symbol* overload runs and silently skips the byte-swap. Zero diagnostic lines, wrong code. Use it only when every type has a valid meaning in every branch.
+- **`if constexpr`** (Ch. 18) is the right tool for *one algorithm with type-dependent steps* — one body, one instantiation, no overload set to reason about. Misuse is rejected by whatever `static_assert` you wrote (7–8 lines of diagnostic here) and nothing else; without the `static_assert`, `read<double>` compiles and returns an unswapped `double`.
+- **SFINAE** (`std::enable_if`) removes candidates from the overload set, so `read<double>` is "no matching function" with each candidate's failed condition listed (10–19 lines). It works, it is what every pre-C++20 library does, and its two costs are the ones Ch. 19 §19.6 complains about: the requirement is spelled as a type-trait expression in a defaulted template parameter (unreadable, un-nameable, easy to get subtly non-exclusive), and the compiler cannot *rank* two candidates whose conditions overlap — it reports ambiguity.
+- **Concepts** state the requirement by name and let overloads be **ranked by subsumption**: if `concept Wide = WireInt<T> && sizeof(T) == 8`, then `template <Wide T> rank(T)` is *more constrained* than `template <WireInt T> rank(T)`, and `rank(uint64_t{})` picks it with no ambiguity (`mov eax, 2` — §19.5). Subsumption works only through *named* concepts: two `requires`-clauses that spell the same condition out twice are *different* atomic constraints and ambiguous. The diagnostic for `con::read<double>` is the longest (25–29 lines) and the only one that says *why*: `note: because 'double' does not satisfy 'WireInt'`. The standard library's concepts — `std::integral`, `std::invocable<F, Args…>`, `std::ranges::contiguous_range` (the one a zero-copy decoder wants for its buffer argument), `std::same_as`, `std::convertible_to` — compose into your own.
+
+Concepts also give §19.4.3's policies the static interfaces they were missing. The `OrderBook<Storage, Locking, Alloc>` template accepted *any* three types and reported a missing method as a 200-line instantiation trace from inside the host; with concept-checked parameters it reports it at the template argument:
+
+```cpp
+template <class S> concept BookStorage = requires(S s, std::int64_t px, std::int32_t q) {
+    { s.add(px, q) } -> std::same_as<void>;
+    { s.best_bid() } -> std::convertible_to<std::int64_t>;
+    { S::capacity } -> std::convertible_to<std::size_t>;          // a static member is a requirement too
+};
+template <class L> concept LockingPolicy = requires(L l) { l.lock(); l.unlock(); } && std::is_nothrow_default_constructible_v<L>;
+template <class St> concept Strategy = requires(St s, std::int64_t px, std::int32_t qty) { { s.on_tick(px, qty) } noexcept -> std::same_as<void>; };
+
+template <BookStorage Storage, LockingPolicy Locking, class Alloc> class OrderBook : Storage, Locking { /* unchanged */ };
+```
+
+A concept checks **syntax, not semantics** — `LockingPolicy` is satisfied by a type whose `lock()` does nothing, which is exactly what `NoLock` relies on; the semantic contract still lives in documentation and tests. And a concept is free: it is evaluated at instantiation, produces no code, and §19.5's asm is byte-identical with or without the constraint. Ch. 20 uses exactly this machinery — `fixed_string` NTTPs plus `if constexpr` over a `consteval` table — to generate a whole decoder.
 
 ## 19.5 Verify the codegen: zero-overhead confirmation
 
@@ -283,7 +329,7 @@ There is no trace of `StrategyBase`, no `static_cast`, no call — the abstracti
         call    qword ptr [rax]             ; indirect call — NOT inlined, the abstraction leaked
 ```
 
-**Expression-template fusion.** For `d = a + b + c`, confirm a *single* loop with no temporary buffers — `d[i] = a[i]+b[i]+c[i]` computed in one pass, ideally vectorized (Ch. 29):
+**Expression-template fusion.** For `d = a + b + c`, confirm a *single* loop with no temporary buffers — `d[i] = a[i]+b[i]+c[i]` computed in one pass, ideally vectorized (Ch. 32):
 
 ```asm
 .loop:                                       ; one fused pass, no intermediate vectors
@@ -319,11 +365,24 @@ No wrapper, no load/store through a stack slot, no extra `mov`: a trivially-copy
 
 - **For any "zero-cost" abstraction on the hot path, diff its asm against the hand-written equivalent.** Same instructions = the claim holds. A stray `call`, extra moves, or a missing inline = it leaked.
 - **Confirm the dispatch inlined** (no `call [rax]`, the §19.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 9).
-- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 95).
+- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 98).
+
+**Four dispatch mechanisms, one instruction.** The §19.4.6 `read<uint64_t>` under tag dispatch, `if constexpr`, SFINAE and concepts (`clang++ -O2 -std=c++23 -march=x86-64-v3`; GCC 13.3 identical bar `endbr64`):
+
+```asm
+; tag::read<uint64_t>   ifc::read<uint64_t>   sfinae::read<uint64_t>   con::read<uint64_t>   — ALL FOUR:
+        movbe   rax, qword ptr [rdi + 30]   ; load + byte-swap, offset folded
+        ret
+; tag::read<Sym>  and  con::read<Sym>:                 ; con::rank(uint64_t) — subsumption picked the Wide overload:
+        mov     rax, qword ptr [rdi + 22]              ;         mov     eax, 2
+        ret                                            ;         ret
+```
+
+The choice of mechanism is a *diagnostics and design* decision; the optimizer sees the same function four times. Concept checks, `enable_if` and tag parameters leave no instructions — the empty tag argument is passed in no register and the constraint is evaluated before codegen begins.
 
 ### Build-time/size caveat
 
-Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time + binary size. Verify the *other* axis too — `size`/`bloaty` on the binary, `-ftime-trace` on the build — so a runtime win doesn't hide an I-cache (Ch. 12) or build-time regression (§19.6).
+Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time + binary size. For the four dispatch mechanisms of §19.4.6 that cost is the same — 400 instantiations compiled in 471/471/478/484 ms (tag/`if constexpr`/SFINAE/concepts, GCC 13.3) and 322/320/344/326 ms (Clang 18.1) — so concepts are not a build-time tax; what differs is the *length and quality* of the error when a constraint fails (0 lines and wrong code for tag dispatch, 7–8 for `if constexpr`+`static_assert`, 10–19 for SFINAE, 25–29 with a named reason for concepts). Verify the *other* axis too — `size`/`bloaty` on the binary, `-ftime-trace` on the build — so a runtime win doesn't hide an I-cache (Ch. 12) or build-time regression (§19.6).
 
 ---
 
@@ -336,7 +395,8 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 - **Expression-template dangling (`auto` lifetime).** `auto e = a + b;` may capture *references* to `a`/`b` in the expression type; if they go out of scope before `e` is evaluated, it dangles. Evaluate expressions immediately (assign to a concrete `Vec`), and prefer a vetted library (Eigen/Blaze) that handles lifetimes.
 - **Over-abstraction.** A tower of policies/CRTP layers for variation you don't actually have (YAGNI) costs build time, readability, and error-message sanity for no runtime benefit. Reach for these when there's a *real* need for compile-time variation on the hot path, not preemptively.
 - **Combinatorial instantiation explosion.** `Host<A, B, C>` with several options per axis can instantiate dozens of combinations, each a code copy — build-time and size blowup (Ch. 18). Cap the matrix to combinations you actually ship.
-- **Forgetting the abstraction must still be *correct*.** Static dispatch removes the runtime check but not the need for it; `static_cast`-based CRTP and policy composition can hide lifetime/aliasing bugs (Ch. 21) the compiler won't catch. Zero-cost ≠ zero-risk.
+- **Forgetting the abstraction must still be *correct*.** Static dispatch removes the runtime check but not the need for it; `static_cast`-based CRTP and policy composition can hide lifetime/aliasing bugs (Ch. 23) the compiler won't catch. Zero-cost ≠ zero-risk.
+- **Subsumption and ambiguity traps (§19.4.6).** Two overloads constrained by *equivalent but separately spelled* `requires`-clauses are ambiguous — subsumption only relates *named* concepts (`Wide` subsumes `WireInt` because `Wide` is defined as `WireInt<T> && …`); a concept that checks the *wrong thing* (syntax present, semantics absent) silently admits a policy that compiles and misbehaves; and tag dispatch that forgets to reject (`read<double>` taking the symbol path) produces no error at all. Constrain with named concepts, keep the semantic contract in tests, and reserve tag dispatch for sets where every branch is valid for every type.
 
 ---
 
@@ -345,12 +405,14 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 **Exercises**
 
 1. **Prove zero-cost.** Build `zerocost.cpp`; run `hand` vs `crtp` vs `virt` vs `func` pinned/turbo-off. Confirm CRTP matches hand-written ns/call. Then disassemble (Ch. 4) and confirm the CRTP and hand-written bodies are **identical**, and `virt` shows `call [rax]` (§19.5).
-2. **Break the inline.** Make the CRTP `go()` large (or mark it `[[gnu::noinline]]`). Does CRTP still match hand-written? Explain why "zero-cost" depends on inlining (Ch. 12 §12.4.1, Ch. 22 §22.2) and the ILP it exposes (Ch. 11), and what the asm now shows.
+2. **Break the inline.** Make the CRTP `go()` large (or mark it `[[gnu::noinline]]`). Does CRTP still match hand-written? Explain why "zero-cost" depends on inlining (Ch. 12 §12.4.1, Ch. 24 §24.2) and the ILP it exposes (Ch. 11), and what the asm now shows.
 3. **Policy-based order book (sketch).** Write a tiny `Book<StoragePolicy>` with two policies (flat array vs `std::map`). Confirm (a) `sizeof` is unaffected by an *empty* policy (Ch. 9), (b) each policy inlines, and (c) the binary grows per instantiated combination (`size`).
 4. **Bloat measurement.** Instantiate a non-trivial templated function for 1, 4, 16 types; measure binary size (`size`/`bloaty`) and build time (`-ftime-trace`). Where does bloat become a concern (Ch. 12), and how does factoring out type-independent code help (§19.6)?
 5. **Expression templates vs naïve.** Using Eigen (or a tiny hand-rolled version), compute `d = a + b + c` over large vectors naïvely vs with expression templates. Compare passes/allocations and ns/element; confirm fusion in the asm (§19.5). When does it *not* pay?
 
 **Checklist — zero-cost abstractions**
+
+- [ ] Template parameters on the hot path are **constrained by named concepts** (§19.4.6) — a bad policy type fails at the argument, not 200 lines inside the host — and the constrained and unconstrained versions produce **the same asm** (§19.5).
 
 - [ ] Hot-path polymorphism known at compile time uses **CRTP / static dispatch**, not `virtual` (Ch. 14).
 - [ ] I **verified zero-cost in the asm** (§19.5) — the abstraction's codegen **matches the hand-written** equivalent (inlined, no `call [rax]`, no extra copies).
@@ -359,7 +421,7 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 - [ ] Heavy metaprograms are constrained with **concepts/`requires`** for readable errors, and I didn't reach for expression templates without a measured temporary/allocation problem.
 - [ ] Expression results are **evaluated immediately** (no `auto` dangling), preferably via a **vetted library** (Eigen/Blaze).
 - [ ] I checked the **build-time axis** (`-ftime-trace`) and **combinatorial explosion** of policy matrices (Ch. 18) — runtime wins didn't hide a build/size regression.
-- [ ] I didn't **over-abstract** for variation that doesn't exist (YAGNI); zero-cost still requires correctness (lifetimes/aliasing — Ch. 21).
+- [ ] I didn't **over-abstract** for variation that doesn't exist (YAGNI); zero-cost still requires correctness (lifetimes/aliasing — Ch. 23).
 
 ---
 
@@ -374,9 +436,9 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 ## 19.9 Additional Reading
 
 - CppCon talks on "zero-cost abstractions," CRTP, and policy-based design — including before/after asm walkthroughs that mirror §19.5.
-- Ch. 14 (*Indirect Calls & Virtual Dispatch*) — the runtime-polymorphism cost CRTP avoids; Ch. 18 (*Compile-Time Mechanics*) — the `if constexpr`/template foundation; Ch. 20 (*The Cost of Abstractions*) — abstractions that *aren't* free; Ch. 25 (*Cache-Friendly Containers*) and Ch. 24 (*Custom Allocators*) — policy-based containers/allocators in practice; Ch. 29 (*SIMD*) — expression-template vectorization.
-- **Ch. 77 §77.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
+- Ch. 14 (*Indirect Calls & Virtual Dispatch*) — the runtime-polymorphism cost CRTP avoids; Ch. 18 (*Compile-Time Mechanics*) — the `if constexpr`/template foundation; Ch. 21 (*The Cost of Abstractions*) — abstractions that *aren't* free; Ch. 28 (*Cache-Friendly Containers*) and Ch. 27 (*Custom Allocators*) — policy-based containers/allocators in practice; Ch. 32 (*SIMD*) — expression-template vectorization.
+- **Ch. 80 §80.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
 
 ---
 
-*Next: Ch. 20 — The Cost of Abstractions, the counterweight to this chapter: the abstractions that are *not* free — exception unwinding, RTTI, `dynamic_cast` — and how to handle errors on the hot path with `noexcept`, error codes, and `std::expected` without paying the unwinder.*
+*Next: Ch. 20 — Compile-Time Protocol Decoders: From Schema to Code, where the techniques of this chapter and Ch. 18 build something a feed handler ships: a venue's field list written once as a schema, parsed in `consteval`, turned into overlay accessors by `if constexpr`, `static_assert`ed against the venue document — and proven in the asm to be the same `movbe` as the hand-written decoder of Ch. 60.*
