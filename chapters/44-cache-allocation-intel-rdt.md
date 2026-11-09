@@ -2,15 +2,15 @@
 
 # Chapter 44 — Cache Allocation Technology & Intel RDT
 
-> **Prerequisites:** Ch. 7–8 (the memory hierarchy and why an L3 eviction costs a DRAM round-trip), Ch. 16 (NUMA), Ch. 42, 43, 45 (isolating the hot core — this chapter isolates its *cache*, the piece core-pinning alone can't), Ch. 33 (contention on shared cache lines), Appendix C (the tuning checklist this extends).
+> **Prerequisites:** Ch. 7–8 (the memory hierarchy and why an L3 eviction costs a DRAM round-trip), Ch. 16 (NUMA), Ch. 42–43 (pinning and SMT — a dedicated core; this chapter isolates its *cache*, the piece core-pinning alone can't), Ch. 33 (contention on shared cache lines). Ch. 45 (`isolcpus`/`nohz_full`/RT) and Appendix C come *after* this chapter and are not needed first — this chapter assumes only a pinned core.
 >
-> **Leads into:** Ch. 56 (DDIO — which lands NIC data in the very L3 region this chapter learns to partition), Appendix C (add these knobs to the quiet-box checklist). The isolation step beyond core pinning (Ch. 42) and SMT control (Ch. 43): partitioning the shared last-level cache so a noisy neighbor can't evict the hot working set even when the core is dedicated.
+> **Leads into:** Ch. 56 (DDIO — which lands NIC data in the very L3 region this chapter learns to partition), Ch. 45 (RT scheduling & kernel tuning — the kernel-side isolation of the same core), Appendix C (add these knobs to the quiet-box checklist). The isolation step beyond core pinning (Ch. 42) and SMT control (Ch. 43): partitioning the shared last-level cache so a noisy neighbor can't evict the hot working set even when the core is dedicated.
 
 ---
 
 ## 44.1 Why it matters: pinning the core isn't enough if the cache is shared
 
-Part VII went to great lengths to give the hot thread a *quiet core* — `isolcpus`, `nohz_full`, IRQ affinity, RT priority (Ch. 42, 43, 45). But a pinned core is not an *isolated* core, because the one resource it still shares with every other core on the socket is the **last-level cache (L3)**. On a modern Xeon the L3 is a single shared pool, inclusive-ish, carved across all cores. So the housekeeping thread on core 1, the logging consumer (Ch. 71) on core 0, a capture writer (Ch. 75), even a stray `cron` job (Ch. 45) — anything running anywhere on the socket — allocates into the *same* L3 your hot path depends on, and can **evict your hot working set** (the order book, the strategy state, the decode tables — Ch. 25). That eviction is invisible to `taskset`: the core is yours, but the cache underneath it is a commons, and a noisy neighbor turns an L3 hit (~15–20 ns, Ch. 7) into a DRAM miss (~80–100 ns) at exactly the wrong moment (Ch. 1).
+Ch. 42–43 gave the hot thread a *dedicated core* — pinned, IRQs steered away, the SMT sibling idle — and Ch. 45 will quiet it further with `isolcpus`, `nohz_full` and RT priority. But a pinned core is not an *isolated* core, because the one resource it still shares with every other core on the socket is the **last-level cache (L3)**. On a modern Xeon the L3 is a single shared pool, inclusive-ish, carved across all cores. So the housekeeping thread on core 1, the logging consumer (Ch. 71) on core 0, a capture writer (Ch. 75), even a stray `cron` job (Ch. 45) — anything running anywhere on the socket — allocates into the *same* L3 your hot path depends on, and can **evict your hot working set** (the order book, the strategy state, the decode tables — Ch. 25). That eviction is invisible to `taskset`: the core is yours, but the cache underneath it is a commons, and a noisy neighbor turns an L3 hit (~15–20 ns, Ch. 7) into a DRAM miss (~80–100 ns) at exactly the wrong moment (Ch. 1).
 
 This is the last, quietest source of tail latency on an otherwise-tuned box, and it is precisely the kind of jitter that *only* shows up under production load — when the housekeeping cores are actually busy — and never in a quiet lab (Ch. 76's test-vs-prod drift). The symptom is maddening: p50 is perfect, but p99.9 shows the hot path occasionally paying DRAM latency for data that *should* be resident, because something on another core reached into the shared L3 and knocked it out. Core isolation gave you the compute; it did nothing for the cache.
 
@@ -140,4 +140,4 @@ Two higher-order uses that connect forward:
 
 ---
 
-*Next: Ch. 45 — Real-Time Scheduling & Kernel Tuning, the kernel configuration behind the isolation this chapter assumed: `isolcpus`, `nohz_full`, RT priorities, cgroups, and `cyclictest` — turning a pinned, cache-partitioned core into a jitter-free one.*
+*Next: Ch. 45 — Real-Time Scheduling & Kernel Tuning, the kernel side of isolating the core this chapter just gave a private cache: `isolcpus`, `nohz_full`, RT priorities, cgroups, and `cyclictest` — turning a pinned, cache-partitioned core into a jitter-free one.*

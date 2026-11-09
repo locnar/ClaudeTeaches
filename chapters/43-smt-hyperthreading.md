@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 42 (pinning — you pin to a *logical* CPU; this chapter is its sibling), Ch. 11–12 (the execution ports / front-end the siblings share), Ch. 7 (the L1/L2 they share), Ch. 6 (BIOS — enabling/disabling HT), Ch. 41 (the hot-path-owns-the-core principle), Ch. 29 (AVX downclocking shares the core too), Ch. 1 (latency vs throughput).
 >
-> **Leads into:** Ch. 45 (RT scheduling / isolation — isolate the sibling too), Ch. 6/Appendix C (BIOS HT toggle). This resolves the "what about the sibling?" question Ch. 42 raised and feeds the per-core decision in the tuning checklist.
+> **Leads into:** Ch. 44 (CAT/RDT — after the core and its sibling, the shared L3 is the next resource to partition), Ch. 45 (RT scheduling / isolation — isolate the sibling too), Ch. 6/Appendix C (BIOS HT toggle). This resolves the "what about the sibling?" question Ch. 42 raised and feeds the per-core decision in the tuning checklist.
 
 ---
 
