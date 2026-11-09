@@ -64,21 +64,22 @@ Pinning's payoff is **jitter reduction** — the tail (Ch. 1), not the mean. Mea
 // Build: g++ -O2 -std=c++20 -march=native jitter.cpp -o jitter
 // Run:   ./jitter                        (unpinned — scheduler may migrate/preempt)
 //        taskset -c 2 ./jitter           (pinned to core 2)
-//        taskset -c 2 ./jitter           (with core 2 isolated: isolcpus/nohz_full + IRQs routed away — Ch.45)
+//        taskset -c 2 ./jitter           (with core 2 isolated: isolcpus/nohz_full + IRQs routed away — Ch. 45)
 #include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
-#include <chrono>
 #include <x86intrin.h>
 
 int main() {
     constexpr long N = 50'000'000;
-    std::vector<std::uint32_t> samples; samples.reserve(N);
+    // Sized, not reserve()d: the 200 MB sample buffer must be faulted in BEFORE the timed loop, or a
+    // first-touch page fault every 1,024 samples (~1-2 µs each) owns the tail whatever the core does.
+    std::vector<std::uint32_t> samples(N);
     std::uint64_t prev = __rdtsc();
     for (long i = 0; i < N; ++i) {
         std::uint64_t now = __rdtsc();
-        samples.push_back(std::uint32_t(now - prev));   // cycles for this iteration
+        samples[i] = std::uint32_t(now - prev);        // cycles for this iteration
         prev = now;
         // a tiny fixed amount of work would go here; the iteration time SHOULD be constant.
     }
@@ -90,16 +91,16 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), turbo off (illustrative; the *tail* is the point — convert cycles to ns at ~2.9 GHz):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x (`isolcpus`/`nohz_full` as stated per row, THP = `madvise`), turbo off (illustrative; the *tail* is the point — convert cycles to ns at 2.9 GHz). The sample buffer is faulted in *before* the loop: an earlier draft `reserve()`d it, and the first-touch page fault every 1,024 samples put a ~1-2 µs spike in every row's tail no matter how quiet the core was.
 
 ```
                                    p50    p99    p99.9    p99.99    max        what's in the tail
-   unpinned (noisy system)        ~20    ~80    ~2,500   ~30,000   ~120,000   migrations, preemption, IRQs (Ch.41)
-   pinned to a normal core        ~20    ~30    ~400     ~8,000    ~40,000    fewer migrations, but timer tick + IRQs remain
-   pinned + isolated + IRQs away  ~20    ~22    ~28      ~60       ~300       quiet core: tail nearly GONE
+   unpinned (noisy system)        ~30    ~80    ~2,500   ~30,000   ~120,000   migrations, preemption, IRQs (Ch. 41)
+   pinned to a normal core        ~30    ~34    ~400     ~8,000    ~40,000    fewer migrations, but timer tick + IRQs remain
+   pinned + isolated + IRQs away  ~30    ~32    ~36      ~60       ~300       quiet core: tail nearly GONE
 ```
 
-Read it the Ch. 1 way: **the median (p50) barely changes — pinning isn't about the mean — but the *tail* collapses by orders of magnitude.** Unpinned, the p99.99/max are *huge* (tens of thousands of cycles) because the loop is occasionally **migrated** (cold restart — Ch. 41), **preempted** (another thread ran), or **interrupted** (a timer tick or IRQ stole the core). Pinning removes migrations and shrinks the tail; but a *normal* pinned core still takes the **timer tick** and **device IRQs**, so spikes remain. Only when the core is **isolated** (`isolcpus`/`nohz_full` — Ch. 45) *and* **IRQs are routed away** (this chapter) does the tail nearly vanish — the loop iteration time becomes the constant it should be. This is the headline result of Part VII: **a quiet core has a flat latency distribution; a noisy core has a long, ugly tail — and pinning + IRQ routing + isolation is what makes the core quiet.** Verify with `perf stat -e cpu-migrations,context-switches` (→ 0) and by checking `/proc/interrupts` shows ~no interrupts accumulating on the hot core during a run.
+Read it the Ch. 1 way: **the median (p50) barely changes — pinning isn't about the mean; it sits at ~30 cycles in every row because that is `rdtsc`'s own reciprocal throughput (~27 cycles on Ice Lake, Ch. 17), not the loop body — but the *tail* collapses by orders of magnitude.** Unpinned, the p99.99/max are *huge* (tens of thousands of cycles) because the loop is occasionally **migrated** (cold restart — Ch. 41), **preempted** (another thread ran), or **interrupted** (a timer tick or IRQ stole the core). Pinning removes migrations and shrinks the tail; but a *normal* pinned core still takes the **timer tick** and **device IRQs**, so spikes remain. Only when the core is **isolated** (`isolcpus`/`nohz_full` — Ch. 45) *and* **IRQs are routed away** (this chapter) does the tail nearly vanish — the loop iteration time becomes the constant it should be. This is the headline result of Part VII: **a quiet core has a flat latency distribution; a noisy core has a long, ugly tail — and pinning + IRQ routing + isolation is what makes the core quiet.** Verify with `perf stat -e cpu-migrations,context-switches` (→ 0) and by checking `/proc/interrupts` shows ~no interrupts accumulating on the hot core during a run.
 
 ## 42.4 Techniques
 

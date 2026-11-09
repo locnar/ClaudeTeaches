@@ -74,6 +74,7 @@ Measure per-message decode latency across the encoding spectrum (§53.2.1): fixe
 #include <cstdint>
 #include <cstring>
 #include <charconv>
+#include <string>
 #include <vector>
 #include <chrono>
 #include <bit>
@@ -86,7 +87,7 @@ struct AddOrder { std::uint8_t type; std::uint64_t seq, id; std::uint8_t side;
 
 struct Parsed { std::uint64_t seq, id, price; std::uint32_t qty; char side; };
 
-// zero-copy decode: load fields in place with bswap (Ch.21,28) — no payload copy.
+// zero-copy decode: load fields in place with bswap (Ch. 21, 28) — no payload copy.
 Parsed decode_binary(const std::uint8_t* p) {
     Parsed r;
     std::uint64_t seq; std::memcpy(&seq, p+1, 8);  r.seq = std::byteswap(seq);       // safe load + swap
@@ -96,13 +97,14 @@ Parsed decode_binary(const std::uint8_t* p) {
     std::uint64_t px;  std::memcpy(&px,  p+30, 8); r.price = std::byteswap(px);
     return r;
 }
-// FIX-like text decode: scan "55=AAPL|44=12345|38=100|54=1|..." — field scan + from_chars (Ch.28).
+// FIX-like text decode: scan "55=AAPL|44=12345|38=100|54=1|..." — field scan + from_chars (§53.4.1).
+// Every dereference is guarded by `s < end`: a truncated datagram must not read past the buffer (the bounds-check pitfall below).
 Parsed decode_fix(const char* s, std::size_t n) {
     Parsed r{}; const char* end = s + n;
     while (s < end) {
-        int tag = 0; s = std::from_chars(s, end, tag).ptr; if (*s=='=') ++s;
-        if (tag == 44) { long long px; s = std::from_chars(s, end, px).ptr; r.price = px; }
-        else if (tag == 38) { unsigned q; s = std::from_chars(s, end, q).ptr; r.qty = q; }
+        int tag = 0; s = std::from_chars(s, end, tag).ptr; if (s < end && *s=='=') ++s;
+        if (tag == 44) { long long px = 0; s = std::from_chars(s, end, px).ptr; r.price = px; }
+        else if (tag == 38) { unsigned q = 0; s = std::from_chars(s, end, q).ptr; r.qty = q; }
         else { while (s < end && *s != '\x01') ++s; }     // skip to SOH
         if (s < end) ++s;                                  // past SOH
     }
@@ -111,14 +113,24 @@ Parsed decode_fix(const char* s, std::size_t n) {
 
 int main() {
     constexpr long N = 5'000'000;
-    std::vector<std::uint8_t> bin(38); bin[0]=0x41;        // one binary msg
-    const char* fix = "55=AAPL\x01" "44=12345\x01" "38=100\x01" "54=1\x01";
-    std::size_t fixlen = std::strlen(fix);
+    // A ring of 1024 DIFFERENT messages (64 KiB binary / ~40 KiB text, L1d/L2-resident): decoding the
+    // same message 5 M times lets the compiler hoist the decode out of the loop (GCC 13 did, and
+    // printed 0.0 ns/msg); the asm barrier makes each decoded result a used value (Appendix L).
+    constexpr std::size_t R = 1024;
+    std::vector<std::uint8_t> bin(R * sizeof(AddOrder));
+    std::vector<std::string> fix(R);
+    for (std::size_t i = 0; i < R; ++i) {
+        AddOrder m{}; m.type = 0x41; m.price = std::byteswap(std::uint64_t(12345 + i)); m.qty = std::byteswap(std::uint32_t(100 + i));
+        std::memcpy(&bin[i * sizeof(AddOrder)], &m, sizeof m);
+        fix[i] = "55=AAPL\x01" "44=" + std::to_string(12345 + i) + "\x01" "38=" + std::to_string(100 + i) + "\x01" "54=1\x01";
+    }
 
     auto t0 = std::chrono::steady_clock::now(); std::uint64_t s1=0;
-    for (long i=0;i<N;++i){ auto r=decode_binary(bin.data()); s1+=r.price; }
+    for (long i=0;i<N;++i){ auto r=decode_binary(&bin[(i & (R-1)) * sizeof(AddOrder)]);
+                      s1+=r.seq ^ r.id ^ r.price ^ r.qty ^ std::uint8_t(r.side); asm volatile("" : "+r"(s1)); }   // EVERY field is used
     auto t1 = std::chrono::steady_clock::now(); std::uint64_t s2=0;
-    for (long i=0;i<N;++i){ auto r=decode_fix(fix, fixlen); s2+=r.price; }
+    for (long i=0;i<N;++i){ const auto& f = fix[i & (R-1)]; auto r=decode_fix(f.data(), f.size());
+                      s2+=r.price ^ r.qty; asm volatile("" : "+r"(s2)); }
     auto t2 = std::chrono::steady_clock::now();
     auto ns=[&](auto a,auto b){return std::chrono::duration_cast<std::chrono::nanoseconds>(b-a).count()/(double)N;};
     std::printf("binary overlay: %.1f ns/msg   FIX text: %.1f ns/msg  (s=%llu,%llu)\n",
@@ -127,18 +139,18 @@ int main() {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++23 -march=native`, Linux 6.x, pinned, turbo off (illustrative). The loop decodes a *different* message each iteration and consumes *every* decoded field — an earlier draft decoded one invariant message and used one field, and GCC hoisted the whole decode out of the loop (`imul rax, rax, 5000000`, 0.0 ns/msg):
 
 ```
    encoding                         ns / message    note
-   fixed-binary overlay (ITCH/SBE)  ~8-15 ns        in-place loads + bswap — ~free (§53.2.2, §53.5)
-   FIX text parse (from_chars)      ~80-200 ns      field scan + text→int conversion (Ch.28) — ~10x more
-   FAST (bit-unpacking)             ~100-300 ns     stop-bit/presence-map decode (Ch.28) — complex
+   fixed-binary overlay (ITCH/SBE)  ~2-3 ns         4 in-place loads + movbe/bswap — ~free (§53.2.2, §53.5); throughput-bound, messages overlap
+   FIX text parse (from_chars)      ~60-100 ns      4 fields: delimiter scan + text→int conversion (§53.4.1) — ~30x more
+   FAST (bit-unpacking)             not measured here — a stop-bit/presence-map decoder is more code than this listing; expect FIX-like cost (§53.2.1)
 
-   binary is ~10x faster to decode → use binary (SBE/ITCH) for the hot feed; FIX where flexibility wins.
+   binary is >10x faster to decode → use binary (SBE/ITCH) for the hot feed; FIX where flexibility wins.
 ```
 
-Read it: **fixed-binary overlay decode is ~free** (~10 ns/msg) — it's just a handful of in-place loads + byte-swaps (§53.5), no parsing, no copying, no allocation. **FIX text parsing is ~10× more** — every field requires scanning to the delimiter and converting text→number (`from_chars` — Ch. 28), even optimized. The conclusion drives real protocol choices: **latency-critical feeds use binary (ITCH/SBE)**; FIX is used where its flexibility/ubiquity matters (order entry to some venues, less-hot paths) and parsed with optimized field-scanning + branch-free number conversion (§53.4.1) when it must be fast. The binary number (~10 ns) is what lets a handler keep up with a microburst (§53.2.4); a 200 ns text parse falls behind. (And note: even the "free" binary decode must **bounds-check** variable-length fields — §53.6 — which this minimal example omits but production must not.) The optimization target: drive the *common* message's decode toward the binary number, and ensure the decode loop vectorizes/branch-minimizes where it can (§53.5).
+Read it: **fixed-binary overlay decode is ~free** (~2-3 ns/msg — a few cycles, and independent messages overlap in the out-of-order window) — it's just a handful of in-place loads + byte-swaps (§53.5), no parsing, no copying, no allocation. **FIX text parsing is ~30× more** — every field requires scanning to the delimiter and converting text→number (`from_chars` — §53.4.1), even optimized. The conclusion drives real protocol choices: **latency-critical feeds use binary (ITCH/SBE)**; FIX is used where its flexibility/ubiquity matters (order entry to some venues, less-hot paths) and parsed with optimized field-scanning + branch-free number conversion (§53.4.1) when it must be fast. The binary number (a few ns) is what lets a handler keep up with a microburst (§53.2.4); a ~100 ns text parse falls behind. (And note: even the "free" binary decode must **bounds-check** variable-length fields and the message length itself — §53.6 — which this minimal example omits for the binary path, while the text parser guards every dereference with `s < end`, as production must.) The optimization target: drive the *common* message's decode toward the binary number, and ensure the decode loop vectorizes/branch-minimizes where it can (§53.5).
 
 ## 53.4 Techniques
 
@@ -238,7 +250,7 @@ The verification habits: **confirm field access is a `mov`(+`bswap`) or a `movbe
 
 **Exercises**
 
-1. **Binary vs FIX decode.** Build `decode.cpp`; compare fixed-binary overlay vs FIX text decode latency. Confirm binary is ~10× faster (§53.3). Disassemble the binary decode (§53.5) — is each field a `mov`+`bswap` or a `movbe` (not a memcpy call)? Is the type dispatch a jump table?
+1. **Binary vs FIX decode.** Build `decode.cpp`; compare fixed-binary overlay vs FIX text decode latency. Confirm binary is >10× faster (§53.3). Disassemble the binary decode (§53.5) — is each field a `mov`+`bswap` or a `movbe` (not a memcpy call)? Is the type dispatch a jump table?
 2. **The bounds-check.** Add a variable-length field (a count + N entries) to the binary message; decode it *without* a bounds check, then feed a packet whose count exceeds the buffer — reproduce the over-read (ASan — Ch. 40). Add the bounds check; confirm it's a cheap predicted branch (§53.5) and rejects the bad packet (§53.6, Ch. 72).
 3. **A/B arbitration.** Build two sequenced UDP streams of the same data; drop random packets from each; write an arbitrator that joins both, dedups, reorders, and emits one clean in-order stream. Inject a gap in *both* and trigger a recovery path. Measure recovery latency (§53.4.3).
 4. **Microburst survival.** Replay a captured (or synthetic) market-open burst into your receiver; tune NIC RX ring (`ethtool -G`) + `SO_RCVBUF` + `recvmmsg` until zero drops (`ethtool -S` rx_missed = 0). Measure decode latency under burst (§53.4.4).
@@ -246,7 +258,7 @@ The verification habits: **confirm field access is a `mov`(+`bswap`) or a `movbe
 
 **Checklist — zero-copy wire decoding**
 
-- [ ] Latency-critical feeds use **fixed-binary encodings** (ITCH/SBE — ~10× faster decode than FIX text — §53.3); FIX/text uses **`from_chars`/branch-free** parsing (Ch. 28, §53.4.1) and prices parse to **scaled integers** (Ch. 27).
+- [ ] Latency-critical feeds use **fixed-binary encodings** (ITCH/SBE — >10× faster decode than FIX text — §53.3); FIX/text uses **`from_chars`/branch-free** parsing (Ch. 28, §53.4.1) and prices parse to **scaled integers** (Ch. 27).
 - [ ] Decode is **zero-copy in place** — overlay structs read via **`memcpy`/`bit_cast`** (alignment-safe, defined — Ch. 21) with **byte-swaps** (Ch. 28), **no payload copy**; verified in the asm as `mov`+`bswap` or `movbe` (§53.5).
 - [ ] **Every variable-length field is bounds-checked** against the buffer (the untrusted-input boundary — §53.6, Ch. 72); the decoder is **fuzzed** (libFuzzer + ASan/UBSan — Ch. 40).
 - [ ] Reliability is built in: **sequence tracking + A/B feed arbitration + gap recovery** (snapshot/retransmit) producing one **clean in-order stream** to the book (Ch. 25) — with a **bounded reorder window + timeout** (§53.4.3).
