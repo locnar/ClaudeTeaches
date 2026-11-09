@@ -1,8 +1,8 @@
 # Appendix L — Reproducible Benchmark & Measurement Harness
 
-> **Consolidates:** the measurement methodology the whole book rests on — micro-benchmarking done right (Ch. 3), the profiling/tooling commands (Ch. 2 and Appendix I), TSC timing (Ch. 17), and CLAUDE.md's non-negotiable rule that *every performance claim is backed by a measurement*. Ch. 3 teaches the *method* (dead-code elimination, warm-up, frequency scaling, statistical rigor, coordinated omission); this appendix is the reusable **scaffold** — a copy-paste Google Benchmark + HdrHistogram skeleton, the pinning/warm-up boilerplate, and the checklist to run before trusting a number.
+> **Consolidates:** the measurement methodology the whole book rests on — micro-benchmarking done right (Ch. 3), the profiling/tooling commands (Ch. 2 and Appendix I), TSC timing (Ch. 17), and the book's non-negotiable rule (Preface, Ch. 3) that *every performance claim is backed by a measurement*. Ch. 3 teaches the *method* (dead-code elimination, warm-up, frequency scaling, statistical rigor, coordinated omission); this appendix is the reusable **scaffold** — a copy-paste Google Benchmark + HdrHistogram skeleton, the pinning/warm-up boilerplate, and the checklist to run before trusting a number.
 
-**How to use this:** L.1 gives the throughput/mean-latency micro-benchmark skeleton; L.2 the tail-latency (HdrHistogram) variant that avoids coordinated omission; L.3 the environment setup that makes runs repeatable; L.4 the pre-trust checklist. The golden rule from Ch. 3 governs all of it: **a benchmark measures what you built, on the machine you ran it on — reason about the distribution (p50/p99/p99.9), not the mean** (Ch. 1). Always record compiler, flags, CPU, and kernel alongside the numbers (CLAUDE.md authoring convention). Skeletons are GCC/Clang + Google Benchmark and the HdrHistogram C library, on Linux x86-64; the code compiles as shown with the flags given.
+**How to use this:** L.1 gives the throughput/mean-latency micro-benchmark skeleton; L.2 the tail-latency (HdrHistogram) variant that avoids coordinated omission; L.3 the environment setup that makes runs repeatable; L.4 the pre-trust checklist. The golden rule from Ch. 3 governs all of it: **a benchmark measures what you built, on the machine you ran it on — reason about the distribution (p50/p99/p99.9), not the mean** (Ch. 1). Always record compiler, flags, CPU, and kernel alongside the numbers (the book-wide convention stated in the Preface). Skeletons are GCC/Clang + Google Benchmark and the HdrHistogram C library, on Linux x86-64; the code compiles as shown with the flags given.
 
 ---
 
@@ -12,14 +12,20 @@ The minimal, correct micro-benchmark — defeating dead-code elimination (Ch. 3)
 
 ```cpp
    #include <benchmark/benchmark.h>
+   #include <bit>
    #include <vector>
    #include "orderbook.hpp"   // the code under test (Ch. 24-25)
 
    // Setup (book construction) happens ONCE per benchmark instance, outside the
-   // timed loop — this is the setup/steady-state split the book insists on (CLAUDE.md).
+   // timed loop — this is the setup/steady-state split Ch. 3 insists on.
    static void BM_BookApplyAdd(benchmark::State& state) {
      OrderBook book;
-     const auto msgs = make_representative_adds(state.range(0));  // realistic input
+     // Realistic input AND a bounded book: a captured add/cancel (or add/execute) sequence
+     // whose depth and order-ID set return to the start state each cycle, so replaying it for
+     // millions of iterations keeps the book at steady state instead of growing it without
+     // end (re-adding the same IDs, allocating as it grows, drifting per-op cost).
+     const auto msgs = make_representative_flow(state.range(0));
+     static_assert(std::has_single_bit(std::size_t{1} << 12)); // ranges below are powers of two
      std::size_t i = 0;
 
      for (auto _ : state) {                       // <-- only THIS loop is timed
@@ -171,27 +177,27 @@ The Preface carries the one-paragraph version of this statement; this is the one
    perf stat -e cycles,instructions,cache-misses,branch-misses \
        taskset -c 3 ./bench ...
 
-   # 5. Record the metadata block WITH the numbers (CLAUDE.md convention):
+   # 5. Record the metadata block WITH the numbers (the book-wide convention — Preface, Ch. 3):
    #    CPU (lscpu), kernel (uname -r), compiler (g++ --version), flags, date.
 ```
 
-**What each buys** (Ch. 3, 6): pinning stops the scheduler migrating the thread mid-measurement (a migration is a cold cache and a new tail); `performance` governor + no-turbo stops the clock changing under you (a benchmark that warms up into turbo then thermally throttles is unrepeatable); NUMA binding stops a stray remote-DRAM allocation adding a fixed penalty (Ch. 16); and `perf stat` alongside gives you *why* — an IPC or cache-miss change explains a latency change (Appendix I.2). Google Benchmark's own **warm-up** iterations (it discards early ones) plus an explicit cache/branch-predictor warm of your data structure (Ch. 46) put you in steady state before the first recorded sample. Always emit the **metadata block** — a number without its CPU/kernel/compiler/flags is not reproducible and, per the authoring conventions, not publishable.
+**What each buys** (Ch. 3, 6): pinning stops the scheduler migrating the thread mid-measurement (a migration is a cold cache and a new tail); `performance` governor + no-turbo stops the clock changing under you (a benchmark that warms up into turbo then thermally throttles is unrepeatable); NUMA binding stops a stray remote-DRAM allocation adding a fixed penalty (Ch. 16); and `perf stat` alongside gives you *why* — an IPC or cache-miss change explains a latency change (Appendix I.2). an **explicit** Google Benchmark warm-up — `--benchmark_min_warmup_time=1` or `->MinWarmUpTime(1.0)` (v1.7+; the default is 0 s, so by default *nothing* is discarded beyond the short calibration runs that size the iteration count, which is not a controlled warm-up) — plus an explicit cache/branch-predictor warm of your data structure (Ch. 46) put you in steady state before the first recorded sample. Always emit the **metadata block** — a number without its CPU/kernel/compiler/flags is not reproducible and, per the authoring conventions, not publishable.
 
 ## L.4 The pre-trust checklist
 
 Before believing a benchmark number — the questions Ch. 3 says to ask, in order:
 
 - [ ] **Is dead-code elimination defeated?** `DoNotOptimize`/`ClobberMemory` present; a suspiciously-fast result (sub-nanosecond, zero-cost) means the loop was optimized away (L.1, Ch. 3).
-- [ ] **Was it warmed up?** Early iterations discarded; caches/TLB/branch predictor in steady state (Ch. 46). A cold first sample is a different measurement (Ch. 46 — warm vs. cold tail).
+- [ ] **Was it warmed up?** An explicit warm-up phase (`MinWarmUpTime` — Google Benchmark discards nothing by default), caches/TLB/branch predictor in steady state (Ch. 46). A cold first sample is a different measurement (Ch. 46 — warm vs. cold tail).
 - [ ] **Is frequency pinned?** `performance` governor, turbo decision made and documented (L.3, Ch. 6) — otherwise variance is clock, not code.
 - [ ] **Enough samples for the tail you claim?** p99.9 needs ≫1000 samples to be stable; don't quote a percentile the sample count can't support (Ch. 3).
 - [ ] **Measured against a baseline?** Report *relative* to a control, not an absolute you can't reproduce elsewhere (Ch. 3) — "1.8× faster than the `std::map` version on this box" beats "42 ns."
-- [ ] **Timing the hot path, not the setup?** Construction/allocation outside the timed loop (L.1); you're measuring steady state, not warm-up (CLAUDE.md).
+- [ ] **Timing the hot path, not the setup?** Construction/allocation outside the timed loop (L.1); you're measuring steady state, not warm-up (Ch. 3).
 - [ ] **Service time or response time — and no coordinated omission?** Decide which question you are asking (Ch. 3 §3.2.2) and keep the two in separate histograms. For response time, pace the loop to a fixed intended schedule and record `end − intended` so queued events land in the tail (L.2); use `hdr_record_corrected_value` *only* on a closed loop, into its own histogram — never both pacing and back-fill, never into the service-time histogram.
 - [ ] **Does the histogram bookkeeping add up?** `total_count` equals the op count in the service histogram and in a paced response histogram (it exceeds it only in a closed-loop back-filled estimate, by design); `dropped` is 0, i.e. the histogram's range covered the worst stall — a sample above `highest_trackable_value` is silently not recorded (L.2).
 - [ ] **Does the codegen match expectation?** Check the asm (Godbolt / `objdump` — Ch. 4, Appendix I.9): did it vectorize / inline / elide the branch you assumed? A benchmark of code the compiler transformed unexpectedly measures the wrong thing.
 - [ ] **Is the effect above noise?** The difference exceeds run-to-run stddev across `--benchmark_repetitions` (Ch. 3) — a 2% "win" inside 5% noise is not a win.
-- [ ] **Metadata recorded?** CPU, kernel, compiler, flags, date attached to the result (CLAUDE.md) — otherwise it isn't reproducible.
+- [ ] **Metadata recorded?** CPU, kernel, compiler, flags, date attached to the result (the book-wide rule — Preface, Ch. 3) — otherwise it isn't reproducible.
 
 Passing this checklist is what turns "this is faster" into *evidence* — the standard every performance claim in this book is held to.
 
