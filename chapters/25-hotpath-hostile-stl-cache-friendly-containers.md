@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 7–8 (caches & data-oriented design — the locality the whole chapter is about), Ch. 23–24 (allocation cost & custom allocators — node containers allocate per element; the order book runs on a pool), Ch. 14 (`std::function`/type erasure), Ch. 15 (TLB — pointer-chasing thrashes it), Ch. 3 (measuring the distribution).
 >
-> **Leads into:** Ch. 34/37 (lock-free queues / Disruptor — ring buffers as containers), Ch. 54 (feed handlers feeding the book), Ch. 28 (bitmaps for level occupancy), Ch. 82 (hot-reload of reference data). The order-book case study (§25.4.4) is referenced throughout Parts VIII-X.
+> **Leads into:** Ch. 34/37 (lock-free queues / Disruptor — ring buffers as containers), Ch. 57 (feed handlers feeding the book), Ch. 28 (bitmaps for level occupancy), Ch. 85 (hot-reload of reference data). The order-book case study (§25.4.4) is referenced throughout Parts VIII-X.
 
 ---
 
@@ -113,6 +113,20 @@ allocations (build)            ~N mallocs (one/node)     1 (the vector)
 
 Read it the Ch. 7 way: **the flat map is ~3× faster on the identical workload**, and the counters say why — at N = 2¹⁶ both tables fit the 24 MiB L3, so `std::unordered_map`'s lookup is two to three *dependent* L3 hits (bucket array → node → key, each a scattered line) while the flat map's probe is one L3 hit on a contiguous slot that prefetches (Ch. 10). Size past L3 (N = 2²², exercise 1) and every one of those dependent hops becomes a DRAM round-trip plus, likely, a TLB miss: the gap widens toward ~3–4× and the absolute numbers move to ~100 ns vs ~30 ns. The build phase also did ~N `malloc`s for the chained map vs *one* allocation for the flat map's vector (Ch. 23). The win grows with key count (more misses to chase) and shrinks if everything fits L1. This is the canonical container measurement: **node-based vs flat is a cache-miss-count difference**, and §25.4 is how you get the flat side. (Production: reach for `absl::flat_hash_map`, `ankerl::unordered_dense`, or `boost::unordered_flat_map` — robin-hood/swiss-table maps that beat this toy and `std::unordered_map` substantially.)
 
+**Row 3 — handle dereference: slot map vs flat hash vs raw pointer (§25.4.4).** The same question for the *order table*: given an identifier for an order, how fast is the object reached, and what does the stale-handle check cost? 2 M lookups, uniformly random over the live orders, at two working-set sizes (GCC 13.3 `-O2 -std=c++20 -march=native`, pinned, on the 4-vCPU VM of Appendix L.2 — TSC 2.70 GHz; VM-measured, the ratios transfer):
+
+```
+                                        10 k-order book (12 288 live, 1.5 MiB)   1.5 M-order table (>100 MiB, cold)
+raw pointer dereference                          0.8 ns                                   13.6 ns
+slot map, generation-checked                     1.4 ns                                   21.1 ns      ← +0.3–0.6 ns for the compare; the rest is the sparse[] line
+slot map, unchecked index                        1.1 ns                                   17.8 ns
+flat open-addressing map (u64 id → index)        5.0 ns                                   36.1 ns      ← hash + probe + key compare, then the same value load
+slot map, 10 % of handles stale (mixed)          0.9 ns  (199 596 of 2 M rejected)        10.8 ns  (199 843 rejected)   ← a stale handle costs ONE compare and no value load
+slot map insert + erase (erase-by-swap)          5.0 ns per pair                            5.0 ns per pair
+```
+
+The slot map is within 2× of a raw pointer cold and within 0.6 ns hot, 3.5× faster than the flat hash that would otherwise front the order table, and the generation check — the thing that makes a reused slot *safe* — is a fraction of a nanosecond. The cold column is memory latency: the handle costs one extra line (`sparse[]`) over the pointer, which is the price of relocatability and validation.
+
 ## 25.4 Techniques
 
 ### 25.4.1 Flat / open-addressing & robin-hood hashing
@@ -137,13 +151,52 @@ For *ordered* associative needs, `std::flat_map`/`std::flat_set` (C++23 — ship
 
 Two more ways to eliminate node allocation and indirection:
 
-- **Intrusive containers.** The link/hook lives **inside the object**, not in a separate node: the object has a `next`/`prev` (or tree hook) member, and the container threads objects directly. Consequences: **no per-element allocation** (the object *is* the node — pair with a pool, Ch. 24), **stable addresses**, an object can be in multiple intrusive lists at once, and removal is O(1) given the object (no lookup). Boost.Intrusive provides `list`/`slist`/`set`/`unordered_set` hooks; HFT code often hand-rolls intrusive lists for order chains. The order book's price-level FIFO is the canonical use (§25.4.4): orders are pool-allocated and intrusively linked, so adding/cancelling an order is pointer surgery with zero allocation. The trade-off: the object carries the hooks (size, coupling) and you own lifetime (Ch. 24, 81).
+- **Intrusive containers.** The link/hook lives **inside the object**, not in a separate node: the object has a `next`/`prev` (or tree hook) member, and the container threads objects directly. Consequences: **no per-element allocation** (the object *is* the node — pair with a pool, Ch. 24), **stable addresses**, an object can be in multiple intrusive lists at once, and removal is O(1) given the object (no lookup). Boost.Intrusive provides `list`/`slist`/`set`/`unordered_set` hooks; HFT code often hand-rolls intrusive lists for order chains. The order book's price-level FIFO is the canonical use (§25.4.5): orders are pool-allocated and intrusively linked, so adding/cancelling an order is pointer surgery with zero allocation. The trade-off: the object carries the hooks (size, coupling) and you own lifetime (Ch. 24, 84).
 - **Small-buffer optimization (SBO) / small-vector types.** Store small payloads **inline** (no heap) and only spill to the heap when they grow: `std::string`'s SBO, and `boost::small_vector`/`absl::InlinedVector`/`llvm::SmallVector` for "usually ≤ N elements" sequences. On the hot path, a small-vector sized to the common case is allocation-free for the common case and contiguous always. Know the SBO threshold and keep hot payloads under it: libstdc++'s `std::string` keeps 15 chars inline (libc++: 22); libstdc++'s `std::function` stores a callable inline only up to 16 bytes / pointer alignment (`sizeof` 32); and a small-vector's `N` is whatever you chose — check each with a `static_assert` or a one-off `sizeof` print, not folklore.
-- **Index handles over pointers.** Storing **indices** into a contiguous arena/vector instead of pointers makes structures relocatable (rehash/grow doesn't invalidate), shrinks the handle (a 32-bit index vs 64-bit pointer — Ch. 9), and keeps everything in one cache-friendly region — a common low-latency idiom (slot maps, generational indices).
+- **Index handles over pointers.** Storing **indices** into a contiguous arena/vector instead of pointers makes structures relocatable (rehash/grow doesn't invalidate), shrinks the handle (a 32-bit index vs 64-bit pointer — Ch. 9), and keeps everything in one cache-friendly region. The worked form of the idiom — a slot map with generational handles — is §25.4.4.
 
-### 25.4.4 Case Study — Building the Limit Order Book
+### 25.4.4 Slot maps and generational handles
 
-The **limit order book (LOB)** is the central HFT data structure, and it's a perfect crucible for this chapter: a feed handler updates it on *every* market-data message (Ch. 54), and the budget is tens of nanoseconds. The naive STL implementation — `std::map<Price, std::list<Order>>` — is a worst-case of everything above: a tree of nodes (log-n cache misses to find a price level) whose values are heap-linked lists of nodes (a `malloc` per order, a cache miss per order in the queue). It "works" and it's an order of magnitude too slow. The fast design exploits the LOB's structure:
+The "index handles over pointers" bullet of §25.4.3 is an idiom; this is the structure that makes it safe. A **slot map** gives every object a stable 64-bit **handle** that is cheap to dereference (an index), cheap to *validate* (one compare), survives the container's reallocation and erasure of its neighbours, and is meaningful across processes (it is an integer, not an address). It is the right container for the three tables a trading system keeps in flight — the order table (orderID → order; the LOB's in §25.4.5, the gateway's in Ch. 88), the armed timers (Ch. 44 §44.4.1), and any object that something else holds a reference to without owning it.
+
+```
+   handle (64 bits) = [ generation : 32 ][ index : 32 ]           sparse[]                 dense[]  (values, contiguous: iteration = a linear scan)
+                                                                  ┌─────────────────────┐  ┌──────────────────────┐
+   get(h):  s = sparse[h.index]                                   │ dense_idx  gen  next │  │ Order … back=sparse i │
+            s.gen == h.generation ? &dense[s.dense_idx] : null    │ dense_idx  gen  next │  │ Order … back          │   back: which sparse slot owns this value
+            ─ one load, one compare, one indexed load             │  (free)    gen  next ├─►│ …                    │   (so erase-by-swap can fix the mover's slot)
+   insert:  pop free list → sparse slot s; dense.push(value);     └─────────────────────┘  └──────────────────────┘
+            s.dense_idx = size-1; return {s.gen, s}                 free list threads the free sparse slots through `next`
+   erase(h): validate; d = s.dense_idx; dense[d] = dense[last]; sparse[dense[d].back].dense_idx = d; --size;      ← erase-by-swap: values stay contiguous
+            s.gen += 1 (or 2); push s on the free list              ← the old handle is now INVALID: its generation no longer matches, forever
+```
+
+```cpp
+// slotmap.hpp — dense values + sparse indirection + free list + generation. Build with the §25.3 harness: g++ -O2 -std=c++20 -march=native slotmap.cpp -o slotmap
+struct Handle { std::uint64_t v; static Handle make(std::uint32_t idx, std::uint32_t gen) { return {std::uint64_t(gen) << 32 | idx}; }
+                std::uint32_t idx() const { return std::uint32_t(v); } std::uint32_t gen() const { return std::uint32_t(v >> 32); } };   // Ch. 28 §28.4.4: two shifts
+template <class T, std::uint32_t CAP> struct SlotMap {                      // CAP a power of two: the index mask is the bounds check (Ch. 28 §28.4.3)
+    struct Slot { std::uint32_t dense, gen, next_free; };
+    Slot sparse[CAP]; T dense[CAP]; std::uint32_t size = 0, free_head = 0;
+    SlotMap() { for (std::uint32_t i = 0; i < CAP; ++i) sparse[i] = {0, 1, i + 1}; }   // gen starts at 1: a zero handle is never valid
+    Handle insert(const T& t) { std::uint32_t s = free_head; Slot& sl = sparse[s]; free_head = sl.next_free; sl.dense = size; dense[size] = t; dense[size].back = s; ++size; return Handle::make(s, sl.gen); }
+    T* get(Handle h) { Slot& sl = sparse[h.idx() & (CAP - 1)]; return sl.gen == h.gen() ? &dense[sl.dense] : nullptr; }   // ONE predictable compare (Ch. 13): stale → nullptr
+    void erase(Handle h) { Slot& sl = sparse[h.idx() & (CAP - 1)]; if (sl.gen != h.gen()) return;                            // stale erase is a no-op, not a corruption
+        std::uint32_t d = sl.dense; --size; if (d != size) { dense[d] = dense[size]; sparse[dense[d].back].dense = d; }        // erase-by-swap keeps values contiguous
+        sl.gen += 2; sl.next_free = free_head; free_head = h.idx(); }                                                        // += 2 keeps gen odd... or += 1; any bump kills the old handle
+};
+```
+
+- **Validation is one compare, and it is the point.** A pointer to a freed slot is a use-after-free the allocator cannot catch (Ch. 24, 84); a handle to a freed slot fails `gen == h.gen()` and yields `nullptr` — deterministically, every time, for the life of the process (a 32-bit generation wraps after 4 billion reuses of *one* slot). The branch predicts "valid" on the hot path and the stale case is the slow path; §25.3's measurement shows the check costing ~0.3 ns over the unchecked index.
+- **Erase-by-swap vs stable slots.** Moving the last value into the hole keeps `dense[]` contiguous — iteration over all live orders is a linear scan (Ch. 8), which the kill-switch (Ch. 87) and a snapshot writer (Ch. 90) want. The cost: a value's *address* changes on someone else's erase, so **nothing may hold a `T*` across an erase** — hold the `Handle`. When values carry intrusive links to each other (the LOB's per-level FIFO — §25.4.5), use the **stable-slot variant**: values live at `dense[index]` directly, no swap, iteration skips free slots (or walks an intrusive live list); Ch. 88's in-flight table is that variant.
+- **Relative handles for shared memory** (Ch. 54 §54.4.2): the handle is an integer, so a process that maps the segment at a different address dereferences it the same way; the segment holds `sparse[]`, `dense[]` and the free list as offsets from the segment base, never pointers — and the generation check guards a *reader* process against a slot the *writer* process recycled between the reader's lookup and its use.
+- **Debug-mode poisoning**: under `#ifndef NDEBUG`, `erase` fills the vacated value with `0xDD` and `get` on a stale handle records `(handle, caller)` before returning `nullptr`; the Ch. 38 §38.4.5 outstanding-view counter is the same discipline for ring slots.
+- **Codegen check** (Ch. 4): `get()` must be a shift, a masked index, a compare and one indexed load — Clang 18.1 at `-O2` emits `movzwl`/`and`, two `lea`s for the 12-byte stride, `shr $32`, `cmp`, `jne`, then the dense index load; no call, no bounds branch beyond the compare. If a `div` or a second compare appears, `CAP` was not a power of two or the generation was not in the high word.
+- **Cousins, in one sentence**: stable-slot vectors (`plf::colony`/C++26 `std::hive` — insertion-order-free, erase-stable, skipfield iteration), sparse sets (the same two arrays without generations, for *sets* of small integers) and `std::inplace_vector` (C++26, Appendix H — fixed-capacity contiguous storage) occupy the same design space with different trade-offs on iteration cost, stability and validation; their full treatment is a separate item and is not written here.
+
+### 25.4.5 Case Study — Building the Limit Order Book
+
+The **limit order book (LOB)** is the central HFT data structure, and it's a perfect crucible for this chapter: a feed handler updates it on *every* market-data message (Ch. 57), and the budget is tens of nanoseconds. The naive STL implementation — `std::map<Price, std::list<Order>>` — is a worst-case of everything above: a tree of nodes (log-n cache misses to find a price level) whose values are heap-linked lists of nodes (a `malloc` per order, a cache miss per order in the queue). It "works" and it's an order of magnitude too slow. The fast design exploits the LOB's structure:
 
 - **Price levels: a flat array indexed by ticks, not a tree.** Prices are discrete (tick-sized — Ch. 27) and the *active* range near the touch is small and contiguous. Represent each side as a **flat array of price levels indexed by (price − base)/tick** — O(1) access to any level, contiguous, prefetchable, no tree, no per-level allocation. The book is a window over the active ticks (a ring/sliding array, or a dense array bounded by the instrument's plausible range), with the **best bid/offer (BBO)** tracked as the current top index. Deep, rarely-touched levels can live in a secondary (sparse/`flat_map`) structure — the hot/cold split of Ch. 1 applied to depth.
 
@@ -153,22 +206,23 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
    O(1) to any level by price; BBO is just an index; deep book = cold secondary store
   ```
 
-- **Orders at a level: an intrusive FIFO from a pool, not `std::list`.** Each price level is a **FIFO queue of resting orders** (price-time priority). Implement it as an **intrusive doubly-linked list** of `Order` objects drawn from an **object pool** (Ch. 24): adding an order is pop-from-pool + link-at-tail (a few instructions, no allocation); cancelling is unlink-given-the-order (O(1), no search — keep an `orderID → Order*`/index map, itself a *flat* hash map, §25.4.1); a fill walks from the head. Zero allocation on the hot path, O(1) add/cancel/match, and each order's neighbors are pool-contiguous (locality).
-- **BBO vs deep-book asymmetry (the hot/cold split).** The overwhelming majority of activity is at or near the touch — BBO updates, adds/cancels in the top few levels — which the flat-array-near-the-top design makes O(1) and cache-hot. Deep-book modifications are rarer and can afford a slower path (the sparse secondary store). Optimize the structure for the *common* operation (top-of-book), not the worst case (arbitrary-depth insert) — and measure against captured data (Ch. 85) where the real distribution of touched levels lives.
-- **Consolidating disparate feeds.** A consolidated book merges multiple venues'/feeds' updates (Ch. 54's A/B arbitration and multi-feed handling). Keep each feed's contribution attributable (so a feed drop/gap — Ch. 54 — can be backed out) while presenting one merged view; per-venue level arrays summed into a consolidated array, or per-order venue tags, with the same flat/intrusive/pool discipline so the merge stays allocation-free and cache-friendly.
+- **Orders at a level: an intrusive FIFO from a pool, not `std::list`.** Each price level is a **FIFO queue of resting orders** (price-time priority). Implement it as an **intrusive doubly-linked list** of `Order` objects drawn from an **object pool** (Ch. 24): adding an order is pop-from-pool + link-at-tail (a few instructions, no allocation); cancelling is unlink-given-the-order (O(1), no search); a fill walks from the head. **The order table is a stable-slot slot map (§25.4.4)**: the venue's orderID maps — through one flat hash (§25.4.1) for venues whose ids are opaque, or directly when the id is dense — to a `Handle` whose index addresses the pooled `Order` and whose generation rejects a cancel or execute for an order already removed (a late message after a replay, a reused slot): §25.3's row 3 puts the handle dereference at ~1.4 ns against ~5 ns for the flat hash alone, and the stale check is what makes the pool's reuse safe. Orders carry their intrusive level links *in* the slot, so the stable-slot variant (no erase-by-swap) is the one used here. Zero allocation on the hot path, O(1) add/cancel/match, and each order's neighbors are pool-contiguous (locality).
+- **BBO vs deep-book asymmetry (the hot/cold split).** The overwhelming majority of activity is at or near the touch — BBO updates, adds/cancels in the top few levels — which the flat-array-near-the-top design makes O(1) and cache-hot. Deep-book modifications are rarer and can afford a slower path (the sparse secondary store). Optimize the structure for the *common* operation (top-of-book), not the worst case (arbitrary-depth insert) — and measure against captured data (Ch. 90) where the real distribution of touched levels lives.
+- **Consolidating disparate feeds.** A consolidated book merges multiple venues'/feeds' updates (Ch. 57's A/B arbitration and multi-feed handling). Keep each feed's contribution attributable (so a feed drop/gap — Ch. 57 — can be backed out) while presenting one merged view; per-venue level arrays summed into a consolidated array, or per-order venue tags, with the same flat/intrusive/pool discipline so the merge stays allocation-free and cache-friendly.
 - **What this buys.** The flat-array + intrusive-pool LOB turns per-message book updates from a parade of cache misses and `malloc`s (the `map<Price,list>` version) into a handful of contiguous, allocation-free operations — the difference between ~hundreds of ns and ~tens of ns per update, and a *flat* tail (Ch. 1) because there's no allocation or tree-rebalance to spike. It's the synthesis of the whole book so far: data-oriented layout (Ch. 8), no hot-path allocation (Ch. 23–24), flat containers (this chapter), cache/TLB locality (Ch. 7, 15).
 
 ## 25.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn
 
 - **`std::map`/`std::unordered_map` on the hot path.** The default reach — and a parade of cache misses + per-element `malloc` (§25.2–25.3). Use a flat/open-addressing map (§25.4.1) or `flat_map` (§25.4.2); reserve the rare justified `std::map` use (need stable addresses *and* ordered *and* insert-heavy) and know you're paying for it.
 - **`shared_ptr` copies on the hot path.** Every copy is an **atomic** refcount bump; shared across cores, the refcount line ping-pongs (Ch. 33) — a serializing cost dwarfing the "pointer copy" it looks like. Pass by `const&`/raw/`unique_ptr`; only copy `shared_ptr` when transferring genuine shared ownership, off the hot path. `make_shared` to fuse the control-block allocation when you do use it.
+- **Slot-map misuse (§25.4.4).** *Skipping the generation check on a "trusted" path*: the one caller that dereferences by index alone is the one that books a fill against a reused slot. *Holding a `T*` across an erase* in the erase-by-swap variant: the value moved; hold the handle. *Generation wrap*: a 16-bit generation on a hot slot wraps in minutes at 10⁵ reuses/s — use 32 bits (4 billion reuses per slot). *Crossing processes without the generation* (an index alone into a shared segment — Ch. 54) loses exactly the protection the reader needed. *Starting generations at zero* makes `Handle{0}` valid; start at 1.
 - **Holding pointers into a flat/rehashing container.** Open-addressing and `vector`-backed containers **move elements** on rehash/grow/insert; a stored pointer/iterator dangles. Use **indices/handles** (§25.4.3) or reserve enough to never rehash on the hot path. (This is the trade for the locality win — design for it.)
 - **Not `reserve`-ing → hot-path rehash/realloc.** A flat map or vector that rehashes/reallocates mid-stream is a latency spike (a big alloc + reinsert/move — Ch. 23). Size to the working set up front; keep growth on the cold path.
 - **`vector<std::function>` / containers of type-erased callables.** Multiplies `std::function`'s double-indirection and possible allocation (Ch. 14) across every element. Use a concrete callable type, a `variant`, or function pointers (Ch. 14).
-- **Intrusive without lifetime discipline.** Intrusive containers + pools mean *you* own lifetimes; an order freed to the pool while still linked, or linked into two lists with conflicting lifetimes, is UAF/corruption (Ch. 24, 81). Keep the ownership rules simple and explicit.
+- **Intrusive without lifetime discipline.** Intrusive containers + pools mean *you* own lifetimes; an order freed to the pool while still linked, or linked into two lists with conflicting lifetimes, is UAF/corruption (Ch. 24, 84). Keep the ownership rules simple and explicit.
 - **Choosing `flat_map` for insert-heavy data.** `flat_map`'s middle-insert is O(n) shifts (§25.4.2); for insert/erase-heavy *ordered* data it can lose to a tree. Match it to lookup/scan-heavy, mutation-light use — and measure.
 - **Benchmarking with everything in L1.** A container comparison on a tiny dataset hides the cache-miss difference that *is* the point (§25.3). Test at the real working-set size (and with realistic, cache-cold access — Ch. 3), or you'll conclude node containers are "fine."
-- **Ignoring the order book's access distribution.** Optimizing the LOB for worst-case arbitrary-depth ops instead of the real, top-of-book-dominated distribution (§25.4.4) wastes effort and may pessimize the common path. Profile against captured market data (Ch. 85).
+- **Ignoring the order book's access distribution.** Optimizing the LOB for worst-case arbitrary-depth ops instead of the real, top-of-book-dominated distribution (§25.4.4) wastes effort and may pessimize the common path. Profile against captured market data (Ch. 90).
 
 ## 25.6 Exercises & checklist
 
@@ -188,8 +242,8 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 - [ ] Per-element node allocation is eliminated via **intrusive containers + pools** (Ch. 24) and/or **small-buffer** types where payloads are usually small (§25.4.3).
 - [ ] The **order book** uses flat tick-indexed level arrays + intrusive pool-backed FIFOs + a flat ID map, optimized for the **top-of-book-dominated** access distribution, with deep book as a cold secondary store (§25.4.4).
 - [ ] **No `vector<std::function>`** / containers of type-erased callables on the hot path (Ch. 14).
-- [ ] Intrusive/pool designs have **explicit, simple lifetime rules** (no linked-while-freed — Ch. 24, 81).
-- [ ] Container choices are validated by **cache/TLB counters and the latency distribution** at the **real working-set size** against **captured data** (Ch. 3, 7, 85) — not a tiny in-L1 microbench.
+- [ ] Intrusive/pool designs have **explicit, simple lifetime rules** (no linked-while-freed — Ch. 24, 84).
+- [ ] Container choices are validated by **cache/TLB counters and the latency distribution** at the **real working-set size** against **captured data** (Ch. 3, 7, 90) — not a tiny in-L1 microbench.
 
 ## 25.7 References
 
@@ -203,7 +257,7 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 
 - C. Cook, *"When a Microsecond Is an Eternity"* (CppCon) — hot-path container/allocation discipline in an HFT context, directly relevant to the LOB.
 - Talks and writeups on building low-latency limit order books (various exchange/HFT engineering blogs) — concrete LOB data-structure designs extending §25.4.4.
-- Ch. 8 (*Data-Oriented Design*) — the locality principles underneath; Ch. 24 (*Custom Allocators*) — the pools the LOB runs on; Ch. 28 (*Bit Manipulation*) — bitmaps for level occupancy/free-lists; Ch. 34/37 (*Lock-Free / Disruptor*) — ring buffers as containers; Ch. 54 (*Wire Decoding*) — the feed that drives the book.
+- Ch. 8 (*Data-Oriented Design*) — the locality principles underneath; Ch. 24 (*Custom Allocators*) — the pools the LOB runs on; Ch. 28 (*Bit Manipulation*) — bitmaps for level occupancy/free-lists; Ch. 34/37 (*Lock-Free / Disruptor*) — ring buffers as containers; Ch. 57 (*Wire Decoding*) — the feed that drives the book.
 - **Appendix E** — the cache-miss latency numbers that make "a cache miss per node" concrete; **Appendix F** — order-book/BBO terminology.
 
 ---

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 30 (atomics & memory ordering — the seqlock's correctness rests entirely on acquire/release and fences), Ch. 31 (single-writer discipline — the seqlock *is* the single-writer/many-reader primitive), Ch. 33 (false sharing — the sequence counter and data layout), Ch. 34 (lock-free — the SPSC ring is for *streams*, the seqlock for *snapshots*), Ch. 7 (coherence — readers don't write, so they don't bounce the line).
 >
-> **Leads into:** Ch. 36 (safe reclamation — the alternative for *large/pointer* state), Ch. 37 (Disruptor — publishes via sequences), Ch. 82 (hot reload — config published via seqlock/pointer swap), Ch. 26/51 (shared-memory publication across processes). The single-writer pattern reappears in Ch. 83.
+> **Leads into:** Ch. 36 (safe reclamation — the alternative for *large/pointer* state), Ch. 37 (Disruptor — publishes via sequences), Ch. 85 (hot reload — config published via seqlock/pointer swap), Ch. 26/54 (shared-memory publication across processes). The single-writer pattern reappears in Ch. 86.
 
 ---
 
@@ -69,7 +69,7 @@ The seqlock's signature is **read latency that stays flat as readers scale**, be
 #include <pthread.h>
 #include <sched.h>
 
-static void pin_to(int core) {                           // Ch. 42
+static void pin_to(int core) {                           // Ch. 45
     cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
     if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
 }
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16 cores), writer pinned to core 1 and R readers to cores 2..R+1 (R ≤ 15 so no SMT sibling pair is used — Ch. 43), writer paced to **one update per µs** (the reads ≫ writes precondition, printed by the program as writes/s and retry %), turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16 cores), writer pinned to core 1 and R readers to cores 2..R+1 (R ≤ 15 so no SMT sibling pair is used — Ch. 46), writer paced to **one update per µs** (the reads ≫ writes precondition, printed by the program as writes/s and retry %), turbo off (illustrative):
 
 ```
    R readers (1 writer @ 1 update/µs):
@@ -194,7 +194,7 @@ The reader side — read optimistically and validate, never accepting a torn val
 
 ## 35.5 Pitfalls & anti-patterns: correctness under the memory model
 
-- **Getting the memory ordering wrong (the cardinal seqlock danger).** A seqlock is *easy to write and easy to write subtly wrong*. Missing the release ordering on the writer (data writes leak past the sequence bump) or the acquire ordering on the reader (data reads hoist before the sequence read) produces a reader that occasionally returns a **torn or stale** value — a silent, rare, architecture-dependent bug (works on x86, fails on ARM — Ch. 30). Use a vetted implementation or get the fences reviewed/model-checked (Ch. 40); test on ARM.
+- **Getting the memory ordering wrong (the cardinal seqlock danger).** A seqlock is *easy to write and easy to write subtly wrong*. Missing the release ordering on the writer (data writes leak past the sequence bump) or the acquire ordering on the reader (data reads hoist before the sequence read) produces a reader that occasionally returns a **torn or stale** value — a silent, rare, architecture-dependent bug (works on x86, fails on ARM — Ch. 30). Use a vetted implementation or get the fences reviewed/model-checked (Ch. 42); test on ARM.
 - **The data-race formality.** Reading data the writer may be concurrently writing is, strictly, a data race (UB — Ch. 30). The standard-blessed way is to make the data accesses atomic (relaxed loads/stores per field via `std::atomic_ref`, as the §35.3 listing does) so the speculative read is well-defined, then validate. Plain non-atomic reads of concurrently-written data are UB even though the value is discarded — the fences order the accesses, they do not legitimise a racing plain read; use relaxed atomics for the data and know your implementation handles this.
 - **Multiple writers.** The protocol assumes **one** writer; two writers corrupt the sequence/data (both bump, interleave). Serialize writers with a lock, or restructure to single-writer (Ch. 31). Don't use a bare seqlock with concurrent writers.
 - **Large snapshots.** A seqlock copies the whole snapshot per read and re-copies on tear; for large data this is expensive and widens the torn-read window (more retries). Use **pointer-swap/RCU** (Ch. 36) for large or pointer-linked state — publish a new immutable version by reference, don't copy per read.
@@ -202,7 +202,7 @@ The reader side — read optimistically and validate, never accepting a torn val
 - **Unbounded retry under heavy writing.** If writes approach read frequency, readers retry a lot (latency tail — Ch. 1) and may even starve. Seqlocks assume reads ≫ writes; if not, use double-buffering/pointer-swap (no retry) or reconsider the design.
 - **False sharing / layout (Ch. 33).** The sequence and data are pulled by every reader on each update (inherent); ensure they don't false-share with *other* unrelated hot data, and keep the snapshot compact (constructive interference for the reader's single copy).
 - **Forgetting the retry can observe a *consistent but stale* value.** Validation guarantees *consistency* (not torn), not *freshness* — a reader gets *a* consistent snapshot, possibly one update old (the writer published a newer one just after). That's correct and usually fine (you want the latest *consistent* value), but don't assume "validated" means "absolutely newest." For sequencing/ordering needs, use a stream (Ch. 34).
-- **Hand-rolling without testing on weak memory / model checking.** Like all lock-free code (Ch. 34), x86 hides ordering bugs. Validate on ARM (Appendix A) and with a memory-model-aware checker (GenMC / CDSChecker / Relacy — §40.4.3) before trusting a hand-written seqlock with something as critical as a price. Note that **TSan does not understand `std::atomic_thread_fence`** (GCC 13 warns `'atomic_thread_fence' is not supported with '-fsanitize=thread'`), so a fence-based seqlock like §35.3's cannot be validated by TSan — it will misreport; TSan is usable only on a variant written with release/acquire *stores and loads* on the sequence and `std::atomic_ref` data accesses.
+- **Hand-rolling without testing on weak memory / model checking.** Like all lock-free code (Ch. 34), x86 hides ordering bugs. Validate on ARM (Appendix A) and with a memory-model-aware checker (GenMC / CDSChecker / Relacy — §42.4.3) before trusting a hand-written seqlock with something as critical as a price. Note that **TSan does not understand `std::atomic_thread_fence`** (GCC 13 warns `'atomic_thread_fence' is not supported with '-fsanitize=thread'`), so a fence-based seqlock like §35.3's cannot be validated by TSan — it will misreport; TSan is usable only on a variant written with release/acquire *stores and loads* on the sequence and `std::atomic_ref` data accesses.
 
 ## 35.6 Exercises & checklist
 
@@ -210,7 +210,7 @@ The reader side — read optimistically and validate, never accepting a torn val
 
 1. **Read scalability.** Build `seqlock.cpp`; run `seq` vs `rwlock` with R=1,2,4,8,15 readers + 1 writer (the listing pins them; the third argument paces the writer — try 1000 ns and 0). Plot ns/read vs reader count. Confirm the seqlock is flat and the `shared_mutex` grows ~linearly. Why does the "shared" read lock contend (§35.3)?
 2. **Retry rate vs write rate.** The listing already counts reader retries and prints writes/s; vary the writer's pace (third argument) from rare to continuous (0). At what write rate does the retry rate (and read latency tail) become significant? Relate to "reads ≫ writes" (§35.2).
-3. **Break the ordering.** Remove the release/acquire fences (use `relaxed` everywhere). On x86 it likely still passes; cross-compile/run on ARM (Appendix A) or model-check (Ch. 40) and detect a torn read. Restore the fences (§35.5).
+3. **Break the ordering.** Remove the release/acquire fences (use `relaxed` everywhere). On x86 it likely still passes; cross-compile/run on ARM (Appendix A) or model-check (Ch. 42) and detect a torn read. Restore the fences (§35.5).
 4. **Torn-read demo.** Make the snapshot large (a big struct) and the writer slow mid-update (write half, pause, write half); show readers detect the tear and retry (never returning a torn value). Then shrink the snapshot — retries drop.
 5. **Seqlock vs pointer-swap.** Publish a *large* table both ways: a seqlock (copy-per-read) and an atomic pointer-swap to a new immutable version (Ch. 36). Compare read latency and the writer cost. Where's the crossover (snapshot size) where pointer-swap wins (§35.2, §35.5)?
 
@@ -219,7 +219,7 @@ The reader side — read optimistically and validate, never accepting a torn val
 - [ ] Small, frequently-updated, read-heavy **snapshots** (BBO, price, config, position) are published via a **seqlock** (single-writer, odd/even sequence) — **not** a mutex/`shared_mutex` (which serializes readers — §35.3).
 - [ ] There is exactly **one writer** (single-writer discipline — Ch. 31); multiple writers are serialized or the design is restructured.
 - [ ] The reader does **snapshot-read-snapshot-validate** into a **local copy**, retrying on odd/changed sequence — never using data in place, never returning a torn value (§35.4.2).
-- [ ] **Memory ordering is correct** (release on the writer's data publication, acquire on the reader's sequence reads, fences around the data) — and **validated on a weakly-ordered machine / a memory-model-aware model checker** (Ch. 30, §40.4.3 — TSan can't check the fence-based form), not x86 alone.
+- [ ] **Memory ordering is correct** (release on the writer's data publication, acquire on the reader's sequence reads, fences around the data) — and **validated on a weakly-ordered machine / a memory-model-aware model checker** (Ch. 30, §42.4.3 — TSan can't check the fence-based form), not x86 alone.
 - [ ] Concurrently-read data uses the **atomic/fence pattern** (not plain non-atomic reads of written data — the data-race formality, §35.5).
 - [ ] The snapshot is **small and trivially-copyable**; **large/pointer state** uses **pointer-swap/RCU** (Ch. 36) instead.
 - [ ] **Reads ≫ writes** (retry rate is low) — verified; if writes are frequent, I used double-buffering/pointer-swap or reconsidered the design.
@@ -236,8 +236,8 @@ The reader side — read optimistically and validate, never accepting a torn val
 ## 35.8 Additional Reading
 
 - J. Preshing's blog — memory ordering and publication patterns, helpful for getting the seqlock fences right.
-- Talks/posts on "single-writer principle" (Martin Thompson / Mechanical Sympathy) — why single-writer is the foundation of fast publication (ties Ch. 31, 83).
-- Ch. 30 (*Atomics*) — the ordering the seqlock depends on; Ch. 31 (*Foundations*) — single-writer discipline; Ch. 34 (*Lock-Free*) — the streaming (ring) alternative; Ch. 36 (*Safe Reclamation*) — pointer-swap/RCU for large state; Ch. 37 (*Disruptor*) — sequence publication; Ch. 82 (*Hot Reload*) — config/reference-data publication; Ch. 26/51 (*mmap/IPC*) — cross-process publication.
+- Talks/posts on "single-writer principle" (Martin Thompson / Mechanical Sympathy) — why single-writer is the foundation of fast publication (ties Ch. 31, 86).
+- Ch. 30 (*Atomics*) — the ordering the seqlock depends on; Ch. 31 (*Foundations*) — single-writer discipline; Ch. 34 (*Lock-Free*) — the streaming (ring) alternative; Ch. 36 (*Safe Reclamation*) — pointer-swap/RCU for large state; Ch. 37 (*Disruptor*) — sequence publication; Ch. 85 (*Hot Reload*) — config/reference-data publication; Ch. 26/54 (*mmap/IPC*) — cross-process publication.
 - **Appendix A** — ARM weak ordering (where naive seqlocks break); **Appendix F** — seqlock/single-writer glossary entries.
 
 ---

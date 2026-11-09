@@ -169,11 +169,91 @@ Where it pays in trading/quant code: vectorized price/risk/signal math (Greeks, 
 Compose a class from orthogonal **policy** parameters, each supplying one behavioral axis, all resolved and inlined at compile time (the `OrderBook<Storage, Locking, Alloc>` of §19.2):
 
 - **Orthogonal axes as type parameters.** Storage layout (flat array vs intrusive list vs hash — Ch. 25), locking (none / spinlock / seqlock — Ch. 32, 35), allocation (arena / pool / pmr — Ch. 24), threading model. Each policy is a small type with the methods the host calls; swapping one is changing a template argument, not editing the host or adding a runtime branch.
-- **Empty policies are truly free.** A stateless policy (e.g. `NoLock`) contributes no size via the empty-base optimization / `[[no_unique_address]]` (Ch. 9) and its (empty) methods inline to nothing — so a "configurable" design pays zero for the configurability on unused axes.
+- **Empty policies are truly free — static dependency injection and no-op policies.** A stateless policy (e.g. `NoLock`) contributes no size via the empty-base optimization / `[[no_unique_address]]` (Ch. 9) and its (empty) methods inline to nothing — so a "configurable" design pays zero for the configurability on unused axes. This is *dependency injection resolved at compile time*: the host takes its collaborators as type parameters (`Engine<Logger, RiskGate, Clock>`) and a test or a benchmark substitutes a **null object** — `NullLogger` whose `log(...)` is an empty inline body, `NoRisk` whose `check()` returns `accept` as a constant, `FixedClock` returning a journaled time — with no virtual call, no `if (logger)` and no runtime seam. The production binary instantiates `Engine<BinaryLogger, Gate, TscClock>`; the unit test instantiates `Engine<RecordingLogger, NoRisk, FixedClock>`; both are monomorphic and §19.5 shows the null versions leave no instructions behind.
 - **Compile-time configuration of the hot path.** This is the idiomatic way to build a *family* of specialized hot-path components from one source — a `OrderBook` tuned per venue, a feed handler per protocol, a queue per concurrency model — each compiling to code as tight as a bespoke implementation, with the variation captured in types (testable, named, reusable).
 - **vs runtime configuration.** Policy-based design is compile-time; if the choice must be made at runtime (operator picks at startup), you instantiate the needed combinations and select among them once (a single runtime branch at setup, then the hot path is monomorphic) — *not* a per-call runtime policy. Watch the combinatorial instantiation explosion (§19.6) if axes × options is large.
 
-The synthesis of §19.4: encode the *varying design decision* in a type (CRTP for polymorphism, policies for composed behavior, expression types for fused computation) so the optimizer sees a concrete program and the abstraction inlines away — then **verify it did**.
+### 19.4.4 Strong types and units
+
+Ch. 27 wraps a scaled price in `struct Price { std::int64_t ticks; }` and defers "why this costs nothing" here. The idea is older than C++ (Hungarian notation was an attempt at it) and the trading version is concrete: `Price`, `Qty`, `Notional`, `PriceDelta`, `SymbolId`, `ClOrdId`, `Seq`, `Nanos` are all `int64`/`uint64` at runtime and *all different things*, and the bugs that matter — a price added to a quantity, a tick count where a scaled price was expected, an order id compared with a sequence number, nanoseconds passed as microseconds — are type errors that `int64_t` cannot see. A **strong type** is a single-member wrapper whose *allowed operations* are the only ones defined:
+
+```cpp
+// units.hpp — strong types for the order path. Trivially copyable, one register each, zero cost (§19.5 proves it). C++20.
+#include <compare>
+#include <concepts>
+#include <cstdint>
+struct Price      { std::int64_t ticks; constexpr explicit Price(std::int64_t t) : ticks(t) {} auto operator<=>(const Price&) const = default; };   // scaled integer, Ch. 27
+struct PriceDelta { std::int64_t ticks; auto operator<=>(const PriceDelta&) const = default; };
+struct Qty        { std::int64_t v;     constexpr explicit Qty(std::int64_t q) : v(q) {}      auto operator<=>(const Qty&) const = default; };
+struct Notional   { std::int64_t v;     auto operator<=>(const Notional&) const = default; };
+enum class SymbolId : std::uint32_t {};  enum class Seq : std::uint64_t {};                 // ids: an enum class is the cheapest strong type — no arithmetic, no implicit conversion
+struct ClOrdId    { std::uint64_t v; std::uint32_t slot() const { return std::uint32_t(v); } std::uint32_t gen() const { return std::uint32_t(v >> 32); } bool operator==(const ClOrdId&) const = default; };   // Ch. 88
+
+// the allowed-operations matrix — everything NOT listed does not compile:
+[[nodiscard]] constexpr PriceDelta operator-(Price a, Price b)      { return {a.ticks - b.ticks}; }   // price − price → delta
+[[nodiscard]] constexpr Price      operator+(Price a, PriceDelta d) { return Price{a.ticks + d.ticks}; }
+[[nodiscard]] constexpr Price      operator-(Price a, PriceDelta d) { return Price{a.ticks - d.ticks}; }
+[[nodiscard]] constexpr Notional   operator*(Price p, Qty q)        { return {p.ticks * q.v}; }       // price × qty → notional (checked variant: Ch. 87 §87.2.3)
+[[nodiscard]] constexpr Qty        operator+(Qty a, Qty b)          { return Qty{a.v + b.v}; }
+[[nodiscard]] constexpr Qty        operator-(Qty a, Qty b)          { return Qty{a.v - b.v}; }
+Price      operator+(Price, Price) = delete;                                                            // no price + price
+Price      operator+(Price, Qty)   = delete;                                                            // no price + qty (would not compile anyway: say so explicitly)
+Notional   operator*(Price, Price) = delete;
+
+template <class T> concept Money = std::same_as<T, Price> || std::same_as<T, Notional> || std::same_as<T, PriceDelta>;   // constrain generic code to the units it means
+template <Money M> constexpr M scale_bp(M m, std::int64_t bp) { return M{m.ticks * bp / 10'000}; }                      // (Notional has .v: a real version uses a member trait)
+static_assert(sizeof(Price) == 8 && std::is_trivially_copyable_v<Price> && std::is_standard_layout_v<Price>);           // the ABI passes it in a register (§19.5)
+```
+
+- **Explicit construction, defaulted comparison, no implicit conversion.** `explicit Price(int64)` means a raw tick count must be *named* as a price where it enters the typed world (the decoder, Ch. 57 §57.4); `operator<=>() = default` gives the full set of comparisons for free; there is no `operator int64_t`, so a `Price` cannot leak into untyped arithmetic by accident — reach `.ticks` on purpose at the codec and the journal.
+- **The matrix is the design.** Write down what each pair of units may do and define exactly those operators; `= delete` the tempting wrong ones so the compiler's error names the intent. The Ch. 87 gate reads as `if (o.px * o.qty > L.max_notional)` with every operand's unit checked; a transposed argument is a compile error, not a Tuesday.
+- **Ids are `enum class`.** `SymbolId`, `Seq`, a port id: no arithmetic should exist, so the cheapest strong type is an `enum class` with an explicit underlying type — comparable, hashable, switchable, convertible only by `static_cast`. `ClOrdId` is a struct because it *has* operations (slot/gen unpacking — Ch. 88 §88.2.1).
+- **`[[nodiscard]]` on every operator** — a computed notional that is dropped is a bug.
+- **Concepts, not SFINAE, to constrain generics** (C++20): `Money` above lets a `clamp`, a `scale_bp` or a serializer accept exactly the unit family it is written for.
+- **Trivially copyable, standard layout, one member** — this is what makes the wrapper free: the Itanium ABI passes such a struct in the same register as its member and the optimizer sees through the constructor; §19.5's asm is the proof. (Members with non-trivial special functions, or two members, change the ABI class and *do* cost — a `Price` with a destructor is passed in memory.)
+- **Units libraries.** For physical/time units with derived dimensions, `mp-units` (C++20/23; an Appendix H row) gives `quantity<si::nano<si::second>>` with dimensional analysis at compile time and the same zero cost; for the handful of trading units above, the hand-written matrix is smaller, faster to compile and easier to read than a dimensional framework. `std::chrono::duration` is the standard library's own strong type and is the right `Nanos` — use it, with `std::chrono::nanoseconds` and `duration_cast` at the boundaries, rather than a bespoke wrapper.
+
+### 19.4.5 Type-state and compile-time state machines
+
+The order lifecycle of Appendix J.3 and the session state machine beneath it (Logon → LoggedOn → Logout) are *runtime* state — a byte in the in-flight table (Ch. 88 §88.2.2), because states are data that must be journaled and replayed. The *API* through which code performs transitions can nevertheless make the illegal ones unrepresentable: **type-state** encodes the state in the type, so that `send()` exists only on a `Session<LoggedOn>` and `on_fill()` only on an `Order<Acked>`.
+
+```cpp
+// typestate.hpp — the state in the type; illegal transitions do not compile. The runtime table still stores the state as a byte (Ch. 88).
+struct Disconnected {}; struct LoggedOn {}; struct LoggingOut {};
+template <class State> class Session;
+template <> class Session<Disconnected> { public: [[nodiscard]] Session<LoggedOn> logon(SeqNums ours) &&;   /* no send(): there is nothing to send on */ };
+template <> class Session<LoggedOn>     { public: [[nodiscard]] ClOrdId send(const NewOrder&) &;  [[nodiscard]] Session<LoggingOut> logout() &&; [[nodiscard]] Session<Disconnected> dropped() &&; };
+template <> class Session<LoggingOut>   { public: [[nodiscard]] Session<Disconnected> confirmed() &&; };
+// Session<LoggedOn> s = Session<Disconnected>{}.logon(seqs);  s.send(o);   // ok
+// Session<Disconnected> d; d.send(o);                                      // error: no member 'send' — the bug Ch. 88 §88.5 lists is now a compile error
+
+struct Sent {}; struct Acked {}; struct Terminal {};
+template <class S> struct Order;
+template <> struct Order<Sent>  { ClOrdId id; [[nodiscard]] Order<Acked> on_ack() &&; [[nodiscard]] Order<Terminal> on_reject() &&; /* no on_fill(): a fill before an ack is Ack+Fill, handled explicitly */ };
+template <> struct Order<Acked> { ClOrdId id; Qty leaves; [[nodiscard]] Order<Acked> on_partial(Qty) &&; [[nodiscard]] Order<Terminal> on_fill() &&; [[nodiscard]] Order<Terminal> on_cancelled() &&; };
+template <> struct Order<Terminal> { ClOrdId id; /* nothing: a terminal order cannot be cancelled, replaced or filled */ };
+
+// a compile-time transition table for the same machine, checked once, used by the runtime byte-state code:
+enum class OState : std::uint8_t { Sent, Acked, PartFilled, Filled, Cancelled, Rejected, N };
+enum class Event  : std::uint8_t { Ack, Partial, Fill, Cancel, Reject, N };
+constexpr OState X = OState::N;                                                        // "illegal"
+constexpr OState TRANSITION[int(OState::N)][int(Event::N)] = {
+    /*            Ack              Partial             Fill            Cancel             Reject          */
+    /*Sent     */ {OState::Acked,  OState::PartFilled, OState::Filled, OState::Cancelled, OState::Rejected},
+    /*Acked    */ {X,              OState::PartFilled, OState::Filled, OState::Cancelled, X},
+    /*PartFill */ {X,              OState::PartFilled, OState::Filled, OState::Cancelled, X},
+    /*Filled   */ {X, X, X, X, X}, /*Cancelled*/ {X, X, X, X, X}, /*Rejected*/ {X, X, X, X, X} };
+static_assert(TRANSITION[int(OState::Filled)][int(Event::Cancel)] == X, "terminal states accept nothing");
+constexpr OState step(OState s, Event e) { return TRANSITION[int(s)][int(e)]; }       // one table load at runtime (Ch. 13 §13.4.2); X → the Ch. 88 stale/illegal path
+```
+
+- **Rvalue-qualified transitions** (`&&`) consume the old state object, so the stale `Session<Disconnected>` cannot be used after `logon()` — the C++ approximation of a move-only typestate (Rust's borrow checker enforces it fully — Ch. 77).
+- **Type-state is the API; the byte is the data.** Ch. 88's table stores `OState` because it must be journaled, snapshotted and replayed; `on_venue` reconstructs the typed view for the transition and writes the byte back. The two agree because both derive from the one `TRANSITION` table — `static_assert` the typed transitions against it.
+- **Compile-time tables** are the branch-light form of a state machine (Ch. 13 §13.4.2): one load instead of a `switch`, with every illegal cell visible at compile time. For the deterministic core (Ch. 86 §86.2.2) this is the shape `apply()` takes for its protocol states.
+- **Runtime-selected states still need a `variant`.** When the state is not known at compile time (which it never is for an *incoming* message), the typed objects live inside a `std::variant<Order<Sent>, Order<Acked>, Order<Terminal>>` and `std::visit` dispatches (Ch. 14 §14.4.3) — a jump table, cheap, but the type-state's zero cost applies *within* a known state, not to the dispatch into it.
+- **The honest trade-off**: one class per state multiplies instantiations (§19.6's bloat axis), error messages name `Session<LoggedOn>` rather than "session not logged on", and a state added later touches every specialization. Use type-state for the handful of protocol objects whose misuse is expensive (session, order, the Ch. 38 slot handle) — not for every enum in the program.
+
+The synthesis of §19.4: encode the *varying design decision* in a type (CRTP for polymorphism, policies for composed behavior and static dependency injection, expression types for fused computation, strong types for units, type-state for protocol objects) so the optimizer sees a concrete program and the abstraction inlines away — then **verify it did**.
 
 ---
 
@@ -214,11 +294,32 @@ There is no trace of `StrategyBase`, no `static_cast`, no call — the abstracti
         ...
 ```
 
-If instead you see *multiple* loops or temporary allocations, the expression templates didn't fuse (or you forced materialization). The verification habits for this chapter:
+If instead you see *multiple* loops or temporary allocations, the expression templates didn't fuse (or you forced materialization).
+
+**Strong types pass in bare registers — identical to `int64_t`.** The §19.4.4 wrappers against their raw equivalents (`clang++ -O2 -std=c++20 -S`, GCC 13.3 produces the same three bodies):
+
+```asm
+; within_collar(Price px, Price lo, Price hi)  — and within_collar_raw(long, long, long): the SAME six instructions
+        cmp     rdi, rsi            ; px >= lo        (each Price is ITS member, in the register the ABI gives an int64)
+        setge   cl
+        cmp     rdi, rdx            ; px <= hi
+        setle   al
+        and     al, cl
+        ret
+; notional(Price, Qty)  — and notional_raw(long, long):
+        mov     rax, rdi
+        imul    rax, rsi            ; price × qty: one imul; the Notional{} braces produced nothing
+        ret
+; bump(Price, PriceDelta) — and bump_raw(long, long):
+        lea     rax, [rdi + rsi]    ; the explicit constructor, the operator and the return type all vanished
+        ret
+```
+
+No wrapper, no load/store through a stack slot, no extra `mov`: a trivially-copyable single-member struct *is* its member to the ABI, and the `explicit` constructors and `[[nodiscard]]` operators are compile-time facts only. The `= delete`d operators leave no trace because the code that would have used them does not exist. The type-state transitions of §19.4.5 compile the same way (an `Order<Sent>::on_ack() &&` is a `mov` of the id) — the state is in the *type*, and types are free. The verification habits for this chapter:
 
 - **For any "zero-cost" abstraction on the hot path, diff its asm against the hand-written equivalent.** Same instructions = the claim holds. A stray `call`, extra moves, or a missing inline = it leaked.
 - **Confirm the dispatch inlined** (no `call [rax]`, the §19.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 9).
-- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 89).
+- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 95).
 
 ### Build-time/size caveat
 
@@ -274,7 +375,7 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 
 - CppCon talks on "zero-cost abstractions," CRTP, and policy-based design — including before/after asm walkthroughs that mirror §19.5.
 - Ch. 14 (*Indirect Calls & Virtual Dispatch*) — the runtime-polymorphism cost CRTP avoids; Ch. 18 (*Compile-Time Mechanics*) — the `if constexpr`/template foundation; Ch. 20 (*The Cost of Abstractions*) — abstractions that *aren't* free; Ch. 25 (*Cache-Friendly Containers*) and Ch. 24 (*Custom Allocators*) — policy-based containers/allocators in practice; Ch. 29 (*SIMD*) — expression-template vectorization.
-- **Ch. 74 §74.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
+- **Ch. 77 §77.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
 
 ---
 

@@ -43,6 +43,12 @@ STEPS = [
     ("insert", 74),  # Ch. 75 language-interop-abi-boundaries
     ("insert", 75),  # Ch. 76 managed-runtimes-measured
     ("insert", 76),  # Ch. 77 choosing-a-language-per-latency-tier
+    ("insert", 37),  # Ch. 38 threading-topologies-hot-loop
+    ("insert", 38),  # Ch. 39 flow-control-backpressure-conflation
+    ("insert", 43),  # Ch. 44 timers-deadlines-without-jitter
+    ("insert", 86),  # Ch. 87 pre-trade-risk-gate-kill-switch
+    ("insert", 87),  # Ch. 88 idempotent-order-entry-order-state-recovery
+    ("insert", 90),  # Ch. 91 sequencer-total-order-replicated-consumers
     # INSERT_STEPS_END
 ]
 def old2new(n):
