@@ -468,7 +468,7 @@ Code & content guidelines:
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (73–73): TODO.
-  - **XIII — Observability & Operations in Production** (74–85): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (75–86): logging, in-band latency tracing
     (Ch. 74, added 2026-11-09 P3-2), application telemetry (Ch. 75, added 2026-11-09 P3-1), security,
     hot reload, process topology, crash handling & post-mortem (Ch. 79, P3-2), capture/replay,
     latency-spike forensics (Ch. 81, P3-2), host health telemetry and network health & drop forensics

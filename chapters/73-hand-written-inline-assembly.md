@@ -44,4 +44,4 @@ TODO
 
 ---
 
-*Next: Ch. 74 — Zero-Overhead Logging.*
+*Next: Ch. 74 — Rust for the Hot Path.*

@@ -39,6 +39,7 @@ STEPS = [
     ("insert", 78),  # Ch. 79 crash-handling-core-dumps-post-mortem
     ("insert", 80),  # Ch. 81 latency-spike-forensics-anomaly-triggered-diagnostics
     ("insert", 72),  # Ch. 73 hand-written-inline-assembly
+    ("insert", 73),  # Ch. 74 rust-for-the-hot-path
     # INSERT_STEPS_END
 ]
 def old2new(n):
