@@ -104,7 +104,7 @@ Replay reproduces what *did* happen; **simulation** explores what *would* happen
 - **Non-deterministic core silently breaking replay/gates.** If the core isn't truly deterministic (§77.5), replay diverges and both the correctness and latency gates become meaningless. The determinism gate (§81.4.1) must itself be enforced — replay must match golden bit-for-bit, always.
 - **Naive backtest mistaken for reality.** Open-loop replay (your orders don't move the market) trusted for a liquidity-taking strategy — the P&L is fiction. Use a simulation harness (§81.4.3) where the strategy's actions matter.
 - **Measuring kernel/component latency, not wire-to-wire.** Timing inside the app and missing the NIC/PCIe/queuing (Ch. 60, 68) — the §81.3 walkthrough must be wire-to-wire (PTP), or it omits exactly the parts the customer (the market) sees.
-- **Tuning once and walking away.** Performance is defended continuously (§81.1) — a compiler bump (Ch. 22), a kernel update (Ch. 6), a dependency change (Ch. 75) can regress codegen or jitter at any time. The gate and the monitoring are forever, not a one-time project.
+- **Tuning once and walking away.** Performance is defended continuously (§81.1) — a compiler bump (Ch. 22), a kernel update (Ch. 6), a dependency change (Ch. 75) can regress codegen or jitter at any time. The gate and the monitoring are forever, not a one-time project — and the monitoring includes the *platform*: Ch. 79's isolation/thermal/SMI/clocksource invariants and Ch. 80's drop counters, sampled beside the application histograms, are what turn "the tail moved" into "this knob drifted".
 
 ## 81.6 Exercises & checklist
 

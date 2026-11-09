@@ -1007,12 +1007,19 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 78.6 Exercises & checklist
 
 ### [79. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](79-host-health-telemetry.md)
-- 79.1 Why it matters: TODO
-- 79.2 Mental model: TODO
-- 79.3 Measure it: TODO
+- 79.1 Why it matters: the quiet box decays
+- 79.2 Mental model: isolation as a live invariant
+  - 79.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
+  - 79.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
+  - 79.2.3 Drift: how a tuned box untunes itself
+  - 79.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
+- 79.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
 - 79.4 Techniques
-  - 79.4.1 TODO
-- 79.5 Pitfalls & anti-patterns: TODO
+  - 79.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
+  - 79.4.2 Frequency, thermal, power and SMIs — read from the right core
+  - 79.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
+  - 79.4.4 Baseline, drift audit, and wiring into the pipeline
+- 79.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
 - 79.6 Exercises & checklist
 
 ### [80. Network Health Telemetry & Drop Forensics](80-network-health-telemetry-drop-forensics.md)

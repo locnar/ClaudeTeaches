@@ -202,4 +202,4 @@ Capture's payoff is replaying it through the deterministic core (Ch. 77) — for
 
 ---
 
-*Next: Ch. 79 — Host Health Telemetry: Proving the Quiet Box Stayed Quiet.*
+*Next: Ch. 79 — Host Health Telemetry: Proving the Quiet Box Stayed Quiet, the first of two chapters that watch the platform the way Ch. 74 watches the application: the isolation invariants of Ch. 42–46 (involuntary switches, migrations, faults, the IPI rows, the tick) sampled every second from a housekeeping core, plus frequency/thermal throttling, SMIs, THP/compaction, the clocksource and the hardware's own error counters — with the fingerprint of every way a tuned box drifts, and the proof that the sampler itself never touches the hot core.*
