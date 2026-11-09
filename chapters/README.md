@@ -356,6 +356,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 24.4.2 LTO
   - 24.4.3 PGO and BOLT
   - 24.4.4 Debug info, frame pointers and unwind tables: what the production binary carries
+  - 24.4.5 Operating PGO/BOLT: the profile lifecycle
 - 24.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
 - 24.6 Exercises & checklist
 
@@ -1427,30 +1428,57 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 100.6 Exercises & checklist
 
 ### [101. Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing](101-testing-latency-critical-code.md)
-- 101.1 Why it matters: TODO
-- 101.2 Mental model: TODO
-- 101.3 Measure it: TODO
+- 101.1 Why it matters: the bug that loses money is a logic bug in a correct-looking program
+- 101.2 Mental model
+  - 101.2.1 The test pyramid for a deterministic core
+  - 101.2.2 Properties, not expected values
+  - 101.2.3 Deterministic simulation testing
+  - 101.2.4 Test doubles that cost nothing
+- 101.3 Measure it: a test suite for the core, a bug found by seed, and the price of a seam
 - 101.4 Techniques
-  - 101.4.1 TODO
-- 101.5 Pitfalls & anti-patterns: TODO
+  - 101.4.1 Table-driven tests of `apply(state, input)`
+  - 101.4.2 Property-based tests, invariants and shrinking
+  - 101.4.3 Deterministic simulation of the gateway against a fault-injecting venue
+  - 101.4.4 Golden-master tests cut from captures
+  - 101.4.5 Test doubles as policies: production and simulation from one template
+  - 101.4.6 Running the suite: sanitizers, ARM, and what belongs where
+- 101.5 Pitfalls & anti-patterns
 - 101.6 Exercises & checklist
 
 ### [102. Performance Engineering in CI & the Profile Lifecycle](102-performance-engineering-ci-profile-lifecycle.md)
-- 102.1 Why it matters: TODO
-- 102.2 Mental model: TODO
-- 102.3 Measure it: TODO
+- 102.1 Why it matters: a gate that flaps is a gate that gets turned off
+- 102.2 Mental model
+  - 102.2.1 A benchmark is a test with a noisy oracle
+  - 102.2.2 Which statistic to gate, on which machine
+  - 102.2.3 The pipeline: fast gate, nightly gate, bisection
+  - 102.2.4 Profiles decay like benchmarks
+- 102.3 Measure it: the noise floor, the gate, and the stale profile
 - 102.4 Techniques
-  - 102.4.1 TODO
-- 102.5 Pitfalls & anti-patterns: TODO
+  - 102.4.1 A/A calibration: measure the floor, derive the tolerance
+  - 102.4.2 The gate: bootstrap CI, rank test, minimum effect
+  - 102.4.3 Deterministic proxies for shared runners
+  - 102.4.4 The nightly replay gate and bisection by replay
+  - 102.4.5 Operating PGO/AutoFDO/BOLT: the profile lifecycle
+  - 102.4.6 Trend, alerting and the human loop
+- 102.5 Pitfalls & anti-patterns
 - 102.6 Exercises & checklist
 
 ### [103. Release Engineering & Measuring Changes in Production](103-release-engineering-measuring-changes-in-production.md)
-- 103.1 Why it matters: TODO
-- 103.2 Mental model: TODO
-- 103.3 Measure it: TODO
+- 103.1 Why it matters: the deploy is a latency event you schedule
+- 103.2 Mental model
+  - 103.2.1 The deploy calendar: what may change when
+  - 103.2.2 Compatibility windows: attaching a new version to live state
+  - 103.2.3 Trust in stages: shadow → canary → fleet
+  - 103.2.4 Why the CI gate is necessary and not sufficient
+- 103.3 Measure it: a blue/green cutover tick by tick, and paired comparison with its own A/A
 - 103.4 Techniques
-  - 103.4.1 TODO
-- 103.5 Pitfalls & anti-patterns: TODO
+  - 103.4.1 The release manifest: what "a release" is
+  - 103.4.2 Compatibility windows in code
+  - 103.4.3 Blue/green cutover for process-per-role
+  - 103.4.4 Shadow runs and canary shards
+  - 103.4.5 Paired production comparison, with its A/A
+  - 103.4.6 Venue conformance and the weekend test
+- 103.5 Pitfalls & anti-patterns
 - 103.6 Exercises & checklist
 
 ### [104. Production Profiling & End-to-End Case Study](104-production-profiling-end-to-end-case-study.md)
@@ -1462,6 +1490,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 104.4.2 Deterministic replay of captured market data
   - 104.4.3 Simulation harnesses
   - 104.4.4 Profiling the live system safely
+  - 104.4.5 Closing the loop: from the latency ledger to fills, markouts and race outcomes
 - 104.5 Pitfalls & anti-patterns: drift between test and production
 - 104.6 Exercises & checklist
 
@@ -1569,6 +1598,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - L.3 Making a run repeatable (environment & isolation)
 - L.4 The pre-trust checklist
 - L.5 Benchmarking across languages (the Ch. 83 protocol: same box/core/capture, digest parity, warm vs cold windows, each toolchain's sink and asm)
+- L.6 Benchmarks as tests: the CI skeleton (Ch. 102) — CTest labels, `--benchmark_out=json`, `compare.py`, the A/A table and the artefact layout keyed by revision and runner class
 
 ### [Appendix M — Pre-Open Readiness Gate & Market-Open Playbook](appendix-M-readiness-gate-market-open.md)
 - M.1 The readiness state machine (cold → warming → syncing → reconciled → armed → trading → disarmed; one predicted branch on the order path)

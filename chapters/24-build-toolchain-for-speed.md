@@ -181,6 +181,25 @@ Read it as a design decision: **frame pointers are the hot-path-safe capture** �
 
 The convention, in one build line: `-O2 -g -march=<colo uarch> -fno-omit-frame-pointer -frecord-gcc-switches -Wl,--build-id=sha1`, strip at package time, archive `.debug` by build ID, keep `.eh_frame` (never `-fno-asynchronous-unwind-tables`), and add `-mno-omit-leaf-frame-pointer -fno-optimize-sibling-calls` to the TUs whose crash stacks you want complete after measuring them with the Ch. 3 harness. Appendix D.4 and D.7 carry the rows.
 
+### 24.4.5 Operating PGO/BOLT: the profile lifecycle
+
+§24.4.3 ends with "refresh profiles as the strategy/code changes"; this is the procedure, with the costs measured in Ch. 102 §102.3 on a decoder-style dispatch kernel (GCC 13.3 / Clang 18.1, the reference VM): PGO trained on the open's message mix bought −13 % (GCC) / −10 % (Clang) on the open and cost **+3 % / +6 %** on the midday mix — a *stale-workload* profile; a profile from the previous source revision, forced through after a one-function change, cost **+13–17 %** against a fresh one (GCC refuses by default with `-Werror=coverage-mismatch`; Clang 18 built silently). The instrumented GCC build (`-fprofile-update=atomic`) ran 3.5× slower, Clang's front-end instrumentation 3 % slower, which decides where training can run.
+
+```
+   TRAIN    on a named replayed capture (Ch. 94–95) containing the open and the day — never synthetic, never idle; at 0.3× speed into the instrumented build
+            GCC:   g++ -O2 -march=… -fprofile-generate [-fprofile-update=atomic] -c x.cpp -o build/x.o   (the .gcda is keyed by the OBJECT name: keep -o identical in the -fprofile-use compile)
+            Clang: clang++ -O2 -fprofile-instr-generate …;  LLVM_PROFILE_FILE="prof/%m-%p.profraw" ./app_instr
+   MERGE    llvm-profdata merge -output=rev.profdata prof/*.profraw   [-weighted-input=3,open.profdata -weighted-input=1,midday.profdata]
+            gcov-tool merge -w 3,1 dirA dirB   (GCC; or let the runtime accumulate .gcda across runs)
+   STORE    the profile is a build input keyed by (source revision, capture id, date) and named in the release manifest (Ch. 103 §103.4.1); the hermetic build (Ch. 25) pins it
+   USE      -fprofile-use -fprofile-correction [-fprofile-partial-training]  /  -fprofile-instr-use=rev.profdata;  then LTO;  then BOLT from an LBR profile of the SAME replay, as the last build step, every time
+   GATE     mismatch diagnostics fatal — GCC: -Werror=coverage-mismatch (default) -Werror=missing-profile;  Clang: -Werror=profile-instr-out-of-date -Werror=profile-instr-unprofiled;
+            capture age < D days;  the replay gate (Ch. 102 §102.4.4) runs the PGO'd binary on the open AND a midday window and fails if either is slower than plain -O2
+   REFRESH  on every change to a hot-path TU, weekly, after any venue/feed change;  AutoFDO (perf record -b on production → create_llvm_prof / create_gcov → -fprofile-sample-use / -fauto-profile) refreshes between instrumented trainings at ~zero runtime cost
+```
+
+The lifecycle's shape is Ch. 102's for a benchmark baseline — a measured artefact with provenance, a validity window and a gate — because a profile *is* a performance claim about the workload, and it decays like one. Appendix D.6 lists the flags; Appendix I.9 the one-liners.
+
 ## 24.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
 
 - **`-Ofast`/`-ffast-math` changing your numbers.** `-Ofast` silently enables `-ffast-math`: FP reassociation, no NaN/Inf handling, flush-to-zero — which can change computed prices/risk in the last bits, break cross-build **determinism** (Ch. 30, 94 — replay must be bit-exact), and miscompile code that relies on NaN checks. Never blanket-enable it on financial math; opt into specific, understood relaxations (e.g. `-fno-math-errno`) and keep determinism-critical code at strict FP (Ch. 30). 

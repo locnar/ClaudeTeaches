@@ -2,7 +2,7 @@
 
 # Chapter 104 — Production Profiling & End-to-End Case Study
 
-> **Prerequisites:** Ch. 86, 99, 100 (telemetry, host health, network health — the three continuous signal sources this chapter's monitoring half consumes), all of it — this is the capstone. Most directly: Ch. 2–3 (profiling / micro-benchmarking), Ch. 1 (tail-latency thinking), Ch. 17/66 (timestamps), Ch. 69 (eBPF production tracing), Ch. 89–94 (deterministic state machine + capture/replay — the basis of the regression gate), Ch. 60, 63, 66, 69, 70 (the wire path the walkthrough traces).
+> **Prerequisites:** Ch. 101–103 (the test suite, the CI gate and its A/A calibration, and the release procedure — this chapter's gate is the principle, theirs the mechanics), Ch. 86, 99, 100 (telemetry, host health, network health — the three continuous signal sources this chapter's monitoring half consumes), all of it — this is the capstone. Most directly: Ch. 2–3 (profiling / micro-benchmarking), Ch. 1 (tail-latency thinking), Ch. 17/66 (timestamps), Ch. 69 (eBPF production tracing), Ch. 89–94 (deterministic state machine + capture/replay — the basis of the regression gate), Ch. 60, 63, 66, 69, 70 (the wire path the walkthrough traces).
 >
 > **Leads into:** the Appendices (A: ARM/Graviton; C: tuning checklist; E: latency numbers; G: bibliography; I: tooling command cookbook; J: market-structure & protocol primer; L: reproducible benchmark harness). The book's final chapter: continuous performance monitoring, regression detection, and a full tick-to-trade walkthrough that touches every Part.
 
@@ -76,14 +76,13 @@ This table *is* the book: every stage is a Part, every number is a technique, an
 
 ### 104.4.1 Regression detection and latency-regression gates in CI
 
-The defense against silent regression: **make latency a CI gate, the same way correctness is.** Built on deterministic replay (Ch. 89–94):
+The defense against silent regression: **make latency a CI gate, the same way correctness is.** The principles, with the mechanics in Ch. 101–102:
 
-- **Golden capture + golden output.** Keep a representative captured session (Ch. 94 — including a microburst, Ch. 60) and the golden outputs the deterministic core (Ch. 89) produces from it. This is the regression fixture.
-- **Parity gate (research vs production).** The second golden is the *research tier's*: Ch. 94 §94.4.6's Python module, built from the same `kernel.hpp`, must produce the same digest over the golden capture as the engine — and the pure-Python reference decoder (kept only as an oracle) must agree with it field-for-field over a prefix. A divergence here is a drifted reimplementation, a stale extension build, or a layout change at the Ch. 81 waist (its parity asserts fail first) — found in CI, not in a backtest that quietly disagrees with production. Ch. 83 §83.4.6 extends the same digest across every language the firm runs.
-- **Correctness gate (determinism).** In CI, replay the golden capture through the build and assert outputs are **bit-identical** to golden (§89.2.2). Any divergence is a behavior change — caught before deploy. This also continuously *proves* the core is still deterministic (a sneaked-in `clock_gettime` — §89.5 — fails the gate), and with the per-event digest column of §89.4.6 the failure reports the *first diverging event* rather than a diff — run the gate twice with ASLR on and across two compilers to catch pointer-keyed hashing and FP reassociation (§89.4.6's lint).
-- **Latency-regression gate.** Replay the capture and measure per-stage and end-to-end latency (the §104.3 decomposition), comparing the *distribution* (p50/p99/p99.9 — Ch. 3, not the mean) against a baseline with a tolerance. A stage whose p99.9 regressed beyond tolerance **fails the build**. Make the statistics explicit (Ch. 3 §3.4.4): N ≥ 30 replays per build; a bootstrap 95% confidence interval on each stage's p99.9; fail when the CI's *lower* bound exceeds baseline + tolerance (so noise cannot fail you, and a real regression cannot hide in it); a Mann–Whitney U-test on the bulk of the distribution; and a change-point test on the trend series for the slow drift below. This catches the added indirect call (Ch. 14), the layout change (Ch. 9), the new allocation (Ch. 26), the codegen regression from a compiler bump (Ch. 24) — at PR time, not in production.
-- **Stable measurement environment.** A regression gate is only as good as its measurement noise (Ch. 3): run it on a quiet, tuned, isolated box (Ch. 6, Appendix C) with frequency scaling pinned (Ch. 3), enough replay iterations for statistical power, and compare distributions (not single runs) so normal variance doesn't flap the gate. A noisy gate gets ignored; a stable one is trusted.
-- **Track the trend.** Beyond pass/fail, record the per-stage distribution over time (a dashboard) so slow drift — a few ns per release — is visible before it sums to a regression. Performance, like the budget, is watched continuously.
+- **Golden capture + golden output.** Keep a representative captured session (Ch. 94–95 — including a microburst, Ch. 60) and the golden outputs the deterministic core (Ch. 89) produces from it. This is the regression fixture; Ch. 101 §101.4.4 cuts the small per-build masters from it.
+- **Correctness gate (determinism).** Replay the golden capture through the build and assert outputs are **bit-identical** to golden (§89.2.2), with the per-event digest column of §89.4.6 naming the first diverging event; run it under ASLR and across two compilers. Beside it, the logic suite of Ch. 101 — table-driven, property-based and deterministic-simulation tests — because a golden master catches *change*, not *wrongness*.
+- **Parity gate (research vs production).** Ch. 94 §94.4.6's Python module, built from the same `kernel.hpp`, must produce the same digest over the golden capture as the engine; Ch. 83 §83.4.6 extends the digest across every language the firm runs.
+- **Latency-regression gate.** Replay the capture, measure per-stage and end-to-end latency (the §104.3 decomposition) and compare the *distribution* against a stored baseline — but only after **calibrating what the gate can see**: Ch. 102 §102.3 ran the same binary twenty times and found a 22 % run-to-run p99 spread and a 196 % p99.9 spread on a shared runner, so the per-PR gate there checks the **median** and p99 with a tolerance derived from that A/A spread, uses a bootstrap CI whose lower bound must clear the tolerance *and* a rank test, and leaves p99.9 to the **nightly** run on the tuned box (Appendix C) with the replayed open (Ch. 95). Deterministic proxies (`instructions:u`, cachegrind, an asm hash of the hot functions) stand in where the timing gate is blind. Ch. 102 §102.4.1–§102.4.4 is the procedure; Appendix L.6 the skeleton.
+- **Track the trend and bisect by replay.** Per-stage distributions stored per revision, a change-point test on the trend for the drift no single gate catches, and a nightly failure that starts a bisection over the same capture on the same box (Ch. 102 §102.4.6, §104.4.2).
 
 ### 104.4.2 Deterministic replay of captured market data
 
@@ -174,6 +173,38 @@ Two reads per stage boundary — `cycles` and `LLC-load-misses`, or `instruction
 **5. Continuous profilers.** Parca, Pyroscope, Elastic Universal Profiling and their relatives attach an eBPF-driven `perf_event` sampler to **every CPU** at ~19–99 Hz and unwind in the kernel (frame pointers or their own DWARF/`.eh_frame` interpretation) — a fleet-wide 0.1–1 % that is excellent for the housekeeping half of the box and exactly the wrong thing for an isolated core: each sample is an NMI on the hot thread, the attach is an IPI, and the per-CPU event is a `nohz_full` tick dependency (Ch. 52). Run them with the isolated cores excluded (their CPU filter, or a `cpuset` that never includes the hot cores — Appendix C.4), and let the hot cores' "continuous profile" be what it already is: the per-stage histograms (Ch. 86) and the `rdpmc` deltas above, which cost no NMI at all.
 
 The observer-effect budget, in one line: **the hot thread pays for stores and `rdpmc`; a housekeeping core pays for everything else; and anything that IPIs or NMIs the hot core is armed for a session, bounded, and frozen on a trigger.**
+
+### 104.4.5 Closing the loop: from the latency ledger to fills, markouts and race outcomes
+
+Every number in this book is justified by one sentence in Appendix K.7 — "the marginal nanosecond still changes fill rates" — that the book has never *checked*. The check is a **post-trade join**, off the hot path, over three journals: the wire capture (Ch. 95: every inbound tick with its hardware timestamp), the order journal (Ch. 91–92: every send with the triggering tick's sequence number, the decision record from the in-band ledger — Ch. 85 — and the NIC's hardware TX stamp), and the venue's acknowledgements and fills with the **venue's own timestamps** (Ch. 60 §60.4.2; Appendix J.5 — the matching engine's receive and match times, to the microsecond or better where RTS 25 applies). Keyed by `ClOrdID` and tick sequence, the join yields per order:
+
+```
+   reaction latency    t_tx_hw(order) − t_rx_hw(triggering tick)             the firm's tick-to-trade for THIS order (the §104.3 budget, realised)
+   venue transit       t_venue_recv(order) − t_tx_hw(order)                   the wire + venue gateway; constant per path, so its variance is the venue's
+   time to ack         t_rx_hw(ack) − t_tx_hw(order)                          the round trip the risk gate's ageing timer (Ch. 47 §47.4.2) is tuned against
+   outcome             filled / partially filled / rejected / cancelled        from the lifecycle (Appendix J.3)
+   queue position      venue timestamp of our order vs venue timestamps of the resting orders ahead of it (from the L3 feed, Ch. 60) at entry
+   race outcome        for a liquidity-taking order: did ours reach the venue before the competing order that took the same liquidity? by how many ns?
+   markout             mid-price change at +1 / +10 / +100 ms after our fill, signed by side — adverse selection: did the market move against the fill?
+```
+
+From per-order rows come the curves that decide where the next engineering month goes: **fill rate vs reaction latency** (bin orders by their own reaction latency; a knee marks where being faster stops buying fills because the competition is already slower), **markout vs reaction latency** (fills won *slowly* are the adversely selected ones — the race was lost and the fill is a consolation), **race margin histograms** per venue (by how many ns we win or lose, from the venue's timestamps — the only clock both sides share), and **time-to-ack by venue gateway** (which session is slow today). The analysis is a batch job over binary journals — the Ch. 94 §94.4.6 decoder bound into Python, Arrow tables, a sort-merge join on `(venue, ClOrdID)` and `(venue, seq)`; minutes for a day — and a strategy question only in its last step. Its first use is operational: Ch. 103 §103.4.4's canary compares a shard's fill rate and markout with its siblings'; a release that is 50 ns faster and fills *less* has changed what it decides, not how fast.
+
+An illustration of the first curve's shape, from a **synthetic** race model (not a measured session — the method is the deliverable, the data must be your own captures): our order against one competitor whose reaction time is normally distributed around 1 200 ns (σ 300 ns); fill rate is the probability of arriving first:
+
+```
+   our reaction (ns)          fill rate
+     600 ns reaction             96.9 %
+     800 ns reaction             89.3 %
+    1000 ns reaction             73.3 %
+    1200 ns reaction             50.0 %
+    1400 ns reaction             26.8 %
+    1600 ns reaction             10.8 %
+    2000 ns reaction              0.7 %
+   the knee sits where our latency crosses the competition's distribution: from 1 200 to 1 000 ns buys ~+23 points; from 800 to 600 ns buys ~+8; below that, nothing the market is paying for.
+```
+
+On a real session the curve is the *measured* value of a nanosecond for each strategy and venue, and the §104.3 decomposition says which stage's hundred nanoseconds are the cheapest to buy. Two cautions: venue timestamps have their own semantics and resolution (gateway receive vs match time; µs vs ns — Appendix J.5's table), so the race margin is only as fine as the venue's clock; and markouts need the *consolidated* mid (Ch. 60 §60.2.3), not the venue's own book, or the adverse selection measured is the venue's, not the market's.
 
 ## 104.5 Pitfalls & anti-patterns: drift between test and production
 

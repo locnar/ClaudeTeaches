@@ -207,6 +207,18 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
    nm -D --defined-only -C ./app | wc -l                  # exported (dynamic) symbol count (visibility hygiene; App D.4)
    g++ ... -fno-reorder-blocks-and-partition -Wl,--emit-relocs -o app   # BOLT needs relocations to reorder functions, and does its own hot/cold splitting (App D.5–D.6)
    perf record -e cycles:u -j any,u ./app                 # LBR data for BOLT
+   # --- the PGO profile lifecycle (Ch. 24 §24.4.5, Ch. 102 §102.4.5):
+   LLVM_PROFILE_FILE="prof/%m-%p.profraw" ./app_instr --replay open.pcapng      # Clang: one raw profile per process, keyed by binary signature (%m)
+   llvm-profdata merge -output=rev.profdata prof/*.profraw                    # merge; -weighted-input=3,open.profdata -weighted-input=1,mid.profdata to weight the open
+   llvm-profdata show --topn=10 rev.profdata                                   # hottest functions / counters in the profile (did the training reach the hot path?)
+   gcov-tool merge -w 3,1 prof_open prof_mid -o prof_merged                    # GCC: weighted merge of two .gcda directories
+   g++ -fprofile-use -fprofile-correction -Werror=coverage-mismatch -Werror=missing-profile -c x.cpp -o build/x.o   # same -o as the instrumented compile, or the .gcda is not found
+   clang++ -fprofile-instr-use=rev.profdata -Werror=profile-instr-out-of-date -Werror=profile-instr-unprofiled x.cpp   # make Clang's silent stale-profile build fatal
+   # --- performance gates in CI (Ch. 102):
+   for i in $(seq 20); do ./bench --benchmark_filter=Update --benchmark_out=aa-$i.json --benchmark_out_format=json; done   # A/A: the same binary 20×; the spread is the noise floor
+   perf stat -e instructions:u,branches:u,branch-misses:u -r 10 -x, ./bench   # deterministic proxy: instructions:u varies < 0.01 % run to run on any runner
+   valgrind --tool=cachegrind --cache-sim=yes --branch-sim=yes ./bench         # simulated misses: slow, exact, machine-independent
+   objdump -d --no-show-raw-insn app | awk '/<hot_fn>:/,/ret/' | sha256sum     # asm hash of a hot function: unchanged → no timing run needed
    perf2bolt -p perf.data -o app.fdata ./app              # convert perf profile for BOLT (Ch. 24)
    llvm-bolt ./app -o ./app.bolt -data=app.fdata \
      -reorder-blocks=ext-tsp -reorder-functions=hfsort \

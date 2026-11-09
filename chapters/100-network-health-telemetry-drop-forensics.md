@@ -388,4 +388,4 @@ Under kernel bypass (Ch. 70) layers 2b–5 of the table move into the user-space
 
 ---
 
-*Next: Ch. 101 — Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing.*
+*Next: Ch. 101 — Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing: before a build may touch any of the above, the book's first test code — table-driven tests of `apply(state, input)`, property-based tests with a shrinker that cut a 200-input failure to two, a deterministic simulation that drove the gateway through 5 000 seeded fault schedules in 120 ms and found a resend bug at seed 1, golden masters cut from captures, and test doubles as policies that compile to the production instructions.*

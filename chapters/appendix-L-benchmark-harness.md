@@ -212,14 +212,47 @@ Everything above is C++; Ch. 83 §83.2.3 extends it to a cross-language comparis
 
 Report medians of *R* runs per row with the toolchain versions and flags in the header (Ch. 83 §83.3 is the worked example: nine toolchains, one kernel, one table), add the L.2 tail-latency variant for any row whose runtime can pause (Ch. 82), and state the box — numbers from a VM are not the reference machine's.
 
-## L.6 References
+## L.6 Benchmarks as tests: the CI skeleton (Ch. 102)
+
+The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline compares against a stored baseline with the statistics of Ch. 102 §102.4.2. The skeleton, for a CMake/CTest project:
+
+```
+   # CMakeLists.txt — benchmarks are tests with a label; the per-PR job runs the label, the nightly runs everything on the tuned box
+   add_executable(bench_book bench_book.cpp)  target_link_libraries(bench_book benchmark::benchmark)
+   add_test(NAME bench_book COMMAND bench_book --benchmark_out=${CMAKE_BINARY_DIR}/bench/book.json --benchmark_out_format=json
+                                              --benchmark_repetitions=20 --benchmark_report_aggregates_only=false --benchmark_min_time=0.5s)
+   set_tests_properties(bench_book PROPERTIES LABELS "bench;perpr" RUN_SERIAL TRUE)      # RUN_SERIAL: never two benchmarks at once
+
+   # per-PR job (shared runner class R):
+   ctest -L perpr --output-on-failure                                                     # produces bench/*.json
+   perf stat -e instructions:u,branches:u -r 10 -x, ./bench_book --benchmark_filter=Update --benchmark_min_time=0.1s 2> bench/book.counters   # deterministic proxy (Ch. 102 §102.4.3)
+   python3 tools/compare.py benchmarks baseline/R/<last-green-rev>/book.json bench/book.json --no-color > bench/book.compare   # Mann–Whitney per benchmark (Ch. 3 §3.4.4)
+   ./perfgate --aa baseline/R/aa.json --base baseline/R/<last-green-rev>/book.json --cand bench/book.json --stat p50,p99 \
+              --min-effect-from-aa 1.5 --alpha 0.001 > bench/book.gate.json                                             # bootstrap CI vs A/A tolerance + rank test → PASS/FAIL (Ch. 102 §102.4.2)
+
+   # artefact layout (keyed by revision AND runner class; a runner change starts a new series and a new A/A table):
+   baseline/<runner-class>/aa.json                  the A/A table: per-statistic spread of R runs of one binary (Ch. 102 §102.4.1); re-measured weekly
+   baseline/<runner-class>/<rev>/<bench>.json        Google Benchmark JSON (per-repetition samples, not just aggregates)
+   baseline/<runner-class>/<rev>/<bench>.counters    perf stat -x, output
+   baseline/<runner-class>/<rev>/<bench>.gate.json   the verdict line Ch. 102 §102.4.2 emits; the trend view reads these
+
+   # nightly (tuned box, Appendix C; reserved for the gate):
+   cyclictest -q -D 60 -p 90 -m -h 100 | tail -3                                           # quiet-box precondition (Appendix C.7, Appendix M.3)
+   ctest -L bench                                                                           # all benchmarks, the L.2 tail variant included
+   ./replay --speed 1 --pacer spin --capture captures/open-<id>.pcapng --target <box>   # the open onto the wire (Ch. 95 §95.4.3)
+   ./perfgate --aa baseline/tuned/aa.json --base baseline/tuned/median-of-last-7/ --cand nightly/<rev>/ --stat p50,p99,p99.9 --per-stage   # per §104.3 stage
+```
+
+Two rules the skeleton encodes. **The sample, not the summary, is the artefact**: `--benchmark_report_aggregates_only=false` keeps every repetition so the bootstrap can resample them; aggregates alone cannot be gated honestly. **Tolerances come from `aa.json`, never from the YAML**: `--min-effect-from-aa 1.5` sets each statistic's minimum effect to 1.5× its A/A spread on that runner class, so the gate's promise ("catches +3 ns on the median, +6 ns on p99, nothing on p99.9 here") is a measured fact about the runner. The L.2 harness's two histograms feed the same gate for the tail variant, and the nightly's per-stage comparison is Ch. 104 §104.4.1's gate with Ch. 102 §102.4.4's operating procedure.
+
+## L.7 References
 
 - **Google Benchmark** documentation and User Guide — `benchmark::State`, `DoNotOptimize`/`ClobberMemory`, arguments/ranges, reporters and JSON output (L.1).
 - **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `HdrHistogram_c` libraries) — the basis of L.2; `hdr_histogram.h` documents the record-and-back-fill semantics of `hdr_record_corrected_value` and the false-return-on-out-of-range behaviour of `hdr_record_value` that L.2 relies on.
 - Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 17 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 53 (warming) — the warm-vs-cold discipline in L.3.
 - The `perf`, `taskset`, `chrt`, `cpupower`, `numactl` man pages (Appendix I) — the environment controls of L.3.
 
-## L.7 Additional Reading
+## L.8 Additional Reading
 
 - **Appendix I** (Tooling Command Cookbook) — the `perf stat`/pinning/`objdump` commands to run *alongside* a benchmark so the counters explain the timing.
 - **Appendix C** (System Tuning Checklist) — the box-level setup (isolation, governor, C-states) that makes a benchmark host quiet enough to trust.
