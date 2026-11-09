@@ -188,7 +188,7 @@ The low-latency RDMA discipline (ties Ch. 23, 41):
 - [ ] The **verb matches the data-flow pattern**: one-sided **WRITE** for push/publication (the cross-host seqlock — Ch. 35), **READ** for fetch, **SEND/RECV** for message passing, **atomics** for cross-host coordination (§63.4.1).
 - [ ] One-sided WRITE publication uses **correct ordering** (data then flag/sequence — Ch. 30, 35) so the remote (which **polls** its memory) sees consistent, non-torn data (§63.5).
 - [ ] The **fabric** is chosen and configured: native **IB** (lowest latency, dedicated) or **RoCEv2** with **lossless PFC/ECN** (not lossy Ethernet) (§63.4.2).
-- [ ] RDMA is used for **intra-datacenter** host-to-host messaging (risk cluster, distribution, gateways) — not expected to help the external **exchange** leg (Appendix K, Ch. 60); zero-copy registered buffers throughout (§63.4.3).
+- [ ] RDMA is used for **intra-datacenter** host-to-host messaging (risk cluster, distribution, gateways) — not expected to help the external **exchange** leg (Appendix K; the switching fabric — Ch. 60); zero-copy registered buffers throughout (§63.4.3).
 - [ ] **Inline** small messages, **batch doorbells / unsignaled completions** for high rate (§63.4.3); a higher-level library (`librdmacm`/UCX) is used where raw verbs complexity isn't justified.
 - [ ] **Security/IOMMU**: rkeys scoped tightly, IOMMU configured (Ch. 66), RDMA peers treated with appropriate trust (Ch. 72).
 

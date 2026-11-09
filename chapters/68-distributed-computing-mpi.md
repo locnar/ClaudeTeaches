@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 67 (GPU — the other batch-tier accelerator; MPI scales across nodes/GPUs), Ch. 63 (RDMA/InfiniBand — MPI's fast transport), Ch. 16 (NUMA — rank placement), Ch. 31 (shared-nothing — MPI is shared-nothing across hosts), Ch. 1 (latency vs throughput — MPI is throughput/scale).
 >
-> **Leads into:** Ch. 63 (the RDMA transport under MPI), Ch. 67 (multi-GPU via MPI), Ch. 76 (large-scale backtesting/risk in the case study). Part XI's scale-out tier — for the *off-order-path* compute spread across a cluster, explicitly not the tick-to-trade path.
+> **Leads into:** Ch. 69 (FPGA — the latency-tier accelerator, by contrast), Ch. 76 (large-scale backtesting/risk in the case study). Part XI's scale-out tier — for the *off-order-path* compute spread across a cluster, explicitly not the tick-to-trade path.
 
 ---
 
@@ -14,11 +14,11 @@ Chapter 67's GPU scaled compute *within* a box; **MPI (Message Passing Interface
 
 And the framing is, once again, the same Ch. 1 dichotomy: MPI is a **throughput/scale** tool, **off the order path**. Crossing a *network* between hosts (even the fast RDMA/InfiniBand transports — Ch. 63) costs microseconds per message — so, exactly like the GPU's PCIe round-trip (Ch. 66–67), **message latency keeps MPI off the tick-to-trade path**. You don't distribute the order decision across a cluster (the network hop alone blows the nanosecond budget); you distribute the *batch analytics* around it — backtests, risk, research — where the work is large, parallelizable across nodes, and latency-insensitive (budgets in seconds-to-hours). MPI is the cluster-scale version of the off-hot-path tier; the tick-to-trade path stays single-host (ideally single-thread, single-core — Ch. 31, 62), and inline-on-NIC for hardware acceleration (Ch. 69).
 
-What makes MPI worth a chapter (beyond "run it across nodes") is the **communication structure** — and that the communication is usually the bottleneck, not the compute. MPI gives you **point-to-point** (send/recv between two ranks) and **collective** operations (broadcast, scatter/gather, all-reduce — operations across *all* ranks), and the art of scaling is (1) minimizing and structuring communication (it's the cluster's version of the contention/coordination cost — Ch. 31), (2) **overlapping communication with computation** (non-blocking calls — like the GPU's transfer/compute overlap, Ch. 67.4.2), (3) using the fast **RDMA/InfiniBand transport** (Ch. 63) rather than TCP, and (4) **topology-aware rank placement** (NUMA — Ch. 16, and network topology) so ranks that talk a lot are close. A poorly-structured MPI program is dominated by communication (a collective on the critical path serializing everything — §68.5); a well-structured one overlaps communication with compute and scales near-linearly. This chapter explains the communicator/point-to-point/collective model (§68.2), measures message latency vs size (§68.3), details non-blocking overlap, RDMA transports, and topology-aware placement (§68.4), and warns about collectives on the critical path (§68.5). It's the scale-out tier for off-order-path compute.
+What makes MPI worth a chapter (beyond "run it across nodes") is the **communication structure** — and that the communication is usually the bottleneck, not the compute. MPI gives you **point-to-point** (send/recv between two ranks) and **collective** operations (broadcast, scatter/gather, all-reduce — operations across *all* ranks), and the art of scaling is (1) minimizing and structuring communication (it's the cluster's version of the contention/coordination cost — Ch. 31), (2) **overlapping communication with computation** (non-blocking calls — like the GPU's transfer/compute overlap, §67.4.2), (3) using the fast **RDMA/InfiniBand transport** (Ch. 63) rather than TCP, and (4) **topology-aware rank placement** (NUMA — Ch. 16, and network topology) so ranks that talk a lot are close. A poorly-structured MPI program is dominated by communication (a collective on the critical path serializing everything — §68.5); a well-structured one overlaps communication with compute and scales near-linearly. This chapter explains the communicator/point-to-point/collective model (§68.2), measures message latency vs size (§68.3), details non-blocking overlap, RDMA transports, and topology-aware placement (§68.4), and warns about collectives on the critical path (§68.5). It's the scale-out tier for off-order-path compute.
 
 ## 68.2 Mental model: communicators; point-to-point vs collective
 
-**MPI — many processes (ranks), communicating by messages, shared-nothing across hosts.** You launch *N* copies of your program (`mpirun -n N`); each is a **rank** (0..N-1), running on some node, with its *own* memory (shared-nothing — Ch. 31, across hosts). They cooperate by **passing messages** — no shared memory between nodes (that's RDMA's job under the hood — Ch. 63, but the MPI model is messages):
+**MPI — many processes (ranks), communicating by messages, shared-nothing across hosts.** You launch *N* copies of your program (`mpirun -n N`); each is a **rank** (0..N-1), running on some node, with its *own* memory (shared-nothing — Ch. 31, across hosts). They cooperate by **passing messages** — no shared memory between nodes (that's RDMA's job under the hood — Ch. 63, but the MPI model is messages). For a C++ program that means the **C API** (`MPI_Send`, …) through the `mpicxx` wrapper — the MPI C++ bindings were deleted in MPI-3.0 (2012); Boost.MPI and MPL are the common C++ wrappers if you want RAII and templates over it:
 
 ```
    mpirun -n 4 ./app   →   rank 0 (node A) ┐
@@ -29,7 +29,7 @@ What makes MPI worth a chapter (beyond "run it across nodes") is the **communica
 ```
 
 - **Communicators — groups of ranks.** A **communicator** defines a group of ranks that can communicate (`MPI_COMM_WORLD` = all ranks); you can create sub-communicators for subsets. Operations happen *within* a communicator. (The scoping mechanism.)
-- **Point-to-point — between two ranks.** `MPI_Send`/`MPI_Recv` (blocking) or `MPI_Isend`/`MPI_Irecv` (non-blocking — §68.4.1) send a message from one rank to another. The basic communication. Blocking send/recv *waits* for the transfer; non-blocking returns immediately and you check/wait later (enabling overlap — §68.4.1).
+- **Point-to-point — between two ranks.** `MPI_Send`/`MPI_Recv` (blocking) or `MPI_Isend`/`MPI_Irecv` (non-blocking — §68.4.1) send a message from one rank to another. The basic communication. `MPI_Recv` blocks until the message has arrived; `MPI_Send` blocks only until the *send buffer is reusable* — for small (eager-protocol) messages that is before the receiver has the data, for large (rendezvous) messages it effectively waits for the receiver; `MPI_Ssend` is the one that truly waits for the match. Non-blocking returns immediately and you check/wait later (enabling overlap — §68.4.1).
 - **Collective — across all ranks in a communicator.** Operations involving *all* ranks:
   - **Broadcast** (`MPI_Bcast`) — one rank's data to all.
   - **Scatter/Gather** (`MPI_Scatter`/`MPI_Gather`) — distribute chunks of data to ranks / collect them back (split the work, collect results).
@@ -51,7 +51,44 @@ The model: **MPI runs N ranks (shared-nothing processes across hosts) that pass 
 
 ## 68.3 Measure it: message latency vs size
 
-The fundamental MPI cost is the **message** — its latency (small messages, dominated by the per-message overhead) and bandwidth (large messages, dominated by the transport — Ch. 63). The classic measurement is the latency/bandwidth curve, which (with the transport choice) tells you how communication will scale.
+The fundamental MPI cost is the **message** — its latency (small messages, dominated by the per-message overhead) and bandwidth (large messages, dominated by the transport — Ch. 63). The classic measurement is the latency/bandwidth curve, which (with the transport choice) tells you how communication will scale. Read the knee in it: small messages go **eager** (copied into the receiver's buffer immediately), larger ones **rendezvous** (a handshake, then a zero-copy RDMA transfer — one extra round-trip), and the threshold is tunable (UCX `UCX_RNDV_THRESH`, Open MPI `btl_*_eager_limit`) — the step in `osu_latency` output is that switch, not noise.
+
+```cpp
+// mpi_pingpong.cpp — the two MPI costs in one program: small-message latency (non-blocking ping-pong) and a collective.
+// Build: mpicxx -O2 -std=c++20 mpi_pingpong.cpp -o mpi_pingpong    (Open MPI 5.0 + UCX 1.17; mpicxx wraps the C API —
+//        the C++ bindings were removed in MPI-3.0)
+// Run:   mpirun -n 2 --map-by ppr:1:node --bind-to core ./mpi_pingpong     # two nodes over RDMA (UCX_TLS=rc,sm)
+//        mpirun -n 2 -x UCX_TLS=tcp ./mpi_pingpong                         # the same over TCP, for the §68.3 gap
+#include <cstdio>
+#include <cstdint>
+#include <mpi.h>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    int rank = 0, size = 0; MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+    constexpr int iters = 10000; alignas(64) std::uint8_t buf[8]{};
+    const int peer = rank ^ 1;
+
+    double t0 = MPI_Wtime();
+    for (int i = 0; i < iters; ++i) {                             // ping-pong: rank 0 sends, rank 1 echoes
+        MPI_Request rq[2];
+        if (rank == 0) { MPI_Isend(buf, 8, MPI_BYTE, peer, 0, MPI_COMM_WORLD, &rq[0]); MPI_Irecv(buf, 8, MPI_BYTE, peer, 0, MPI_COMM_WORLD, &rq[1]); }
+        else           { MPI_Irecv(buf, 8, MPI_BYTE, peer, 0, MPI_COMM_WORLD, &rq[0]); MPI_Isend(buf, 8, MPI_BYTE, peer, 0, MPI_COMM_WORLD, &rq[1]); }
+        MPI_Waitall(2, rq, MPI_STATUSES_IGNORE);                  // non-blocking + wait: the §68.4.1 overlap primitive
+    }
+    double rtt_us = (MPI_Wtime() - t0) / iters * 1e6;
+
+    double local = rank + 1.0, total = 0.0;                       // the collective: a synchronisation point across ALL ranks
+    t0 = MPI_Wtime();
+    for (int i = 0; i < iters; ++i) MPI_Allreduce(&local, &total, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    double ar_us = (MPI_Wtime() - t0) / iters * 1e6;
+
+    if (rank == 0) std::printf("8-byte one-way latency ~%.2f us (RTT/2)   allreduce(N=%d) ~%.2f us\n", rtt_us / 2, size, ar_us);
+    MPI_Finalize();
+    return 0;
+}
+```
+
 
 ```
    # Standard MPI benchmarks: OSU Micro-Benchmarks (osu_latency, osu_bw, osu_allreduce) or Intel MPI Benchmarks.
@@ -61,7 +98,7 @@ The fundamental MPI cost is the **message** — its latency (small messages, dom
    # Compare transports: TCP vs RDMA/InfiniBand (§68.4.2) — and rank placement (§68.4.3).
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — a cluster with InfiniBand/RoCE (RDMA — Ch. 63) vs TCP/Ethernet (illustrative; the *transport gap* and *small-message floor* are the point):
+Representative results (toolchain and machine: Appendix L.3 per node) — a cluster of reference hosts with ConnectX-6 HDR100 (RDMA — Ch. 63) vs the same hosts over 25 GbE TCP, Open MPI 5.0 + UCX 1.17, one rank per node bound to a core (illustrative; the *transport gap* and *small-message floor* are the point):
 
 ```
    point-to-point latency:           RDMA/InfiniBand (Ch.63)    TCP/Ethernet (Ch.47)
@@ -81,7 +118,7 @@ Read it: the **small-message latency** (~1-2 µs over RDMA, ~20-50 µs over TCP)
 
 ### 68.4.1 Non-blocking calls and compute/communication overlap
 
-The key scaling technique — hide communication behind computation (the MPI version of Ch. 67.4.2):
+The key scaling technique — hide communication behind computation (the MPI version of §67.4.2):
 
 - **Non-blocking point-to-point (`MPI_Isend`/`MPI_Irecv`).** Blocking `MPI_Send`/`Recv` *wait* for the transfer (the rank stalls — like a blocking GPU transfer, Ch. 67). **Non-blocking** versions return *immediately* (the transfer proceeds in the background), and you `MPI_Wait`/`MPI_Test` later. This lets a rank **compute while its messages are in flight** — overlapping communication with computation, so the communication cost is hidden (the rank isn't stalled waiting). The single most important MPI scaling technique.
 - **The overlap pattern.** Post the non-blocking receives early, start the (independent) computation, and `MPI_Wait` for the data only when you actually need it — by which time it's (ideally) already arrived (transfer overlapped with compute). Structure the algorithm to have *independent* work to do while communicating (the GPU/Disruptor overlap idea — Ch. 37, 67).
@@ -155,7 +192,7 @@ Placing ranks so communicating ranks are close (ties Ch. 16, 42):
 - Talks/papers on large-scale Monte-Carlo risk and distributed backtesting in finance — the workloads of §68.1 at cluster scale.
 - The CUDA-aware MPI / GPUDirect documentation — multi-GPU distributed compute (ties Ch. 66–67).
 - Ch. 67 (*GPU/CUDA*) — the per-node accelerator MPI scales across; Ch. 63 (*RDMA*) — MPI's fast transport; Ch. 16 (*NUMA*) / Ch. 42 (*Pinning*) — rank placement; Ch. 31 (*Concurrency Foundations*) — shared-nothing/communication-cost at cluster scale; Ch. 66 (*PCIe*) — GPUDirect; Ch. 76 (*Case Study*) — large-scale backtesting/risk.
-- **Appendix E** — MPI message latency (RDMA vs TCP) numbers; **Appendix F** — MPI/rank/collective glossary.
+- **Appendix F** — MPI/rank/collective glossary.
 
 ---
 
