@@ -156,8 +156,8 @@ Sometimes you must observe *production* (the bug won't reproduce offline yet). D
 
 - **eBPF / bpftrace (Ch. 63) — the production-safe probe.** Attach a probe to a function, a tracepoint, or a USDT marker to record data (latency, arguments, counts) with low overhead (Ch. 63), *without* stopping the process or recompiling. This is how you observe a live low-latency system: non-stopping, and production-safe when placed with care — kernel tracepoints cost tens of ns per hit, but a uprobe on a user function (and an *enabled* USDT marker, which is implemented as a uprobe: its `nop` is patched to `int3`) traps into the kernel on every hit (~hundreds of ns to a few µs — Ch. 63 §63.3), so such probes belong on boundaries and slow paths, never inside the tick-to-trade inner loop. Trace the suspect path, gather the data offline, and reproduce.
 - **Lock-free logging as a debug channel (Ch. 73).** The zero-overhead logger (Ch. 73) *is* a debugging tool: add a binary log record (~5–20 ns — Ch. 73 §73.3) on the suspect path to capture the state at the moment of interest, and decode it offline. Because it's off-path (formatting/IO on the consumer thread), it doesn't perturb timing the way `printf` does — the observer effect (§5.5) minimized. Debug by *recording*, not by *stopping*.
-- **`perf` and hardware counters (Ch. 2) for behavior, not logic.** For "why is this slow/stalling" (as opposed to "why is this wrong"), `perf` and the PMU (Ch. 2) show the microarchitectural behavior — a cache miss, a mispredict, a front-end stall (Ch. 7/12/13) — without stopping the process. Debug performance bugs with counters (Ch. 2/83), logic bugs with replay/`rr`.
-- **Always: gather in production, reproduce and fix offline.** Production tracing's job is to gather *enough to reproduce* (the input, the state, the timing signature) so you can then reproduce the bug offline (§5.3) and debug it with heavy tools. Don't try to *fix* on the live system; observe cheaply, reproduce, fix on the replay, verify with the regression gate (Ch. 83).
+- **`perf` and hardware counters (Ch. 2) for behavior, not logic.** For "why is this slow/stalling" (as opposed to "why is this wrong"), `perf` and the PMU (Ch. 2) show the microarchitectural behavior — a cache miss, a mispredict, a front-end stall (Ch. 7/12/13) — without stopping the process. Debug performance bugs with counters (Ch. 2/84), logic bugs with replay/`rr`.
+- **Always: gather in production, reproduce and fix offline.** Production tracing's job is to gather *enough to reproduce* (the input, the state, the timing signature) so you can then reproduce the bug offline (§5.3) and debug it with heavy tools. Don't try to *fix* on the live system; observe cheaply, reproduce, fix on the replay, verify with the regression gate (Ch. 84).
 
 ## 5.5 Pitfalls & anti-patterns: the observer effect and optimized-out state
 
@@ -169,7 +169,7 @@ Sometimes you must observe *production* (the bug won't reproduce offline yet). D
 - **Trusting the source view of optimized code.** Believing `gdb`'s source-line and variable display on an `-O2` binary when the optimizer reordered/eliminated things — the display can be misleading. Cross-check with the asm (Ch. 4) when the source view seems impossible (§5.4.1).
 - **Core dumps stalling survivors (Ch. 78).** A synchronous, huge, on-the-hot-disk core dump that freezes the box — hurting the *surviving* processes (Ch. 78.4.5). Make core handling async/bounded/off-path (§5.4.2).
 - **Debugging without reproducing.** Guessing at a bug you can't reproduce, adding speculative fixes, "fixing" it by luck (or by perturbation that hides it). Invest in reproduction first (capture-replay, `rr` — §5.3); an unreproduced bug isn't fixed, it's hidden.
-- **Fixing on the live system.** Editing/patching production to chase a bug — changing the thing you're debugging under load. Observe in production, reproduce and fix offline, verify with the regression gate (Ch. 83), then deploy (§5.4.3).
+- **Fixing on the live system.** Editing/patching production to chase a bug — changing the thing you're debugging under load. Observe in production, reproduce and fix offline, verify with the regression gate (Ch. 84), then deploy (§5.4.3).
 
 ## 5.6 Exercises & checklist
 
@@ -179,7 +179,7 @@ Sometimes you must observe *production* (the bug won't reproduce offline yet). D
 2. **Reverse-debug with `rr`.** Replay §5.3's `rr` session; then record a null-deref / corruption bug of your own, set a hardware watchpoint on the corrupted location and `reverse-continue` from the crash to the write that caused it (§5.4.2). Contrast with forward-only `gdb`, and check `rr record` works at all on your box (`perf_event_paranoid`, VM counters).
 3. **Capture-replay reproduction.** Reproduce a "production" bug by replaying a captured session (Ch. 80) through the deterministic core (Ch. 78) under `gdb` — breakpoint the exact triggering message (§5.4.2). Verify determinism (same bug every replay).
 4. **Heisenbug.** Create a timing-dependent bug that vanishes when you add a `printf` but persists with a lock-free log record (Ch. 73) — demonstrate the observer effect and the low-overhead workaround (§5.5, §5.4.3).
-5. **Production trace → offline fix.** Use bpftrace (Ch. 63) to capture the arguments/state of a suspect path in a running system without stopping it, reproduce the bug offline from the captured data, fix it, and verify with the regression gate (Ch. 83) (§5.4.3).
+5. **Production trace → offline fix.** Use bpftrace (Ch. 63) to capture the arguments/state of a suspect path in a running system without stopping it, reproduce the bug offline from the captured data, fix it, and verify with the regression gate (Ch. 84) (§5.4.3).
 
 **Checklist:**
 
@@ -189,7 +189,7 @@ Sometimes you must observe *production* (the bug won't reproduce offline yet). D
 - [ ] **Optimized-code bugs** are debugged **as optimized** (asm/registers — Ch. 4, sanitizers — Ch. 40) when they don't survive `-O0`; the `-O0` disappearance is read as a **UB/race clue** (§5.4.1).
 - [ ] **`rr` reverse debugging** is used for elusive logic bugs once reproducible; **core dumps** (async/off-path — Ch. 78) + capture-replay for crashes (§5.4.2).
 - [ ] The **observer effect** is respected — the lowest-overhead tool that can see the bug, heavy tools only on the replay (§5.2, §5.5).
-- [ ] Fixes are made and verified **offline** (regression gate — Ch. 83), never on the live system (§5.5).
+- [ ] Fixes are made and verified **offline** (regression gate — Ch. 84), never on the live system (§5.5).
 
 ## 5.7 References
 

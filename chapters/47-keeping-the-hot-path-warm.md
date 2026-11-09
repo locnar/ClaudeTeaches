@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 7/12/15 (caches / I-cache / TLB — the state that goes cold), Ch. 13–14 (branch predictors — also cold), Ch. 41 (context switching — the cold-restart cost this chapter generalizes), Ch. 23/26 (pre-faulting / `mlock`), Ch. 1 (warm vs cold *tail*), Ch. 42–46 (a quiet core — pinned, sibling handled, cache-partitioned, tickless, with the residual noise attributed — that *can* stay warm).
 >
-> **Leads into:** Ch. 57–59, 63, 64 (NIC / DDIO / flow steering / bypass — pre-establishing connections, warming the RX path), Ch. 77–78 (hot reload / fast restart — warm-up after a reload/restart), Ch. 83 (the end-to-end case study). Closes **Part VII** — the last enemy after the core is quiet.
+> **Leads into:** Ch. 57–59, 63, 64 (NIC / DDIO / flow steering / bypass — pre-establishing connections, warming the RX path), Ch. 77–78 (hot reload / fast restart — warm-up after a reload/restart), Ch. 84 (the end-to-end case study). Closes **Part VII** — the last enemy after the core is quiet.
 
 ---
 
@@ -119,7 +119,7 @@ Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.
    COLD gap + shadow traffic:  p50 ~4,500 cycles   (~1.6 µs)   ~warm again — the shadow feed kept lines and TLB entries resident
 ```
 
-Read it: the **warm** path (tight loop — what your benchmark measures) is ~1 µs; the **cold** path (first message after an idle gap that evicted the working set) is **~5× slower** — and *that* is the latency the real, rare, critical message sees, because production has idle gaps, not tight loops. This gap is **invisible in a normal benchmark** (which keeps everything warm) and **invisible in the average** (most messages in a busy period are warm) — it lives in the *tail* and activates exactly when the market goes quiet-then-active (the worst time). The third row is the cure: running **shadow traffic** (the *real* `process()` on dummy messages, here a sweep of the working set every ~1 MiB of other traffic — a shadow feed at roughly the real feed's rate) during the idle gap keeps the working set, predictors, and TLB resident, so the "cold" path is ~warm again. (It closes most, not all, of the gap: the dummy messages touch *other* lines of the same set than the real one will, so the real message still finds its lines in L3, not L1 — exactly the "warm" row.) The lesson that closes Part VII: **measure the cold path, not just the warm one** — and **keep it warm with shadow traffic + pre-faulting (§47.4)** so the first real message is never the cold one. (To measure cold latency honestly in production, apply Ch. 83's production-profiling discipline to this one question: tag the first message after each idle gap and histogram *its* latency separately from the warm ones.)
+Read it: the **warm** path (tight loop — what your benchmark measures) is ~1 µs; the **cold** path (first message after an idle gap that evicted the working set) is **~5× slower** — and *that* is the latency the real, rare, critical message sees, because production has idle gaps, not tight loops. This gap is **invisible in a normal benchmark** (which keeps everything warm) and **invisible in the average** (most messages in a busy period are warm) — it lives in the *tail* and activates exactly when the market goes quiet-then-active (the worst time). The third row is the cure: running **shadow traffic** (the *real* `process()` on dummy messages, here a sweep of the working set every ~1 MiB of other traffic — a shadow feed at roughly the real feed's rate) during the idle gap keeps the working set, predictors, and TLB resident, so the "cold" path is ~warm again. (It closes most, not all, of the gap: the dummy messages touch *other* lines of the same set than the real one will, so the real message still finds its lines in L3, not L1 — exactly the "warm" row.) The lesson that closes Part VII: **measure the cold path, not just the warm one** — and **keep it warm with shadow traffic + pre-faulting (§47.4)** so the first real message is never the cold one. (To measure cold latency honestly in production, apply Ch. 84's production-profiling discipline to this one question: tag the first message after each idle gap and histogram *its* latency separately from the warm ones.)
 
 ## 47.4 Techniques
 
@@ -145,7 +145,7 @@ The setup-time warming that complements continuous shadow traffic — done at st
 
 ## 47.5 Pitfalls & anti-patterns: cold-start stalls, warming the wrong state
 
-- **Benchmarking only the warm path (the measurement blind spot).** A tight-loop benchmark keeps everything resident and reports the *warm* latency — hiding the cold tail that the rare, critical message actually sees (§47.3). **Measure the cold path** (first message after an idle gap), tag and track the first-message-after-idle latency in production using Ch. 83's profiling discipline, and treat the cold number as the real tail (Ch. 1).
+- **Benchmarking only the warm path (the measurement blind spot).** A tight-loop benchmark keeps everything resident and reports the *warm* latency — hiding the cold tail that the rare, critical message actually sees (§47.3). **Measure the cold path** (first message after an idle gap), tag and track the first-message-after-idle latency in production using Ch. 84's profiling discipline, and treat the cold number as the real tail (Ch. 1).
 - **Warming the *wrong* state (the subtle trap).** A warm-up routine that touches *different* code/data than the real hot path warms the wrong caches/predictors — the real path is still cold. Warming must run the **real hot-path code on real-shaped data** (§47.4.1); a divergent "warm-up function" gives false confidence. Verify the warmed state *is* the production state.
 - **Shadow traffic with side effects (sending real orders!).** The catastrophic bug: shadow/dummy messages that aren't properly suppressed actually **transmit orders** — sending synthetic trades to the market. The side-effect suppression (drop the synthetic order at the final gate) must be *bulletproof* and tested; a warming bug that sends real orders is a financial/regulatory disaster. Isolate the dry-run path carefully.
 - **Warming the cold path *on* the hot path (perturbing it).** If shadow traffic and real traffic interleave badly, the warming work can *delay* a real message (the thread is busy processing a dummy when the real one arrives). The busy-poll design must *prioritize real messages* — process a shadow message only when *no* real one is available, and make the real-message check cheap so warming yields instantly. Don't let warming add latency to the thing it's protecting.
@@ -167,7 +167,7 @@ The setup-time warming that complements continuous shadow traffic — done at st
 
 **Checklist — keeping the hot path warm**
 
-- [ ] I **measure the COLD path** (first message after an idle gap), not just the warm tight-loop number — and track **cold-start latency** (the first message after each idle gap) separately in production, with Ch. 83's profiling discipline. The cold number is the real tail (Ch. 1).
+- [ ] I **measure the COLD path** (first message after an idle gap), not just the warm tight-loop number — and track **cold-start latency** (the first message after each idle gap) separately in production, with Ch. 84's profiling discipline. The cold number is the real tail (Ch. 1).
 - [ ] **Shadow/dummy traffic** runs the **real hot-path code on real-shaped data** during idle gaps (interleaved into the busy-poll loop — process a shadow message when no real one is available) — keeping caches, predictors, TLB, and prefetcher warm (§47.4.1).
 - [ ] Shadow traffic's **side effects are bulletproof-suppressed** (no synthetic order ever transmitted) — tested and isolated (§47.5).
 - [ ] Warming **prioritizes real messages** — it never delays a real message (cheap real-check, instant yield) (§47.5).
@@ -182,7 +182,7 @@ The setup-time warming that complements continuous shadow traffic — done at st
 - U. Drepper, *What Every Programmer Should Know About Memory* — cache state and the cost of cold access (the decay model of §47.2).
 - Intel *Optimization Reference Manual* — branch-predictor and prefetcher training/decay behavior (§47.2).
 - The TCP slow-start / congestion-window-after-idle literature (RFC 5681 and `tcp_slow_start_after_idle`) — connection warming (§47.4.2, ties Ch. 52).
-- Ch. 83 (*Production Profiling & Case Study*) — measuring warm-vs-cold tail latency in production and the end-to-end walkthrough.
+- Ch. 84 (*Production Profiling & Case Study*) — measuring warm-vs-cold tail latency in production and the end-to-end walkthrough.
 
 ## 47.8 Additional Reading
 

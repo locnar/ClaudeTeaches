@@ -37,6 +37,7 @@ STEPS = [
     ("insert", 79),  # Ch. 80 network-health-telemetry-drop-forensics
     ("insert", 73),  # Ch. 74 in-band-latency-tracing-budget-attribution
     ("insert", 78),  # Ch. 79 crash-handling-core-dumps-post-mortem
+    ("insert", 80),  # Ch. 81 latency-spike-forensics-anomaly-triggered-diagnostics
     # INSERT_STEPS_END
 ]
 def old2new(n):

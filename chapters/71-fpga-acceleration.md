@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 68 (PCIe — the round-trip FPGAs avoid by going inline on the NIC), Ch. 54 (feed decoding — what an inline FPGA does in hardware), Ch. 57/64 (NIC / bypass — the FPGA sits on/replaces the NIC path), Ch. 1 (latency/determinism), Ch. 69–70 (GPU/MPI — the *throughput* accelerators; FPGA is the *latency* one).
 >
-> **Leads into:** Ch. 72 (SmartNICs/DPUs — programmable NICs, some FPGA-based), Ch. 83 (the wire-to-wire case study). Part XI's *latency*-tier accelerator — the one that *can* go on the tick-to-trade path.
+> **Leads into:** Ch. 72 (SmartNICs/DPUs — programmable NICs, some FPGA-based), Ch. 84 (the wire-to-wire case study). Part XI's *latency*-tier accelerator — the one that *can* go on the tick-to-trade path.
 
 ---
 
@@ -79,7 +79,7 @@ The canonical HFT FPGA — the trading pipeline *in fabric on the NIC*:
 - **Pre-trade risk and order entry in fabric.** A **fast pre-trade risk check** (price/size limits, position checks — Ch. 27's integer math in hardware) and **order generation** (build the order message — Ch. 54's encoding in reverse) in fabric → the FPGA can decide and *emit an order* wire-to-wire without the CPU. Risk checks in hardware are also a *safety* mechanism (a hardware kill-switch — Ch. 78).
 - **Order-entry transport: who owns the TCP session?** Most venues take orders over **TCP** sessions (OUCH, FIX, binary gateways), and TCP in fabric means a **TCP offload engine** — hard, and a major vendor differentiator. The standard HFT hybrid avoids it: the **CPU keeps the session** (handshake, keep-alives, retransmission, sequence numbers) and **pre-arms** complete order frames — headers, sequence numbers and checksums precomputed — that the FPGA **fires** on a trigger, then hands back to the host to reconcile the stream. This "CPU arms / FPGA fires" split is why the partition of §71.4.3 puts the *decision* in fabric but the *session* in software.
 - **The CPU handles the complex/rare (§71.4.3).** The FPGA does the *simple, hot* path; complex strategy logic, the full book, rare cases, and reconfiguration are in *software* on the host (over PCIe — Ch. 68, off the hot path). The FPGA and CPU split the work by latency-criticality (§71.4.3). A common pattern: the FPGA handles the simplest "obvious" trades at nanosecond latency, and passes everything else to the software strategy.
-- **Hardware timestamping (Ch. 57, 60).** FPGA NICs provide extremely precise hardware timestamps (Ch. 57, 60) — the FPGA stamps packets at the wire with sub-nanosecond precision — for measurement (Ch. 83) and sequencing. Often the *best* timestamps available.
+- **Hardware timestamping (Ch. 57, 60).** FPGA NICs provide extremely precise hardware timestamps (Ch. 57, 60) — the FPGA stamps packets at the wire with sub-nanosecond precision — for measurement (Ch. 84) and sequencing. Often the *best* timestamps available.
 
 ### 71.4.2 Partial reconfiguration
 
@@ -145,7 +145,7 @@ The central FPGA engineering decision — partition by latency-criticality and c
 
 - Talks on "FPGA in HFT" and wire-to-wire trading pipelines — real-world inline fabric trading systems.
 - The partial-reconfiguration and FPGA-verification literature — live updates and rigorous hardware verification (§71.4.2, §71.5).
-- Ch. 68 (*PCIe*) — the round-trip inline placement avoids; Ch. 54 (*Decoding*) — feed handling, now in fabric; Ch. 57/64 (*NIC/Bypass*) — the software path FPGA undercuts; Ch. 72 (*SmartNICs/DPUs*) — programmable NICs (some FPGA-based); Ch. 78 (*Process Topology*) — the kill-switch/safety in hardware; Ch. 77 (*Hot Reload*) — live parameter/PR updates; Ch. 1 (*Latency/Determinism*) — the flat-tail edge; Ch. 83 (*Case Study*) — wire-to-wire.
+- Ch. 68 (*PCIe*) — the round-trip inline placement avoids; Ch. 54 (*Decoding*) — feed handling, now in fabric; Ch. 57/64 (*NIC/Bypass*) — the software path FPGA undercuts; Ch. 72 (*SmartNICs/DPUs*) — programmable NICs (some FPGA-based); Ch. 78 (*Process Topology*) — the kill-switch/safety in hardware; Ch. 77 (*Hot Reload*) — live parameter/PR updates; Ch. 1 (*Latency/Determinism*) — the flat-tail edge; Ch. 84 (*Case Study*) — wire-to-wire.
 - **Appendix E** — wire-to-wire latency numbers (FPGA vs software bypass); **Appendix F** — FPGA/RTL/HLS/PR glossary.
 
 ---

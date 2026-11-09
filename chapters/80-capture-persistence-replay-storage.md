@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 57, 60 (NIC timestamping / PTP — nanosecond, wire-accurate capture times), Ch. 73 (zero-overhead logging — the same off-hot-path-writer, binary-record discipline applied to ticks/orders), Ch. 49 (io_uring — async writes to disk), Ch. 78 (the deterministic state machine — what you replay captures *into*), Ch. 34/37 (SPSC ring / batching — producer→writer hand-off).
 >
-> **Leads into:** Ch. 83 (the case study — deterministic replay + latency-regression gates in CI). The penultimate chapter: recording everything that happened, losslessly and off the hot path, so the deterministic core (Ch. 78) can be replayed for debugging, research, and compliance.
+> **Leads into:** Ch. 84 (the case study — deterministic replay + latency-regression gates in CI). The penultimate chapter: recording everything that happened, losslessly and off the hot path, so the deterministic core (Ch. 78) can be replayed for debugging, research, and compliance.
 
 ---
 
@@ -149,7 +149,7 @@ A capture is only useful if it's **complete and ordered** — and manageable ove
 
 ### 80.4.5 Feeding captures into replay, simulation and backtests
 
-Capture's payoff is replaying it through the deterministic core (Ch. 78) — for debugging (Ch. 5), regression gating, backtesting and compliance — and the *consumers* of a capture are **Ch. 83's** subject: deterministic replay and performance bisection (§83.4.2), simulation harnesses that model the venue's reactions where an open-loop replay cannot (§83.4.3), and the CI latency-regression gate (§83.4.1). What the capture side owes them is this section's content. **Seekability:** a file layout that can seek by *time* and by *sequence* (§80.2's time index), so a replay can start at 09:31:42 or at sequence 1 048 576 without scanning the day. **The replay clock:** captured timestamps (Ch. 60) drive the replayer's notion of time — never the wall clock — so timing-dependent paths (timeouts, warming, the reorder window of Ch. 54) behave as they did live, and the replayer can run faster than real time without changing the outcome. **Two altitudes, labelled:** a wire-level capture (§80.4.1) replays through the whole stack (decode → decision) while an application-level capture replays only the core, and the file header must say which it is so a replayer never feeds one to the other. **Completeness:** the gap-free, sequenced persistence of §80.4.4 is what makes bit-for-bit replay (Ch. 78.2.2) possible at all — a capture with a hole is a replay that diverges.
+Capture's payoff is replaying it through the deterministic core (Ch. 78) — for debugging (Ch. 5), regression gating, backtesting and compliance — and the *consumers* of a capture are **Ch. 84's** subject: deterministic replay and performance bisection (§84.4.2), simulation harnesses that model the venue's reactions where an open-loop replay cannot (§84.4.3), and the CI latency-regression gate (§84.4.1). What the capture side owes them is this section's content. **Seekability:** a file layout that can seek by *time* and by *sequence* (§80.2's time index), so a replay can start at 09:31:42 or at sequence 1 048 576 without scanning the day. **The replay clock:** captured timestamps (Ch. 60) drive the replayer's notion of time — never the wall clock — so timing-dependent paths (timeouts, warming, the reorder window of Ch. 54) behave as they did live, and the replayer can run faster than real time without changing the outcome. **Two altitudes, labelled:** a wire-level capture (§80.4.1) replays through the whole stack (decode → decision) while an application-level capture replays only the core, and the file header must say which it is so a replayer never feeds one to the other. **Completeness:** the gap-free, sequenced persistence of §80.4.4 is what makes bit-for-bit replay (Ch. 78.2.2) possible at all — a capture with a hole is a replay that diverges.
 
 ## 80.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 
@@ -171,7 +171,7 @@ Capture's payoff is replaying it through the deterministic core (Ch. 78) — for
 2. **Prove lossless under burst.** Drive a burst whose peak exceeds sustained disk rate; size the ring for `(peak − sustained) × duration` and verify the persisted journal is **gap-free by sequence** (§80.4.4). Then shrink the ring and show drops appear — and that your gap-check *detects* them (not assumes).
 3. **Wire vs app capture replay.** Capture both at the wire (tap/`AF_PACKET`, §80.4.1) and at the application level; replay each through the deterministic core (Ch. 78) and confirm both reproduce the session — wire capture exercising decode+decision, app capture exercising the core (§80.4.5).
 4. **Hardware timestamps.** Capture with software timestamps and with NIC/PTP hardware timestamps (Ch. 57, 60); compare their accuracy and load-sensitivity. Reconstruct a wire-to-wire latency from the hardware timestamps (Ch. 60).
-5. **Deterministic-replay regression gate.** Build a golden capture + golden output (Ch. 78); in CI, replay the capture through the current build and assert bit-identical outputs and no per-stage latency regression (§80.4.5, Ch. 83). Break the core's determinism (add a `now()`) and watch the gate catch it.
+5. **Deterministic-replay regression gate.** Build a golden capture + golden output (Ch. 78); in CI, replay the capture through the current build and assert bit-identical outputs and no per-stage latency regression (§80.4.5, Ch. 84). Break the core's determinism (add a `now()`) and watch the gate catch it.
 6. **`O_DIRECT` and page-cache pollution.** Capture with buffered I/O vs `O_DIRECT` (§80.4.3) and measure the hot path's cache/TLB miss rate (Ch. 2) during heavy capture — show buffered capture pollutes the hot working set and `O_DIRECT` doesn't.
 
 **Checklist:**
@@ -182,7 +182,7 @@ Capture's payoff is replaying it through the deterministic core (Ch. 78) — for
 - [ ] Records are **compact binary** (raw bytes + seq + **hardware/PTP timestamp**, Ch. 57, 60), **versioned/self-describing**, archived with their decoder + strategy/config versions (§80.4.2, Ch. 77).
 - [ ] The writer is a **dedicated off-core thread/process** (Ch. 42) using **batched io_uring** (Ch. 49) + **`O_DIRECT`** + **NVMe**, on **isolated storage**; durability (`fsync` granularity) is tuned without falling behind (§80.4.3, §80.5).
 - [ ] The journal is **append-only/WAL**, **time-indexed**, with periodic **snapshots/checkpoints** bounding replay/seek; retention + off-path compaction meet the **compliance** minimum (§80.2, §80.4.4).
-- [ ] Captures feed **deterministic replay** (Ch. 78), **simulation**, **backtests**, and a **CI regression gate** (outputs match golden + no latency regression) (§80.4.5, Ch. 83); **every** core input (incl. timers/config) is captured in order (§80.5).
+- [ ] Captures feed **deterministic replay** (Ch. 78), **simulation**, **backtests**, and a **CI regression gate** (outputs match golden + no latency regression) (§80.4.5, Ch. 84); **every** core input (incl. timers/config) is captured in order (§80.5).
 
 ## 80.7 References
 
@@ -197,9 +197,9 @@ Capture's payoff is replaying it through the deterministic core (Ch. 78) — for
 
 - Talks and write-ups on market-data capture, packet capture at line rate, and trading-system journaling — lossless capture and replay in production (§80.4).
 - The event-sourcing / log-as-source-of-truth literature (Kafka, the "turning the database inside out" line of thinking) adapted to a low-latency capture journal (§80.2).
-- Ch. 83 (*Production Profiling & Case Study*) — deterministic replay + latency-regression gates in CI, the direct consumer of capture; Ch. 78 (*Process Topology / State Machine*) — what replay runs through; Ch. 60 (*PTP*) — the timestamps; Ch. 49 (*io_uring*) — the write path; Ch. 73 (*Logging*) — the sibling off-path writer.
+- Ch. 84 (*Production Profiling & Case Study*) — deterministic replay + latency-regression gates in CI, the direct consumer of capture; Ch. 78 (*Process Topology / State Machine*) — what replay runs through; Ch. 60 (*PTP*) — the timestamps; Ch. 49 (*io_uring*) — the write path; Ch. 73 (*Logging*) — the sibling off-path writer.
 - **Appendix E** — the syscall and page-fault rows (the floor under why capture can't be synchronous; NVMe write ~10–30 µs and `fdatasync` ~20–100 µs are measured in §80.3); **Appendix F** — WAL/journal/capture/replay glossary.
 
 ---
 
-*Next: Ch. 81 — Host Health Telemetry: Proving the Quiet Box Stayed Quiet, the first of two chapters that watch the platform the way Ch. 75 watches the application: the isolation invariants of Ch. 42–46 (involuntary switches, migrations, faults, the IPI rows, the tick) sampled every second from a housekeeping core, plus frequency/thermal throttling, SMIs, THP/compaction, the clocksource and the hardware's own error counters — with the fingerprint of every way a tuned box drifts, and the proof that the sampler itself never touches the hot core.*
+*Next: Ch. 81 — Latency-Spike Forensics & Anomaly-Triggered Diagnostics.*

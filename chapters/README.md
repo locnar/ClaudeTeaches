@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 83 chapters are grouped into twelve Parts; thirteen appendices (A–M) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 84 chapters are grouped into twelve Parts; thirteen appendices (A–M) follow.
 
 ---
 
@@ -1025,48 +1025,57 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 80.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 - 80.6 Exercises & checklist
 
-### [81. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](81-host-health-telemetry.md)
-- 81.1 Why it matters: the quiet box decays
-- 81.2 Mental model: isolation as a live invariant
-  - 81.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
-  - 81.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
-  - 81.2.3 Drift: how a tuned box untunes itself
-  - 81.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
-- 81.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
+### [81. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](81-latency-spike-forensics-anomaly-triggered-diagnostics.md)
+- 81.1 Why it matters: TODO
+- 81.2 Mental model: TODO
+- 81.3 Measure it: TODO
 - 81.4 Techniques
-  - 81.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
-  - 81.4.2 Frequency, thermal, power and SMIs — read from the right core
-  - 81.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
-  - 81.4.4 Baseline, drift audit, and wiring into the pipeline
-- 81.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
+  - 81.4.1 TODO
+- 81.5 Pitfalls & anti-patterns: TODO
 - 81.6 Exercises & checklist
 
-### [82. Network Health Telemetry & Drop Forensics](82-network-health-telemetry-drop-forensics.md)
-- 82.1 Why it matters: a silent drop at the open is a wrong book and a lost race
-- 82.2 Mental model: the counter hierarchy, by the layer that dropped
-  - 82.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
-  - 82.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
-  - 82.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
-- 82.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
+### [82. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](82-host-health-telemetry.md)
+- 82.1 Why it matters: the quiet box decays
+- 82.2 Mental model: isolation as a live invariant
+  - 82.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
+  - 82.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
+  - 82.2.3 Drift: how a tuned box untunes itself
+  - 82.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
+- 82.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
 - 82.4 Techniques
-  - 82.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
-  - 82.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
-  - 82.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
-  - 82.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
-  - 82.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
-- 82.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
+  - 82.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
+  - 82.4.2 Frequency, thermal, power and SMIs — read from the right core
+  - 82.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
+  - 82.4.4 Baseline, drift audit, and wiring into the pipeline
+- 82.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
 - 82.6 Exercises & checklist
 
-### [83. Production Profiling & End-to-End Case Study](83-production-profiling-end-to-end-case-study.md)
-- 83.1 Why it matters: tying the whole book together
-- 83.2 Mental model: continuous performance monitoring in production
-- 83.3 Measure it: a full tick-to-trade walkthrough
+### [83. Network Health Telemetry & Drop Forensics](83-network-health-telemetry-drop-forensics.md)
+- 83.1 Why it matters: a silent drop at the open is a wrong book and a lost race
+- 83.2 Mental model: the counter hierarchy, by the layer that dropped
+  - 83.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
+  - 83.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
+  - 83.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
+- 83.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
 - 83.4 Techniques
-  - 83.4.1 Regression detection and latency-regression gates in CI
-  - 83.4.2 Deterministic replay of captured market data
-  - 83.4.3 Simulation harnesses
-- 83.5 Pitfalls & anti-patterns: drift between test and production
+  - 83.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
+  - 83.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
+  - 83.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
+  - 83.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
+  - 83.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
+- 83.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
 - 83.6 Exercises & checklist
+
+### [84. Production Profiling & End-to-End Case Study](84-production-profiling-end-to-end-case-study.md)
+- 84.1 Why it matters: tying the whole book together
+- 84.2 Mental model: continuous performance monitoring in production
+- 84.3 Measure it: a full tick-to-trade walkthrough
+- 84.4 Techniques
+  - 84.4.1 Regression detection and latency-regression gates in CI
+  - 84.4.2 Deterministic replay of captured market data
+  - 84.4.3 Simulation harnesses
+- 84.5 Pitfalls & anti-patterns: drift between test and production
+- 84.6 Exercises & checklist
 
 ## Appendices
 

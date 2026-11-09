@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 57 (NIC features/offloads — the SmartNIC generalizes them into a programmable processor), Ch. 63 (eBPF/XDP — one of the programming models, now *offloaded* onto the NIC), Ch. 71 (FPGA — some DPUs *are* FPGA-based; the inline-vs-lookaside placement question recurs), Ch. 68 (PCIe — the host–DPU boundary), Ch. 65 (RDMA — DPUs do it on-NIC), Ch. 1 (latency/tail).
 >
-> **Leads into:** Ch. 78 (process topology — the DPU as a separate fault domain / role offloaded off-host), Ch. 76 (security — DPU-resident isolation/filtering), Ch. 83 (the end-to-end case study). The last chapter of Part XI — the *programmable hop* between wire and host, closing the accelerator tour.
+> **Leads into:** Ch. 78 (process topology — the DPU as a separate fault domain / role offloaded off-host), Ch. 76 (security — DPU-resident isolation/filtering), Ch. 84 (the end-to-end case study). The last chapter of Part XI — the *programmable hop* between wire and host, closing the accelerator tour.
 
 ---
 
@@ -172,7 +172,7 @@ The discipline, stated once: **offload what terminates on the NIC or was never h
 
 - Vendor case studies and talks on DPU offload in finance/HFT — feed filtering, capture, security, and on-NIC RDMA in production (§72.4).
 - The "is a DPU worth it?" analyses and benchmarks from the systems/networking community — the added-hop trap and where offload actually pays (§72.3, §72.5).
-- Ch. 71 (*FPGA*) — the fabric path and its determinism, which FPGA-DPUs inherit; Ch. 63 (*eBPF/XDP*) — the offloaded programming model; Ch. 57 (*NIC offloads*) — the fixed-function baseline; Ch. 64 (*Kernel bypass*) — the host software floor the DPU must beat to be worth it; Ch. 78 (*Process topology*) — the DPU as a fault domain; Ch. 76 (*Security*) — DPU-resident isolation; Ch. 83 (*Case study*) — where the DPU fits the wire-to-wire path.
+- Ch. 71 (*FPGA*) — the fabric path and its determinism, which FPGA-DPUs inherit; Ch. 63 (*eBPF/XDP*) — the offloaded programming model; Ch. 57 (*NIC offloads*) — the fixed-function baseline; Ch. 64 (*Kernel bypass*) — the host software floor the DPU must beat to be worth it; Ch. 78 (*Process topology*) — the DPU as a fault domain; Ch. 76 (*Security*) — DPU-resident isolation; Ch. 84 (*Case study*) — where the DPU fits the wire-to-wire path.
 - **Appendix A** (ARM/Graviton) — the DPU's ARM cores and their memory model/performance vs x86; **Appendix C** — tuning the DPU's own Linux; **Appendix E** — wire-to-wire numbers; **Appendix F** — DPU/SmartNIC/inline/lookaside glossary.
 
 ---
