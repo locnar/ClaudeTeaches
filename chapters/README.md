@@ -790,6 +790,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 59.4.1 Send-path internals: autocorking, the ACK clock, the cold window, pacing
   - 59.4.2 Offloads, congestion control, and buffer tuning
   - 59.4.3 Bypassing the stack where TCP itself is the tax
+  - 59.4.4 Failure detection: how long until TCP tells you the gateway is gone
 - 59.5 Pitfalls & anti-patterns: autocorking, spurious recovery and offload latency
 - 59.6 Exercises & checklist
 
@@ -1269,12 +1270,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 91.6 Exercises & checklist
 
 ### [92. The Order-Entry Gateway & Session Layer](92-order-entry-gateway-session-layer.md)
-- 92.1 Why it matters: TODO
-- 92.2 Mental model: TODO
-- 92.3 Measure it: TODO
+- 92.1 Why it matters: the session is the only thing that can cancel your orders
+- 92.2 Mental model
+  - 92.2.1 Four protocols, one state machine
+  - 92.2.2 Sequence numbers are state, and state must survive the process
+  - 92.2.3 Liveness has layers, and each one is a clock
+  - 92.2.4 The encode fast path and the throttle
+- 92.3 Measure it: encode latency, resync time, and how long TCP takes to notice
 - 92.4 Techniques
-  - 92.4.1 TODO
-- 92.5 Pitfalls & anti-patterns: TODO
+  - 92.4.1 The persisted session state: one page, written before the send
+  - 92.4.2 The encode fast path: template, `to_chars`, one checksum pass
+  - 92.4.3 The resend store and `ResendRequest` handling
+  - 92.4.4 Liveness: heartbeats, `TestRequest`, and setting TCP's timers below the session's
+  - 92.4.5 Throttles, batching and the order of operations on send
+  - 92.4.6 Reconnect and takeover: who owns the numbers
+- 92.5 Pitfalls & anti-patterns
 - 92.6 Exercises & checklist
 
 ### [93. Crash Handling, Core Dumps & Post-Mortem Diagnostics](93-crash-handling-core-dumps-post-mortem.md)

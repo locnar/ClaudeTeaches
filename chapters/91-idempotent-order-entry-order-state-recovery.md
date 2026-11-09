@@ -246,4 +246,4 @@ Ch. 19 §19.4.5's type-state makes the illegal transitions unrepresentable: a `S
 
 ---
 
-*Next: Ch. 92 — The Order-Entry Gateway & Session Layer.*
+*Next: Ch. 92 — The Order-Entry Gateway & Session Layer: the component that carries this chapter's orders to the venue — the FIX/SoupBinTCP/iLink session as a deterministic state machine with persisted sequence numbers, PossDup resends and gap fills from a shared-memory store, a ~50–100 ns template encode, the venue throttle, and the measured truth that TCP keeps a dead venue "connected" for fifteen minutes unless the session layer and `TCP_USER_TIMEOUT` say otherwise.*

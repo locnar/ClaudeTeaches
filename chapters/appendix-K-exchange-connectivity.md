@@ -54,7 +54,7 @@ Comparing timestamps across machines and firms — the basis of true wire-to-wir
 Low latency is worthless if the link is down during the open, so the physical layer is built for resilience as well as speed:
 
 - **A/B feed lines** (J.4, Ch. 61) are carried over **diverse physical paths** — separate fiber runs, separate switches — so a single cut or device failure loses at most one line, and the consumer's A/B arbitration (Ch. 61) rides through the gap.
-- **Redundant cross-connects and gateways** give order entry a failover path; sessions are designed to reconnect and resynchronize (J.3) without losing order state.
+- **Redundant cross-connects and gateways** give order entry a failover path; sessions are designed to reconnect and resynchronize (Ch. 92 — persisted sequence numbers, resends and gap fills; Ch. 97 — which gateway may hold the session after a failure) without losing order state.
 - The trade-off is **latency vs. resilience**: the most diverse path is rarely the shortest, so firms balance a fast primary against a safe secondary — the same tension the process-topology and fault-domain discussion raises in software (Ch. 89).
 
 ## K.7 The trade-offs: latency, cost, and regulation

@@ -166,6 +166,24 @@ When even a tuned kernel TCP stack is too slow or too jittery, move TCP off the 
 - **Kernel-bypass reliable transport (Ch. 71).** Where the venue supports it, RDMA (Ch. 71) or a vendor's reliable transport can replace TCP entirely on intra-datacenter links — but for exchange order entry, userspace TCP (Onload) is the common answer because the exchange speaks TCP.
 - **Know when the stack is the floor.** Measure the kernel-TCP order path (busy-polled, fully tuned) against a userspace-TCP path; the gap (often ~microseconds — Ch. 54 vs 62) tells you whether the kernel stack is your floor. If it is, and the budget demands it, bypass (Ch. 70) — the same decision as the rest of Part VIII.
 
+### 59.4.4 Failure detection: how long until TCP tells you the gateway is gone
+
+Everything above makes the connection *fast*; nothing in it makes the connection *honest* about a dead peer. A venue process that exits sends a FIN and `recv()` returns 0 within microseconds; a venue **host** that loses power, a cut cross-connect or a failed switch sends nothing, and the kernel's answer is the retransmission timer. Measured on the reference VM (Ch. 92 §92.3's `tcpdetect.cpp`: a loopback peer whose packets back to the client are silently dropped by an `iptables` rule, Linux 6.18 defaults):
+
+```
+   defaults (net.ipv4.tcp_retries2 = 15)     retransmits at 0.2, 0.4, 0.8, 1.6, 3.3, 6.5, 13, 26 s — RTO 204 ms doubling to 26 s (the backoff is capped at TCP_RTO_MAX = 120 s);
+                                              the socket stays ESTABLISHED and send() keeps succeeding; the kernel gives up when the elapsed time exceeds the
+                                              retries2 budget ≈ 924 s (~15 min). Not detected within the 45 s window.
+   TCP_USER_TIMEOUT = 2000 ms                 ETIMEDOUT at 2.25 s — the first RTO expiry after unacked data has sat for 2 s
+   SO_KEEPALIVE idle 1 s / intvl 1 s / cnt 3  ETIMEDOUT at 4.08 s with NO data in flight (idle + intvl × cnt); default keepalive is OFF, and 7200 s idle when on
+```
+
+- **`TCP_USER_TIMEOUT` (ms, per socket, RFC 5482) is the knob for a session with data in flight** — orders, heartbeats: it bounds how long transmitted data may remain unacknowledged before the connection is aborted with `ETIMEDOUT`, independent of `tcp_retries2`. Set it to about one application heartbeat interval (Ch. 92 §92.4.4) so the socket fails *before* the session layer's second missed heartbeat and the two never disagree. It also applies to the zero-window-probe case (the venue has stopped reading).
+- **Keepalive covers the idle session.** `SO_KEEPALIVE` + `TCP_KEEPIDLE`/`TCP_KEEPINTVL`/`TCP_KEEPCNT` (per socket; the sysctls `tcp_keepalive_time/intvl/probes` are the defaults) probe a connection with no data in flight; a FIX session heartbeating every second never *is* idle, so keepalive is a backstop for the quiet sessions — drop-copy, market-data TCP recovery (Ch. 61), admin.
+- **`tcp_retries2` is a system-wide last resort**, not a tuning knob: lowering it (Linux allows 3–8 for roughly 1–30 s) affects every TCP connection on the host, including the ones that *should* survive a 30 s blip. Prefer the per-socket options. `tcp_syn_retries` governs the *connect* side (default 6 ≈ 127 s before `connect()` fails on a dead venue — set a `SO_SNDTIMEO`/non-blocking connect deadline of ~1 s instead), and `tcp_retries1` (3) only triggers a route re-lookup.
+- **The RTO floor matters for the first detection step**: `tcp_rto_min` (200 ms by default, per-route via `ip route … rto_min`) sets the first retransmit; on a colo cross-connect with a 50 µs RTT the 200 ms floor is 4 000 RTTs, and RACK-TLP (Ch. 59 §59.2) fires a tail-loss probe at ~2 × RTT only when there is *more* data to send. A sub-10 ms `rto_min` on the order session's route is reasonable; below that spurious retransmits on a congested switch become the cost.
+- **The verdict belongs to the session layer.** TCP's timers detect a dead *host*; a wedged venue gateway process keeps the kernel ACKing while processing nothing, and only an unanswered `TestRequest` (Ch. 92 §92.2.3) sees it. Set the socket timers to fail first for the host case, let the heartbeat machine decide the application case, and report "venue dead" once, to one place (Ch. 89 §89.4.3, Ch. 97).
+
 ## 59.5 Pitfalls & anti-patterns: autocorking, spurious recovery and offload latency
 
 - **Stopping at `TCP_NODELAY`.** Nagle is Ch. 58's bug and `TCP_NODELAY` fixes it; it does not fix autocorking (§59.2), the cold window, the 200 ms recovery floor or pacing. A gateway that "has NODELAY everywhere" and still shows a few microseconds between back-to-back orders, or a slow first burst after a lull, is hitting the layer below — read `TCP_INFO` (§59.3) before blaming the network.
