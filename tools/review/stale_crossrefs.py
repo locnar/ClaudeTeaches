@@ -50,6 +50,7 @@ STEPS = [
     ("insert", 87),  # Ch. 88 idempotent-order-entry-order-state-recovery
     ("insert", 90),  # Ch. 91 sequencer-total-order-replicated-consumers
     ("insert", 19),  # Ch. 20 compile-time-protocol-decoders
+    ("insert", 21),  # Ch. 22 cost-of-modern-idioms-strings-without-allocation
     # INSERT_STEPS_END
 ]
 def old2new(n):
