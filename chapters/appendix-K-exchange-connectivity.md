@@ -1,6 +1,6 @@
 # Appendix K — Exchange Connectivity & the Physical Layer
 
-> **Consolidates the infrastructure layer** beneath the software: the NIC and its features (Ch. 60), PTP time distribution and hardware timestamping (Ch. 63), reliable-multicast feeds (Ch. 58), the datacenter fabric (Ch. 65), inline hardware paths (Ch. 74 FPGA, Ch. 75 SmartNIC), and the wire-to-wire measurement that closes the book (Ch. 92). Every latency budget in this book has a floor set by physics and cabling that no code can beat — this appendix names that floor: where the box sits, how the bytes get to the exchange, and how time is distributed at the venue.
+> **Consolidates the infrastructure layer** beneath the software: the NIC and its features (Ch. 60), PTP time distribution and hardware timestamping (Ch. 63), reliable-multicast feeds (Ch. 58), the datacenter fabric (Ch. 65), inline hardware paths (Ch. 74 FPGA, Ch. 75 SmartNIC), and the wire-to-wire measurement that closes the book (Ch. 93). Every latency budget in this book has a floor set by physics and cabling that no code can beat — this appendix names that floor: where the box sits, how the bytes get to the exchange, and how time is distributed at the venue.
 
 **How to use this:** this is *orientation*, not a tuning guide — it explains the constraints the rest of the book optimizes *within*, and it is largely below the C++ layer. It's here so "colocation," "cross-connect," "microwave," and "grandmaster" are not black boxes when they appear in the performance chapters. Nothing here is legal, regulatory, or commercial advice; venue policies, telecom regulation, and vendor offerings change fast, so the specifics are illustrative of an era, not current quotes.
 
@@ -18,7 +18,7 @@
 
 Once colocated, the remaining intra-facility latency is dominated by cable length and medium.
 
-- **Propagation delay** in optical fiber is roughly **5 ns per meter** (light travels at about two-thirds of *c* in glass, ~200,000 km/s). Copper (twinax/DAC) is comparable. So a 10 m difference in cross-connect length is ~50 ns — a meaningful fraction of a tick-to-trade budget (Ch. 92).
+- **Propagation delay** in optical fiber is roughly **5 ns per meter** (light travels at about two-thirds of *c* in glass, ~200,000 km/s). Copper (twinax/DAC) is comparable. So a 10 m difference in cross-connect length is ~50 ns — a meaningful fraction of a tick-to-trade budget (Ch. 93).
 - Because that length difference is monetizable, exchanges commonly issue **length-equalized cross-connects**: every colo tenant, regardless of where their cage physically sits in the hall, gets a cable trimmed to the *same* length as the longest one, so no tenant has a cabling advantage over another. Fairness by construction. (Within your own rack, you still minimize patch lengths and connector count — every connector and meter is latency and a little jitter.)
 - **Fiber vs. copper** at short range is a wash on latency; the choice is driven by transceiver cost, port density, and the NIC's supported media (Ch. 60). The interesting medium choice is *between* sites (K.3), not within the hall.
 
@@ -38,8 +38,8 @@ Getting bytes onto the exchange is a gated, metered, regulated interface — not
 
 - **Order-entry gateways and ports:** you connect to specific exchange **gateway** hosts through provisioned **ports** (sessions), each with an identity, capacity, and often a cost. Some venues offer premium low-latency ports or gateway placement.
 - **Market-data entitlements:** you subscribe (and pay) for specific **feeds** — the depth-of-book multicast (J.4), top-of-book, trades, reference data — and are **entitled** only to what you've licensed. A feed handler (Ch. 57) only sees the streams the firm is entitled to.
-- **Message-rate throttles and fair-access rules:** exchanges impose **rate limits** (orders/second per port) and enforce **fair-access** provisions so no participant can monopolize the gateway; exceed the throttle and messages are rejected or delayed. Your order-submission logic must respect these — the order gateway (Ch. 86) enforces them and the pacing techniques of Ch. 64 shape the bursts — and the budget for doing so is part of the tick-to-trade decomposition (Ch. 92).
-- **Sponsored / direct market access (DMA/SA)** and **pre-trade risk mandates:** regulators require pre-trade risk controls on the order path — in the US, **SEC Rule 15c3-5** (the "Market Access Rule") mandates checks (max order size, price collars, position limits) *before* an order reaches the exchange, whether the firm self-clears or accesses through a sponsor. These checks sit on the critical path (Ch. 92, J.3) and are non-negotiable latency you must budget for — you cannot simply optimize them away.
+- **Message-rate throttles and fair-access rules:** exchanges impose **rate limits** (orders/second per port) and enforce **fair-access** provisions so no participant can monopolize the gateway; exceed the throttle and messages are rejected or delayed. Your order-submission logic must respect these — the order gateway (Ch. 86) enforces them and the pacing techniques of Ch. 64 shape the bursts — and the budget for doing so is part of the tick-to-trade decomposition (Ch. 93).
+- **Sponsored / direct market access (DMA/SA)** and **pre-trade risk mandates:** regulators require pre-trade risk controls on the order path — in the US, **SEC Rule 15c3-5** (the "Market Access Rule") mandates checks (max order size, price collars, position limits) *before* an order reaches the exchange, whether the firm self-clears or accesses through a sponsor. These checks sit on the critical path (Ch. 93, J.3) and are non-negotiable latency you must budget for — you cannot simply optimize them away.
 
 ## K.5 Time distribution at the venue
 
@@ -47,7 +47,7 @@ Comparing timestamps across machines and firms — the basis of true wire-to-wir
 
 - A **grandmaster clock** in the facility, disciplined by a **GNSS/GPS** reference (with a rooftop antenna), is the authoritative time source. It distributes time to hosts via **PTP** (Precision Time Protocol, IEEE 1588 — Ch. 63), which — with **hardware timestamping** in the NIC (Ch. 60) and on-path **boundary/transparent clocks** in the switches — achieves sub-microsecond, often sub-100-nanosecond, alignment across machines.
 - **PPS** (Pulse-Per-Second) is the GNSS receiver's once-per-second edge (usually alongside a 10 MHz reference) carried over coax: it disciplines the **grandmaster** and any reference clock with a 1PPS input, and it is what you put on a scope to verify synchronization at the hardware level. A **boundary clock** (a PTP-aware switch) is disciplined by PTP messages from its upstream master and in turn serves its downstream ports; it does not take a PPS feed. **Oscillator quality** (OCXO or rubidium) and **holdover** — how far the clock drifts when GNSS is lost — are the grandmaster's engineering concerns (the topic Ch. 63 develops, and where White Rabbit pushes to sub-nanosecond).
-- **Regulatory clock-sync requirements:** rules such as **MiFID II RTS 25** in Europe mandate documented maximum divergence from UTC (e.g. 100 µs for many HFT activities) and timestamp granularity — so accurate time distribution is both a *measurement* necessity (you cannot compute wire-to-wire latency across two boxes without it — Ch. 63, 92) and a *compliance* obligation. This is why the NIC-hardware-timestamp / PTP chain (Ch. 60–61) appears in a low-latency book at all.
+- **Regulatory clock-sync requirements:** rules such as **MiFID II RTS 25** in Europe mandate documented maximum divergence from UTC (e.g. 100 µs for many HFT activities) and timestamp granularity — so accurate time distribution is both a *measurement* necessity (you cannot compute wire-to-wire latency across two boxes without it — Ch. 63, 93) and a *compliance* obligation. This is why the NIC-hardware-timestamp / PTP chain (Ch. 60–61) appears in a low-latency book at all.
 
 ## K.6 Redundancy & path diversity
 
@@ -63,7 +63,7 @@ The physical layer is where the latency arms race meets economics and rules:
 
 - **What a nanosecond costs:** colocation, equalized cross-connects, microwave bandwidth, GNSS-disciplined time, and FPGA-integrated NICs (Ch. 74, 75) are large, ongoing capital and operating costs. Each buys a diminishing slice of latency, so firms spend where the marginal nanosecond still changes fill rates — and *stop* where the physical floor makes further software optimization pointless (or vice versa: past a point, only the software is left to improve).
 - **Regulation shapes the field:** fair-access and equalized-cabling rules deliberately cap some advantages; market-access (15c3-5) and clock-sync (MiFID II RTS 25) rules add mandatory latency and infrastructure. The physical layer is not a pure free-for-all; it is an engineered, regulated environment.
-- **The framing for Ch. 92:** the end-to-end tick-to-trade budget the book closes with is the sum of a *physical* floor (this appendix — colocation, cabling, the exchange link, the risk gate) and an *engineering* budget (everything in Parts I–XIII). Knowing which is which tells you whether your next nanosecond comes from a code change or a cross-connect order.
+- **The framing for Ch. 93:** the end-to-end tick-to-trade budget the book closes with is the sum of a *physical* floor (this appendix — colocation, cabling, the exchange link, the risk gate) and an *engineering* budget (everything in Parts I–XIII). Knowing which is which tells you whether your next nanosecond comes from a code change or a cross-connect order.
 
 ## K.8 References
 
@@ -74,7 +74,7 @@ The physical layer is where the latency arms race meets economics and rules:
 
 ## K.9 Additional Reading
 
-- Ch. 60 (NIC features/timestamping), Ch. 63 (PTP/clock sync), Ch. 58 (reliable multicast / A/B feeds), Ch. 65 (fabric), Ch. 74 & 75 (FPGA / SmartNIC inline paths), Ch. 92 (wire-to-wire measurement) — the software that lives on this infrastructure.
+- Ch. 60 (NIC features/timestamping), Ch. 63 (PTP/clock sync), Ch. 58 (reliable multicast / A/B feeds), Ch. 65 (fabric), Ch. 74 & 75 (FPGA / SmartNIC inline paths), Ch. 93 (wire-to-wire measurement) — the software that lives on this infrastructure.
 - **Appendix E** (Latency Numbers) — the *on-host* costs, to compare against the *off-host* physical floor described here; **Appendix J** (Market-Structure Primer) — the protocols, roles, and order lifecycle that ride these links.
 - **Appendix C** (System Tuning Checklist) — the box-level work that makes a colocated server actually quiet (GNSS/PTP, NIC rings, IRQ affinity) once it's in the cage.
 

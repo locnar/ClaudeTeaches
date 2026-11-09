@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 30 (atomics / memory model — the release-store/acquire-load that makes a swap safe), Ch. 35 (seqlocks — single-writer publication of config snapshots), Ch. 36 (safe reclamation — RCU/hazard/epoch for freeing the old version), Ch. 26 (mmap/shared memory — config segments), Ch. 50 (keeping the hot path warm — warming a freshly loaded strategy), Ch. 84 (security — validate/sign config before swap).
 >
-> **Leads into:** Ch. 86 (process topology — config distribution across cooperating processes, single-writer-per-segment), Ch. 92 (case study — live reconfiguration in the end-to-end system). A Part XIII operations chapter: changing a running system *without* dropping a tick or tearing the hot path.
+> **Leads into:** Ch. 86 (process topology — config distribution across cooperating processes, single-writer-per-segment), Ch. 93 (case study — live reconfiguration in the end-to-end system). A Part XIII operations chapter: changing a running system *without* dropping a tick or tearing the hot path.
 
 ---
 
@@ -126,7 +126,7 @@ The two lock-free publication mechanisms (Ch. 35–36), chosen by config size an
 
 Replacing a version raises the question Ch. 36 answers: **when is it safe to free the old one?** A reader may still be using v1 at the instant you publish v2.
 
-- **Version the config** (a monotonically increasing version number in each snapshot) so you can tell which is live, log which version made a decision (ties Ch. 88 capture — record the config version with each order for replay), and detect a stuck reader.
+- **Version the config** (a monotonically increasing version number in each snapshot) so you can tell which is live, log which version made a decision (ties Ch. 89 capture — record the config version with each order for replay), and detect a stuck reader.
 - **Reclaim with a Ch. 36 mechanism, chosen by constraints:**
   - **`shared_ptr<const Config>`** — simplest: readers `atomic_load` the `shared_ptr` (never load the raw pointer and *then* bump the count — the gap between the two is a use-after-free if the writer publishes and drops the last reference in between; the increment must be part of the atomic load, or the load protected by a hazard pointer / RCU read-side section, Ch. 36), the old version frees when the last reader drops it. Easy, but two costs: the refcount bump/drop is an atomic RMW on the read side (Ch. 25 — some hot-path cost and a shared cache line), and `std::atomic<std::shared_ptr>`/`atomic_load` are *not lock-free* in libstdc++ or libc++ (§85.5), so a reader can stall behind a preempted writer. Fine when config reads aren't the very hottest thing; measure.
   - **RCU grace period** — readers are unmarked-fast (just an acquire load, no RMW); the writer waits a grace period (until every reader has passed a quiescent point) before freeing. Lowest read cost; needs the RCU plumbing (Ch. 36).
@@ -183,7 +183,7 @@ Two cutover styles, and the hardest case (reloading *code*):
 - [ ] **Single writer** per config; cross-process config in **shared memory (Ch. 26) using offsets** (not raw pointers), pre-faulted/`mlock`'d (§85.4.3).
 - [ ] **Stateless** changes use **instantaneous cutover**; changes with **transition state** use **draining** (§85.4.4).
 - [ ] **Code/strategy reloads** load + validate + **warm (Ch. 50)** + atomic-swap + safe-reclaim — the new strategy's **first real tick is not a cold-start stall** (§85.4.4).
-- [ ] The config **version** is recorded with decisions/orders (ties Ch. 88 replay) (§85.4.2).
+- [ ] The config **version** is recorded with decisions/orders (ties Ch. 89 replay) (§85.4.2).
 
 ## 85.7 References
 
@@ -197,7 +197,7 @@ Two cutover styles, and the hardest case (reloading *code*):
 
 - Talks and write-ups on live reconfiguration and zero-downtime parameter updates in trading and other always-on systems — double-buffering and atomic-swap patterns in practice (§85.2).
 - The RCU and hazard-pointer usage guides (Ch. 36) applied to configuration and reference data, not just data structures (§85.4.2).
-- Ch. 86 (*Process Topology*) — config distribution across cooperating processes, single-writer-per-segment, and the admin/control process; Ch. 88 (*Capture*) — recording the config version that made each decision for deterministic replay; Ch. 50 (*Keeping the Hot Path Warm*) — warming a reloaded strategy; Ch. 92 (*Case Study*) — live reconfiguration end-to-end.
+- Ch. 86 (*Process Topology*) — config distribution across cooperating processes, single-writer-per-segment, and the admin/control process; Ch. 89 (*Capture*) — recording the config version that made each decision for deterministic replay; Ch. 50 (*Keeping the Hot Path Warm*) — warming a reloaded strategy; Ch. 93 (*Case Study*) — live reconfiguration end-to-end.
 - **Appendix F** — RCU/seqlock/release-acquire glossary; **Appendix E** — the cost of an atomic RMW (the `shared_ptr` refcount on the read side).
 
 ---

@@ -83,7 +83,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 
 - **Design for incast (Ch. 73, 58).** The many-to-one pattern (scatter-gather, fan-in) is the congestion generator. Mitigate at the application level too: stagger/pace senders (Ch. 64's scheduled transmission), use receiver-driven flow control (Ch. 70's Homa ideas — the receiver grants transmission), or limit fan-in concurrency. The fabric (ECN/DCQCN) handles congestion, but application-level incast awareness (don't have 1000 nodes hit one node simultaneously unthrottled) reduces the pressure. Ties Ch. 58 (recovery-request storms are an incast) and Ch. 70 (receiver-driven transports).
 - **Avoid PFC deadlock — the worst failure.** PFC deadlock is a cycle of switches each pausing the next (A pauses B because B pauses C because ... because A) — a fabric-wide freeze that doesn't self-resolve. It arises from *cyclic buffer dependencies*, often from routing that creates loops in the pause-dependency graph. Avoid it with careful topology/routing (no cyclic dependencies — leaf-spine done right, Ch. 65), deadlock-avoidance features in modern switches, and by keeping ECN/DCQCN effective so PFC rarely fires (§69.4.2). Deadlock is why you want PFC as a *rare backstop*, not a frequently-active mechanism.
-- **Monitor PFC and losslessness continuously (Ch. 92).** Watch PFC PAUSE counts, ECN marking rates, RDMA retransmissions, and buffer occupancy across the fabric (Ch. 91's network-health sampler — the per-priority pause and ECN counters by name — and the switch-side telemetry it pairs with). Rising PFC counts or RDMA retransmits signal the losslessness is degrading (a misconfigured hop, an incast, a threshold drift) *before* it becomes a collapse. The fabric's congestion state is a production metric, not a set-and-forget config.
+- **Monitor PFC and losslessness continuously (Ch. 93).** Watch PFC PAUSE counts, ECN marking rates, RDMA retransmissions, and buffer occupancy across the fabric (Ch. 92's network-health sampler — the per-priority pause and ECN counters by name — and the switch-side telemetry it pairs with). Rising PFC counts or RDMA retransmits signal the losslessness is degrading (a misconfigured hop, an incast, a threshold drift) *before* it becomes a collapse. The fabric's congestion state is a production metric, not a set-and-forget config.
 
 ## 69.5 Pitfalls & anti-patterns: PFC deadlock and assuming Ethernet is lossless
 
@@ -94,7 +94,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 - **Inconsistent PFC across the path.** One hop (a switch, a NIC) with PFC disabled/misconfigured — that hop drops, breaking losslessness for the whole path (§69.4.1). PFC must be consistent end-to-end (Ch. 65); verify every hop.
 - **Ignoring incast.** Deploying RDMA scatter-gather (Ch. 73) or many-to-one fan-in without incast mitigation — the fabric congests, PFC storms, goodput collapses (§69.3, §69.4.3). Design for incast (pace senders — Ch. 64, receiver-driven flow — Ch. 70, limit fan-in) as well as configuring the fabric.
 - **RoCEv2 where InfiniBand would be simpler.** Enduring the full PFC/ECN/DCQCN configuration burden and hazards on a fabric you *could* have made dedicated InfiniBand (Ch. 68 — lossless by design). If the fabric can be dedicated, InfiniBand avoids most of this chapter's pain (§69.4.1); RoCEv2's benefit (reuse Ethernet) must be worth the configuration burden.
-- **Set-and-forget.** Configuring PFC/ECN/DCQCN once and not monitoring (§69.4.3) — thresholds drift, a new workload changes the incast pattern, a hop's config is lost on a firmware update, and losslessness silently degrades until a collapse. Monitor PFC/ECN/retransmit counters continuously (Ch. 92).
+- **Set-and-forget.** Configuring PFC/ECN/DCQCN once and not monitoring (§69.4.3) — thresholds drift, a new workload changes the incast pattern, a hop's config is lost on a firmware update, and losslessness silently degrades until a collapse. Monitor PFC/ECN/retransmit counters continuously (Ch. 93).
 
 ## 69.6 Exercises & checklist
 
@@ -104,7 +104,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 2. **Incast collapse.** Drive increasing fan-in (many senders → one receiver) and measure goodput/tail with and without ECN/DCQCN tuned — find the collapse point and show congestion control moving it (§69.3, §69.4.3).
 3. **ECN leads PFC.** Configure ECN marking below vs above the PFC threshold; measure PFC PAUSE counts and tail in each — show that ECN-leads keeps PFC rare and the tail bounded (§69.4.2, §69.5).
 4. **PFC HOL blocking.** Create congestion on one flow and measure the latency of an *unrelated* flow in the same PFC class — demonstrate head-of-line blocking, then separate classes (DCB) to isolate them (§69.4.1, §69.5).
-5. **Monitor the fabric.** Instrument PFC PAUSE counts, ECN marks, and RDMA retransmits (Ch. 92); induce a misconfigured hop and show the monitoring catches the losslessness degradation before collapse (§69.4.3).
+5. **Monitor the fabric.** Instrument PFC PAUSE counts, ECN marks, and RDMA retransmits (Ch. 93); induce a misconfigured hop and show the monitoring catches the losslessness degradation before collapse (§69.4.3).
 
 **Checklist — lossless Ethernet & RDMA congestion**
 
@@ -113,7 +113,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 - [ ] **ECN marking + DCQCN** are enabled as the **primary** congestion control, with the **ECN threshold set below the PFC threshold** so marking leads and PFC is a rare backstop (§69.4.2, §69.5).
 - [ ] **Incast is designed for** — sender pacing (Ch. 64), receiver-driven flow (Ch. 70), or fan-in limits — not left to the fabric alone (§69.4.3, §69.5).
 - [ ] **PFC deadlock is avoided** — acyclic routing/topology (Ch. 65), switch deadlock-avoidance, and PFC kept rare via effective ECN/DCQCN (§69.4.3, §69.5).
-- [ ] **PFC PAUSE counts, ECN marks, and RDMA retransmits are monitored** continuously (Ch. 92); rising counts flagged before collapse (§69.4.3, §69.5).
+- [ ] **PFC PAUSE counts, ECN marks, and RDMA retransmits are monitored** continuously (Ch. 93); rising counts flagged before collapse (§69.4.3, §69.5).
 - [ ] **Native InfiniBand** (Ch. 68) is chosen where a **dedicated fabric** is possible and its lossless-by-design simplicity outweighs RoCEv2's Ethernet reuse (§69.4.1, §69.5).
 
 ## 69.7 References
@@ -122,7 +122,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 - The **IEEE DCB** standards — **802.1Qbb (PFC)**, **802.1Qaz (ETS/DCBX)** — and switch-vendor lossless-RoCE configuration guides (§69.4.1).
 - **TIMELY** (Mittal et al., SIGCOMM 2015) and **HPCC** (Li et al., SIGCOMM 2019) — advanced RDMA congestion control beyond DCQCN (§69.4.2).
 - The PFC-deadlock literature (e.g. "Deadlocks in Datacenter Networks" and Tagger/other deadlock-avoidance work) — the deadlock hazard and its avoidance (§69.4.3, §69.5).
-- Ch. 68 (RDMA/InfiniBand — the transport this fabric carries), Ch. 65 (fabric/switching — the switches enforcing PFC/ECN), Ch. 73 (MPI — an incast-heavy RDMA user), Ch. 16 (NUMA — RDMA memory placement), Ch. 92 (production monitoring — extended to the fabric).
+- Ch. 68 (RDMA/InfiniBand — the transport this fabric carries), Ch. 65 (fabric/switching — the switches enforcing PFC/ECN), Ch. 73 (MPI — an incast-heavy RDMA user), Ch. 16 (NUMA — RDMA memory placement), Ch. 93 (production monitoring — extended to the fabric).
 
 ## 69.8 Additional Reading
 

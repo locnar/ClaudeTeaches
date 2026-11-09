@@ -46,6 +46,7 @@ STEPS = [
     ("insert", 37),  # Ch. 38 threading-topologies-hot-loop
     ("insert", 38),  # Ch. 39 flow-control-backpressure-conflation
     ("insert", 43),  # Ch. 44 timers-deadlines-without-jitter
+    ("insert", 86),  # Ch. 87 pre-trade-risk-gate-kill-switch
     # INSERT_STEPS_END
 ]
 def old2new(n):
