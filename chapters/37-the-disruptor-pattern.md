@@ -182,7 +182,7 @@ Batching is the Disruptor's throughput-and-latency engine, and it's *automatic* 
 1. **Disruptor vs ring vs mutex.** Build `disruptor.cpp` (pin producer/consumer); compare throughput/latency against the SPSC ring (Ch. 34) and a `std::mutex` queue. Confirm the Disruptor's batching advantage. Log the max batch size — when does it grow?
 2. **Burst recovery.** Make the consumer stall periodically (simulate a slow downstream); observe the batch size spike and latency *recover* as it catches up. Compare to a per-message queue that processes one at a time — does it fall behind? (§37.3-§37.4.2)
 3. **Sequence false sharing.** Put the producer cursor and consumer sequence on the *same* cache line (remove `alignas`); measure the slowdown and HITM (`perf c2c` — Ch. 33). Re-pad; confirm recovery. Quantify the §37.5 bug.
-4. **Multi-stage graph.** Extend to a pipeline (producer → A → B) where B's barrier waits on A's sequence, and a parallel fan-out (A and B both consume the producer independently). Verify the ordering guarantees and wrap protection (§37.4.1).
+4. **Multi-stage graph.** Extend to a pipeline (producer → A → B) where B's barrier waits on A's sequence, and a parallel fan-out (A and B both consume the producer independently). Confirm the sequence-barrier ordering guarantees and wrap protection (§37.4.1).
 5. **Wait strategies.** Implement busy-spin, yield, and blocking wait strategies; measure latency *and* CPU use for each on a dedicated vs shared core. Confirm the latency/CPU trade-off (§37.4.2, Ch. 32).
 
 **Checklist — the Disruptor pattern**

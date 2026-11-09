@@ -637,6 +637,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 50.4 Techniques
   - 50.4.1 Lock-free cross-process ring buffers
   - 50.4.2 Shared-memory layout and addressing
+  - 50.4.3 Segment setup and cross-process synchronization
 - 50.5 Pitfalls & anti-patterns: pointers across address spaces
 - 50.6 Exercises & checklist
 
