@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 47 (the kernel I/O path the NIC feeds), Ch. 51, 53 (multicast feeds / decoding the packets), Ch. 42 (IRQ affinity / pinning — RSS steers to cores), Ch. 17 (timekeeping — hardware timestamps), Ch. 41 (busy-poll vs interrupts), Ch. 62-preview (kernel bypass — the NIC's user-space fast path).
 >
-> **Leads into:** Ch. 58 (PTP & cross-host hardware timestamping — built on the NIC's timestamp unit), Ch. 61 (XDP/AF_XDP — in-driver/near-NIC processing), Ch. 62 (kernel bypass — ef_vi/Onload, the NIC's bypass path), Ch. 70 (SmartNICs/DPUs — programmable NICs). The receive-side hardware under Ch. 53's decoder.
+> **Leads into:** Ch. 56 (where the DMA'd packet lands — DDIO), Ch. 57 (flow steering & receive scaling — the deep-dive of §55.4.1), Ch. 58 (PTP & cross-host hardware timestamping — built on the NIC's timestamp unit), Ch. 61 (XDP/AF_XDP — in-driver/near-NIC processing), Ch. 62 (kernel bypass — ef_vi/Onload, the NIC's bypass path), Ch. 70 (SmartNICs/DPUs — programmable NICs). The receive-side hardware under Ch. 53's decoder.
 
 ---
 
@@ -21,11 +21,11 @@ And the features that genuinely matter for HFT are specific: **RSS / flow steeri
 **The NIC's job and its rings.** The NIC receives packets off the wire and **DMA**s them into **RX descriptor rings** in host memory (Ch. 53.2.4), then signals the host (an **interrupt**, or the host **polls**). On send, the host puts packets in **TX rings** and the NIC transmits them. The rings, the steering of packets *to* rings, the interrupt-vs-poll choice, and the offloads are the NIC features that matter:
 
 - **RSS (Receive Side Scaling) — spread/steer packets across queues/cores.** A NIC has *multiple* RX queues; **RSS** hashes each packet's flow (src/dst IP/port) and assigns it to a queue, each queue's interrupt pinned to a specific core (Ch. 42). This (a) spreads load across cores (throughput) and (b) — with **flow steering** (directing a *specific* flow to a *specific* queue/core, via `ntuple`/Flow Director/aRFS) — lets you put the **market-data feed on the dedicated decoder core** (Ch. 42, 53) so the right core processes it with warm caches (Ch. 46) and no cross-core handoff. RSS+steering is how you get the feed to the right place.
-- **Hardware timestamping — the NIC stamps packets in hardware.** The NIC has a **PTP Hardware Clock (PHC)** and can record a precise timestamp at the moment a packet **crosses the wire** (RX) or is **sent** (TX) — far more accurate than a software timestamp taken when your code *gets around to* reading the packet (which includes all the stack/scheduling latency — Ch. 17). Exposed via `SO_TIMESTAMPING` (`SOF_TIMESTAMPING_RX_HARDWARE`/`TX_HARDWARE`). This is the basis of *honest* wire-to-wire latency measurement (Ch. 17, 76) and of PTP cross-host clock sync (Ch. 58). For HFT, hardware RX timestamps tell you *exactly* when a market-data packet arrived, independent of how long your software took to process it.
+- **Hardware timestamping — the NIC stamps packets in hardware.** The NIC has a **PTP Hardware Clock (PHC)** and can record a precise timestamp at the moment a packet **crosses the wire** (RX) or is **sent** (TX) — far more accurate than a software timestamp taken when your code *gets around to* reading the packet (which includes all the stack/scheduling latency — Ch. 17). Exposed via `SO_TIMESTAMPING`: enable timestamping on the interface first (`SIOCSHWTSTAMP` / `hwstamp_ctl -i <if> -r 1`), then set `SOF_TIMESTAMPING_RX_HARDWARE | SOF_TIMESTAMPING_RAW_HARDWARE` (plus `TX_HARDWARE` for sends) — the `RX_HARDWARE`/`TX_HARDWARE` flags only *request generation*; without the `RAW_HARDWARE` *reporting* flag no hardware timestamp reaches the `SCM_TIMESTAMPING` cmsg. This is the basis of *honest* wire-to-wire latency measurement (Ch. 17, 76) and of PTP cross-host clock sync (Ch. 58). For HFT, hardware RX timestamps tell you *exactly* when a market-data packet arrived, independent of how long your software took to process it.
 - **Offloads — work the NIC does instead of the CPU:**
   - **Checksum offload (RX/TX):** the NIC computes/verifies IP/TCP/UDP checksums — *generally good* (saves CPU, no latency cost, keep on).
-  - **TSO/GSO (TCP/Generic Segmentation Offload):** the host hands the NIC a large buffer; the NIC segments it into packets — *throughput* feature; little harm for latency on the send side but irrelevant for small orders.
-  - **LRO/GRO (Large/Generic Receive Offload):** the NIC/stack **coalesces** multiple received packets into one large one before handing up — *adds latency* (it *waits* to coalesce — §55.5). **Disable for latency.**
+  - **TSO / GSO (TCP / Generic Segmentation Offload):** the stack hands down one large buffer; with TSO the NIC segments it into packets in hardware, with GSO the kernel segments it in software just before the driver (the fallback when the NIC can't) — a *throughput* feature; little harm for latency on the send side but irrelevant for small orders.
+  - **LRO/GRO (Large/Generic Receive Offload):** the NIC (LRO) or the stack (GRO) **coalesces** TCP segments within a NAPI poll batch into one large one before handing up — relevant to the TCP recovery/order sockets (Ch. 52); GRO never waits on its own timer (it flushes at the end of the poll — unless `gro_flush_timeout` is set), and for small UDP multicast datagrams it is a no-op unless `UDP_GRO`/`rx-gro-list` is enabled. The cost is the batch-sized hold and the merge work (§55.5). **Disable for latency** — cheap insurance, not a large win on a UDP feed.
   - **Interrupt coalescing (`rx-usecs`/`rx-frames`):** the NIC **batches** interrupts (waits to accumulate packets before interrupting) — *throughput/CPU* feature that **adds latency** (a packet waits for the coalesce timer — §55.5). **Minimize or disable; busy-poll instead.**
 - **Busy-polling vs interrupts (Ch. 41).** Instead of the NIC **interrupting** the CPU when a packet arrives (interrupt latency + the handler + a possible context switch — Ch. 41), the CPU can **busy-poll** the RX ring (check for new descriptors in a tight loop on a dedicated core — Ch. 41). Polling is lower-latency and more *deterministic* (no interrupt jitter) — the HFT default on the hot RX path (via `SO_BUSY_POLL`/NAPI busy-poll — Ch. 47, or kernel bypass — Ch. 62).
 
@@ -41,22 +41,27 @@ Measure two things: the **latency** effect of the batching offloads (interrupt c
    # Inspect and toggle offloads (ethtool):
    $ ethtool -k <iface>                          # show offload settings (gro, lro, tso, rx/tx checksum)
    $ ethtool -K <iface> gro off lro off          # disable receive coalescing (latency)
-   $ ethtool -C <iface> rx-usecs 0 rx-frames 1   # disable interrupt coalescing (interrupt per packet)
+   $ ethtool -C <iface> adaptive-rx off adaptive-tx off rx-usecs 0 tx-usecs 0   # disable coalescing (+ rx-frames 1 where the driver supports it);
+   $ ethtool -c <iface>                                  #   verify: with adaptive moderation left on, mlx5/ice silently ignore rx-usecs
    $ ethtool -G <iface> rx 4096                   # size the RX ring for bursts (Ch.53)
    $ ethtool -l/-L <iface>                         # show/set RSS queue count
    $ ethtool -T <iface>                            # show hardware-timestamping capabilities
 
    # Measure RX latency (wire-to-app) under each config, ideally with HARDWARE timestamps (Ch.17,58):
    #   app_recv_time - nic_hw_rx_timestamp  = the software-stack latency the NIC config affects
+   #   receiver: SO_TIMESTAMPING (RX_HARDWARE|RAW_HARDWARE|SOFTWARE) on the multicast socket, recvmsg(),
+   #   read the SCM_TIMESTAMPING cmsg (struct scm_timestamping: ts[0]=sw, ts[2]=hw raw) and subtract from
+   #   clock_gettime(CLOCK_REALTIME) taken right after recvmsg (PHC synced to system time via phc2sys, Ch. 58).
+   # CPU per config:  mpstat -P <rx-core> 1   and   perf stat -e irq:irq_handler_entry -C <rx-core> sleep 10
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP) + a low-latency NIC, small UDP multicast packets, pinned, turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), Linux 6.x, a low-latency 10/25 GbE NIC (Solarflare/AMD X2522 under `sfc`, or Intel E810 under `ice`; the bypass row needs the Solarflare part), small UDP multicast packets, pinned, turbo off (illustrative — the CPU column is the RX core's busy fraction from `mpstat`):
 
 ```
    RX config                                   wire-to-app latency (p50 / p99)   CPU      note
-   default (GRO on, interrupt coalescing on)   ~8 µs / ~30 µs                    low      coalescing ADDS latency
-   GRO/LRO off, coalescing off (IRQ/packet)    ~5 µs / ~12 µs                    higher   no batching delay, more IRQs
-   + busy-poll (SO_BUSY_POLL / NAPI)           ~3 µs / ~6 µs                     high     no interrupt latency/jitter (Ch.41)
+   default (GRO on, interrupt coalescing on)   ~8 µs / ~30 µs                    ~5%      coalescing ADDS latency
+   GRO/LRO off, coalescing off (IRQ/packet)    ~5 µs / ~12 µs                    ~15%     no batching delay, more IRQs
+   + busy-poll (SO_BUSY_POLL / NAPI)           ~3 µs / ~6 µs                     ~100%    no interrupt latency/jitter (Ch.41)
    + kernel bypass (ef_vi/Onload — Ch.62)      ~0.5-1 µs / ~1-2 µs               100%     no kernel stack at all
 
    software timestamp vs HARDWARE timestamp:   sw includes all the above latency; hw = true wire arrival (Ch.17,58)
@@ -96,7 +101,7 @@ The vendor kernel-bypass stacks — **Onload** (transparent `LD_PRELOAD` socket 
 - **Interrupt-driven RX on the hot path.** Interrupts add latency *and jitter* (the interrupt, the handler, a possible context switch — Ch. 41) vs busy-polling. On a dedicated core, **busy-poll** (§55.4.2). And if interrupt-driven, route the IRQ correctly (Ch. 42) — an un-steered NIC IRQ on the wrong core (or a hot core) is the Ch. 42 problem.
 - **Undersized RX ring → market-open drops (Ch. 53).** A small RX descriptor ring overflows during a microburst → dropped packets (§53.2.4) → gaps/recovery. Size it (`ethtool -G rx <N>`) for the worst burst; monitor `ethtool -S` (rx_missed/rx_no_buffer). A top market-open drop cause.
 - **Software timestamps mistaken for wire-arrival time (Ch. 17, 58).** A software receive timestamp includes all the stack/scheduling latency — it's *not* when the packet arrived. For honest latency measurement (Ch. 76) and sequencing, use **NIC hardware timestamps** (§55.2, Ch. 17, 58). Confusing the two gives wrong latency numbers.
-- **RSS spreading a single feed across cores (losing locality).** If a single market-data feed gets hashed across multiple queues/cores by RSS, it's processed by different cores with cold caches and reordering (Ch. 53). **Steer** the feed to *one* (the decoder) core (§55.4.1) — RSS *load-balancing* is a throughput goal; HFT wants *deterministic steering*.
+- **RSS putting the feed on the wrong core (losing locality).** RSS is a deterministic hash of the flow tuple, so one feed (one source → one group:port) lands on *one* queue, in order — but an arbitrary one, likely a core other than the decoder's (cross-core handoff, cold caches); a channel spread over several multicast groups may land on several queues. **Steer** each group explicitly to the decoder core (§55.4.1, Ch. 57) — RSS *load-balancing* is a throughput goal; HFT wants *deterministic steering*.
 - **`irqbalance` undoing your steering (Ch. 42).** Leaving `irqbalance` running re-shuffles the NIC IRQs, breaking your flow steering. Disable it (Ch. 42); pin IRQs manually.
 - **Disabling checksum offload (over-correction).** Checksum offload is *cheap and good* (saves CPU, no latency cost) — disabling it (in a blanket "turn off all offloads") wastes CPU for no latency benefit. Disable the *batching* offloads (GRO/LRO/coalescing), **keep** checksum/the non-batching ones.
 - **Bypass without the rest of the tuning.** Kernel bypass (Onload/ef_vi — §55.4.3, Ch. 62) is the big win, but it still needs the RX ring sized, the core dedicated/isolated (Ch. 42, 45), busy-polling, and steering — bypass on an un-tuned core/ring still drops/jitters. Bypass is part of a tuned system, not a standalone fix.
@@ -137,7 +142,7 @@ The vendor kernel-bypass stacks — **Onload** (transparent `LD_PRELOAD` socket 
 - HFT NIC-tuning talks (Solarflare/Onload, ExaNIC) — production low-latency NIC configuration.
 - Ch. 47 (*Linux Native I/O*) — the kernel path the NIC feeds; Ch. 51, 53 (*Sockets / Decoding*) — the feeds and packets; Ch. 42 (*Pinning*) — IRQ affinity/steering; Ch. 17 / Ch. 58 (*Timekeeping / PTP*) — hardware timestamps; Ch. 61 (*XDP/AF_XDP*) — in-driver/near-NIC processing; Ch. 62 (*Kernel Bypass*) — ef_vi/Onload/DPDK; Ch. 70 (*SmartNICs/DPUs*) — programmable NICs.
 - Ch. 56 (*DDIO & the NIC-to-Cache Data Path*) — where the received packet physically lands (L3 vs DRAM) and how DDIO decides the RX latency floor; Ch. 60 (*Network Fabric & Switching*) — the hop before the NIC.
-- **Appendix C** (System Tuning Checklist) — the consolidated NIC/`ethtool` tuning; **Appendix E** — kernel-stack vs busy-poll vs bypass RX latency numbers.
+- **Appendix C** (System Tuning Checklist) — the consolidated NIC/`ethtool` tuning; **Appendix E** — kernel-stack vs bypass RX latency numbers.
 
 ---
 
