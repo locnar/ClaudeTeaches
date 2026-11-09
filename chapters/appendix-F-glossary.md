@@ -95,13 +95,17 @@
 ## F.5 C++/toolchain terms
 
 - **BOLT** — Binary Optimization and Layout Tool: a post-link optimizer that re-lays-out the final binary using a `perf` profile for I-cache/I-TLB locality. (Ch. 22, Appendix D)
+- **Borrow checker / `unsafe`** — Rust's compile-time ownership and borrowing analysis, which rejects use-after-free, data races and aliased `&mut` at zero runtime cost; `unsafe` blocks switch specific checks off for raw pointers, FFI and hardware access, marking where the C++-style freedoms live. (Appendix B.1)
 - **Coroutine / HALO** — C++20 stackless coroutines (suspendable functions); HALO (Heap-Allocation eLision Optimization) elides the coroutine frame allocation when the compiler can prove the lifetime. (Ch. 38)
 - **CRTP** — Curiously Recurring Template Pattern: static (compile-time) polymorphism via `template<class D> Base`, avoiding the virtual-call indirection of runtime dispatch. (Ch. 19, 14)
 - **`constexpr` / `consteval`** — compile-time evaluation: `constexpr` *may* run at compile time, `consteval` *must*; moves work off the runtime hot path. (Ch. 18)
 - **`std::execution` (senders / receivers / scheduler)** — the C++26 standard async model: lazily-composed **senders** describe async work, **receivers** are the typed continuation (value/error/stopped), and a **scheduler** places work on an execution context — a zero-cost structured-async abstraction. (Ch. 39)
 - **`std::expected`** — a C++23 vocabulary type holding either a value or an error, for hot-path error handling without exceptions or sentinel codes. (Ch. 20)
+- **FFI** — Foreign Function Interface: calling across language runtimes, in practice through a C ABI (`extern "C"`); the boundary belongs between latency tiers, never on a per-message hot path. (Appendix B.5)
 - **FTZ / DAZ** — Flush-To-Zero / Denormals-Are-Zero: FPU modes treating subnormal floats as zero to avoid the 10-100× denormal-operation penalty; set explicitly on FP hot paths. (Ch. 27, Appendix D)
+- **GC pause** — a stop of the application thread(s) by a managed runtime's garbage collector, from tens of µs (ZGC/Shenandoah/C4) to milliseconds (a full GC): a tail event (Ch. 1) the runtime, not you, schedules — what keeps GC'd languages off the order path. (Appendix B.3–B.4)
 - **Heisenbug / observer effect** — a bug that changes or vanishes when you observe it, because a `printf`/breakpoint/heavy probe perturbs timing; debug via low-overhead capture and offline replay instead. (Ch. 5)
+- **JIT vs AOT** — just-in-time compilation (JVM, .NET) optimizes hot code at runtime after interpreting it, so the first executions are slow and a *deoptimization* can re-introduce a stall mid-session — the Ch. 46 cold-start problem built into the runtime; ahead-of-time compilation (C++, Rust, C, Zig, GraalVM native-image) is fully optimized before the first tick. (Appendix B.3–B.4, Ch. 46)
 - **LTO** — Link-Time Optimization: optimizing across translation-unit boundaries at link (cross-module inlining, devirtualization); ThinLTO is the scalable variant. (Ch. 22, Appendix D)
 - **`noexcept`** — a specifier promising a function won't throw; enables optimizations (no unwinding setup) and is required for some move-aware container fast paths. (Ch. 20)
 - **PGO** — Profile-Guided Optimization: a build that uses a runtime profile (branch/hotness data) to drive inlining, branch layout, and code placement with data instead of heuristics. (Ch. 22, Appendix D)

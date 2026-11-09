@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 18 (compile-time mechanics — `if constexpr`, the template cost model, compile-time evaluation this chapter builds *designs* on), Ch. 14 (indirect dispatch — CRTP here is the by-construction devirtualization that chapter motivated), Ch. 11 (the inlining and back-end ILP that "zero-cost" actually cashes out as), Ch. 4 (reading asm — §19.5 is the whole proof).
 >
-> **Leads into:** Ch. 20 (the cost of abstractions that *aren't* free — exceptions, RTTI, `std::function`), Ch. 25 (cache-friendly containers and intrusive/policy designs), Ch. 29 (SIMD via expression templates / static specialization), Ch. 24 (policy-based allocators). The bloat/error-message costs tie back to Ch. 12 and Ch. 18.
+> **Leads into:** Ch. 20 (the cost of abstractions that *aren't* free — exceptions, RTTI — and `std::expected` as the hot-path alternative; `std::function`'s cost was Ch. 14 §14.2.3), Ch. 25 (cache-friendly containers and intrusive/policy designs), Ch. 29 (SIMD via expression templates / static specialization), Ch. 24 (policy-based allocators). The bloat/error-message costs tie back to Ch. 12 and Ch. 18.
 
 ---
 
@@ -264,8 +264,8 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 
 - CppCon talks on "zero-cost abstractions," CRTP, and policy-based design — including before/after asm walkthroughs that mirror §19.5.
 - Ch. 14 (*Indirect Calls & Virtual Dispatch*) — the runtime-polymorphism cost CRTP avoids; Ch. 18 (*Compile-Time Mechanics*) — the `if constexpr`/template foundation; Ch. 20 (*The Cost of Abstractions*) — abstractions that *aren't* free; Ch. 25 (*Cache-Friendly Containers*) and Ch. 24 (*Custom Allocators*) — policy-based containers/allocators in practice; Ch. 29 (*SIMD*) — expression-template vectorization.
-- **Appendix B** — static dispatch and zero-cost abstraction in Rust (traits/generics vs `dyn`), for the cross-language reader.
+- **Appendix B** (B.1) — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn`), for the cross-language reader.
 
 ---
 
-*Next: Ch. 20 — The Cost of Abstractions, the counterweight to this chapter: the abstractions that are *not* free — exception unwinding, RTTI, `std::function` — and how to handle errors on the hot path with `noexcept`, error codes, and `std::expected` without paying the unwinder.*
+*Next: Ch. 20 — The Cost of Abstractions, the counterweight to this chapter: the abstractions that are *not* free — exception unwinding, RTTI, `dynamic_cast` — and how to handle errors on the hot path with `noexcept`, error codes, and `std::expected` without paying the unwinder.*
