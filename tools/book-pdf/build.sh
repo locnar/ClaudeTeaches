@@ -7,7 +7,7 @@
 # Environment overrides:
 #   MONOFONT   monospace font (default: Menlo on macOS, "DejaVu Sans Mono" on Linux)
 #   MAINFONT   body font (default: the engine's default — Latin Modern)
-#   TOC_DEPTH  0 = parts+chapters, 1 = +sections (default 1)
+#   TOC_DEPTH  1 = parts+chapters, 2 = +sections (default 1; passed to pandoc --toc-depth, which rejects 0)
 #   AUTHOR     name on the title page (default: git user.name)
 #   ENGINE     force a pdf engine (xelatex|lualatex|tectonic)
 #
@@ -45,7 +45,7 @@ ERROR: no Unicode-capable LaTeX engine found (need xelatex, lualatex, or tectoni
   Full TeX (xelatex):
       macOS:  brew install --cask mactex-no-gui      (large) or  brew install --cask basictex
               then: sudo tlmgr update --self && sudo tlmgr install fvextra fancyhdr emptypage \
-                          microtype seqsplit etoolbox booktabs
+                          microtype seqsplit etoolbox booktabs newunicodechar
       Linux:  apt-get install texlive-xetex texlive-latex-extra fonts-dejavu
 EOF
   exit 1

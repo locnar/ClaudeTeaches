@@ -2,7 +2,7 @@
 
 # Chapter 64 — Lossless Ethernet & RDMA Congestion
 
-> **Prerequisites:** Ch. 63 (RDMA / InfiniBand verbs — the transport this fabric carries), Ch. 60 (network fabric & switching — the switches that enforce PFC/ECN), Ch. 16 (NUMA — RDMA is memory-to-memory), Ch. 68 (MPI — a big RDMA user with incast), Ch. 1 (the tail — congestion is a tail event).
+> **Prerequisites:** Ch. 63 (RDMA / InfiniBand verbs — the transport this fabric carries), Ch. 60 (network fabric & switching — the switches that enforce PFC/ECN), Ch. 68-preview (MPI — a big RDMA user with incast), Ch. 1 (the tail — congestion is a tail event).
 >
 > **Leads into:** Ch. 65 (transport beyond TCP — the messaging layer above this fabric). The congestion companion to the RDMA of Ch. 63: what RDMA assumes underneath it — a lossless fabric — and the machinery (PFC, ECN, DCQCN) that provides it, along with the hazards that machinery introduces.
 
@@ -10,7 +10,7 @@
 
 ## 64.1 Why it matters: RDMA assumes a lossless fabric that Ethernet isn't
 
-Ch. 63 built RDMA — one-sided, kernel-bypass, ultra-low-latency remote memory access — and it delivers microsecond messaging *when the fabric cooperates*. But RDMA carries a hidden assumption that Ch. 63 could take for granted on native InfiniBand and cannot on Ethernet: **the fabric is lossless.** RDMA transports (especially the common **RoCEv2** — RDMA over Converged Ethernet) were designed assuming packets are not dropped due to congestion; their reliability and go-back-N retransmission are built for a fabric that doesn't lose packets under load. Native **InfiniBand** provides this by design (credit-based link-level flow control — a sender only transmits when the receiver has buffer). But plain **Ethernet drops packets when a switch buffer fills** (Ch. 60) — that's normal, expected Ethernet behavior — and RDMA over a lossy Ethernet fabric performs *terribly*: a single congestion drop triggers go-back-N retransmission of a whole window, collapsing throughput and spiking latency (Ch. 1's tail, manufactured by the fabric).
+Ch. 63 built RDMA — one-sided, kernel-bypass, ultra-low-latency remote memory access — and it delivers microsecond messaging *when the fabric cooperates*. But RDMA carries a hidden assumption that Ch. 63 could take for granted on native InfiniBand and cannot on Ethernet: **the fabric is lossless.** RDMA transports (especially the common **RoCEv2** — RDMA over Converged Ethernet) were designed assuming packets are not dropped due to congestion; their reliability and go-back-N retransmission (the spec default; NVIDIA firmware offers an opt-in selective-repeat mode — `RDMA_SELECTIVE_REPEAT_EN`, ECE-negotiated on ConnectX-6 Dx and later — which softens but does not remove the loss penalty) are built for a fabric that doesn't lose packets under load. Native **InfiniBand** provides this by design (credit-based link-level flow control — a sender only transmits when the receiver has buffer). But plain **Ethernet drops packets when a switch buffer fills** (Ch. 60) — that's normal, expected Ethernet behavior — and RDMA over a lossy Ethernet fabric performs *terribly*: a single congestion drop triggers go-back-N retransmission of a whole window, collapsing throughput and spiking latency (Ch. 1's tail, manufactured by the fabric).
 
 So running RDMA over Ethernet (RoCEv2 — the economical choice, reusing Ethernet infrastructure instead of a separate InfiniBand fabric) requires *making Ethernet lossless enough*, and that is a real engineering discipline with its own mechanisms and its own failure modes. The tools are **PFC (Priority Flow Control)** — link-level pause frames that tell an upstream switch "stop sending this traffic class, my buffer is full" (creating losslessness by *pausing* instead of *dropping*) — and **ECN (Explicit Congestion Notification)** plus **DCQCN** (the congestion-control algorithm) — which mark and react to congestion *before* buffers fill, reducing how often PFC has to pause. Together, PFC + ECN + DCQCN + DCB (Data Center Bridging) make Ethernet carry RDMA.
 
@@ -44,7 +44,20 @@ The mental model: **lossless Ethernet for RDMA is a two-layer system — ECN/DCQ
 
 *Toolchain and machine: Appendix L.3.*
 
-- **RDMA latency/throughput under congestion.** Run RDMA (Ch. 63) on an uncongested fabric (baseline: microsecond latency, line-rate throughput) and then introduce congestion (competing flows, incast — below). Representative (figures pending real runs): on a *properly configured* lossless fabric, latency degrades gracefully under load (ECN/DCQCN slows senders, tail stays bounded); on a *lossy* or misconfigured fabric, a congestion drop triggers go-back-N and throughput collapses / latency spikes (the tail explodes — Ch. 1). The difference between graceful degradation and collapse is the configuration.
+- **RDMA latency/throughput under congestion.** Run RDMA (Ch. 63) on an uncongested fabric (baseline: microsecond latency, line-rate throughput) and then introduce congestion (competing flows, incast — below). Representative (figures pending real runs): on a *properly configured* lossless fabric, latency degrades gracefully under load (ECN/DCQCN slows senders, tail stays bounded); on a *lossy* or misconfigured fabric, a congestion drop triggers go-back-N and throughput collapses / latency spikes (the tail explodes — Ch. 1). The difference between graceful degradation and collapse is the configuration. The harness, all standard tools:
+
+```
+   # Incast: N senders -> one receiver, traffic in the RoCE class (DSCP 26 / TC 3 here), 30 s each
+   server$  ib_write_bw -D 30 --report_gbits --tos 104 -F              # repeat ib_write_lat for the tail
+   senders$ ib_write_bw -D 30 --report_gbits --tos 104 -F <server>      # x N, N = 2, 4, 8, 16 ...
+   # NIC-side PFC and congestion counters (mlx5 names; sfc/ice differ)
+   $ ethtool -S <if> | grep -E 'prio3_(rx|tx)_pause|pause_duration'    # PFC frames sent/received on the RoCE priority
+   $ cat /sys/class/infiniband/mlx5_0/ports/1/hw_counters/{np_ecn_marked_roce_packets,np_cnp_sent,rp_cnp_handled,out_of_sequence,packet_seq_err}
+   $ rdma statistic show link mlx5_0/1                                  # the same via iproute2's rdma tool
+   # Switch side: per-queue buffer occupancy / ECN marks / PFC pauses from the switch telemetry (Ch. 60)
+```
+
+  Plot goodput and the `ib_write_lat` p99/p99.9 against N; `out_of_sequence`/`packet_seq_err` climbing is go-back-N in action, `np_cnp_sent` rising while `prio3_rx_pause` stays near zero is DCQCN doing its job.
 - **Incast collapse (the decisive test).** The canonical RDMA congestion scenario: **many senders → one receiver** simultaneously (a scatter-gather — Ch. 68, a many-to-one fan-in). Measure goodput and tail as the number of concurrent senders (fan-in) rises. Without congestion control: buffers fill, PFC storms or drops happen, goodput collapses (**incast collapse**). With ECN/DCQCN tuned: senders back off, goodput holds, tail stays bounded. This is where lossless-fabric configuration is proven or disproven — measure at high fan-in, not with two nodes.
 - **PFC behavior — how often it fires, and HOL.** Measure PFC PAUSE frame counts (switch/NIC counters) under load — if PFC is firing frequently, ECN/DCQCN isn't doing its job (buffers are reaching the PFC threshold), and you're exposed to HOL blocking and deadlock risk (§64.5). Well-tuned, PFC fires rarely (the backstop); frequently-firing PFC is a warning sign. Also measure whether PFC pausing one class blocks *unrelated* traffic (HOL blocking, §64.5).
 - **ECN marking rate and DCQCN response.** Measure the ECN marking rate and whether senders are reacting (rate reduction on CNP). Tune the ECN marking thresholds (when the switch starts marking) so senders slow *before* buffers reach the PFC threshold — the marking should lead, PFC should trail.
@@ -74,7 +87,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 
 ## 64.5 Pitfalls & anti-patterns: PFC deadlock and assuming Ethernet is lossless
 
-- **Assuming Ethernet is lossless (the cardinal error).** Running RoCEv2 over plain Ethernet without PFC/DCB configured — Ethernet drops under congestion (Ch. 60), RDMA's go-back-N collapses, and you get microsecond latency in the lab and catastrophic collapse under production load. RoCEv2 *requires* a configured lossless fabric (§64.4.1); it is not optional (§64.1).
+- **Assuming Ethernet is lossless (the cardinal error).** Running RoCEv2 over plain Ethernet without PFC/DCB configured — Ethernet drops under congestion (Ch. 60), RDMA's go-back-N collapses, and you get microsecond latency in the lab and catastrophic collapse under production load. RoCEv2 on *unconfigured* Ethernet (no ECN, no PFC) collapses under congestion. The production options are lossless (PFC + ECN/DCQCN — this chapter) or *resilient/lossy RoCE* (ECN/DCQCN only, relying on ConnectX-4+ adaptive retransmission and slow restart — `roce_adp_retrans_en`/`roce_slow_restart_en` — which some large fabrics run precisely to avoid PFC's deadlock/HOL hazards, at a tail-latency cost); "just plain Ethernet" is not one of them (§64.1, §64.4.1).
 - **PFC deadlock (the worst failure mode).** A cycle of pause dependencies freezes the whole fabric, unrecoverable without intervention (§64.4.3). Avoid with acyclic routing/topology (Ch. 60), switch deadlock-avoidance, and — crucially — keeping ECN/DCQCN effective so PFC rarely fires. A fabric where PFC fires constantly is a deadlock waiting to happen.
 - **Frequently-firing PFC (HOL blocking).** PFC pauses a *whole traffic class*, so a pause for one congested flow blocks *all* flows in that class (head-of-line blocking) — unrelated RDMA traffic stalls behind the congested flow. If PFC fires often (ECN/DCQCN not keeping up, §64.3), you get pervasive HOL blocking. Tune ECN to lead so PFC is rare (§64.4.2).
 - **ECN threshold above PFC threshold.** Misconfiguring so PFC pauses *before* ECN marks — you get PFC's hazards (HOL, deadlock risk) without ECN's proactive benefit. ECN marking must lead the PFC threshold (§64.4.2); this ordering is the most important tuning parameter.
@@ -85,7 +98,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 
 ## 64.6 Exercises & checklist
 
-**Exercises:**
+**Exercises**
 
 1. **Lossless vs lossy RDMA.** Run RDMA (Ch. 63) throughput/latency on a fabric with PFC/DCB configured vs not, under congestion; reproduce graceful degradation vs go-back-N collapse (§64.3).
 2. **Incast collapse.** Drive increasing fan-in (many senders → one receiver) and measure goodput/tail with and without ECN/DCQCN tuned — find the collapse point and show congestion control moving it (§64.3, §64.4.3).
@@ -93,7 +106,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 4. **PFC HOL blocking.** Create congestion on one flow and measure the latency of an *unrelated* flow in the same PFC class — demonstrate head-of-line blocking, then separate classes (DCB) to isolate them (§64.4.1, §64.5).
 5. **Monitor the fabric.** Instrument PFC PAUSE counts, ECN marks, and RDMA retransmits (Ch. 76); induce a misconfigured hop and show the monitoring catches the losslessness degradation before collapse (§64.4.3).
 
-**Checklist:**
+**Checklist — lossless Ethernet & RDMA congestion**
 
 - [ ] RoCEv2 runs in a **dedicated PFC-enabled, no-drop DCB class** (ETS bandwidth guarantee), separate from lossy TCP — never on unconfigured Ethernet (§64.4.1, §64.5).
 - [ ] **PFC is configured consistently end-to-end** (every switch and NIC on the path — Ch. 60); verified, not assumed (§64.4.1, §64.5).
@@ -115,7 +128,7 @@ The lessons: on a properly configured lossless fabric RDMA degrades gracefully; 
 
 - Vendor (NVIDIA/Mellanox, Cisco, Arista) lossless-RoCE deployment guides — practical PFC/ECN/DCQCN configuration and monitoring (§64.4).
 - The datacenter-congestion-control research line (DCQCN, TIMELY, HPCC, Swift — and the incast/pFabric work) — the state of the art beyond DCQCN (§64.4.2).
-- Ch. 63 (*RDMA*) — the transport that depends on this fabric; Ch. 65 (*Transport Beyond TCP*) — receiver-driven flow control for incast; Ch. 59 (*Precise Transmission*) — pacing to ease congestion; Ch. 60 (*Fabric*) — the switches; **Appendix E** — RDMA latency numbers; **Appendix F** — PFC / ECN / DCQCN / incast glossary; **Appendix G** — the DCQCN/TIMELY/HPCC bibliography.
+- Ch. 63 (*RDMA*) — the transport that depends on this fabric; Ch. 65 (*Transport Beyond TCP*) — receiver-driven flow control for incast; Ch. 59 (*Precise Transmission*) — pacing to ease congestion; Ch. 60 (*Fabric*) — the switches; **Appendix F** — PFC / ECN / DCQCN / incast glossary; **Appendix G** — the Part X / RoCE references.
 
 ---
 

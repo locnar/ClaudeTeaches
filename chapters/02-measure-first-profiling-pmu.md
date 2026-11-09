@@ -2,7 +2,7 @@
 
 # Chapter 2 — Measure First: Profiling & Hardware Performance Counters
 
-> **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution, not the mean. Solid C++ and Linux command-line fluency. For the hands-on parts you want a Linux box with `perf` installed (`linux-tools-$(uname -r)` on Debian/Ubuntu, `perf` package on RHEL/Fedora) and permission to read counters (`/proc/sys/kernel/perf_event_paranoid` ≤ 2, or run under `sudo`).
+> **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution, not the mean. Solid C++ and Linux command-line fluency. For the hands-on parts you want a Linux box with `perf` installed (`linux-tools-$(uname -r)` on Ubuntu, `linux-perf` on Debian, the `perf` package on RHEL/Fedora) and permission to read counters (`/proc/sys/kernel/perf_event_paranoid` ≤ 2, or run under `sudo`).
 >
 > **Leads into:** Ch. 3 (*Micro-benchmarking Done Right*) makes the measurement statistically honest; Ch. 4 (*Reading the Machine*) explains the asm that these counters point you at. The top-down method introduced here (§2.2.2) is the lens for all of Part II, and the cache/branch/front-end counters reappear in Ch. 7–14. Live production tracing with eBPF/`bpftrace` is Ch. 61.
 
@@ -54,7 +54,7 @@ A crucial constraint follows from the hardware: **there are only so many program
 
 ### 2.2.2 Top-down microarchitecture analysis
 
-Raw counters are a haystack. The breakthrough that makes them usable is the **Top-Down Microarchitecture Analysis Method (TMAM)**, developed by Ahmad Yasin at Intel. Instead of staring at fifty events, you classify every *pipeline slot* — an opportunity to issue one micro-op in one cycle — into one of four buckets. A core that can issue 4 µops/cycle ("4-wide") has 4 slots per cycle; over a run, every slot was either usefully used or wasted in one of these ways:
+Raw counters are a haystack. The breakthrough that makes them usable is the **Top-Down Microarchitecture Analysis Method (TMAM)**, developed by Ahmad Yasin at Intel. Instead of staring at fifty events, you classify every *pipeline slot* — an opportunity to issue one micro-op in one cycle — into one of four buckets. A core that can issue 4 µops/cycle ("4-wide", Skylake) has 4 slots per cycle — the 5-wide Ice Lake-SP reference machine has 5 (`TOPDOWN.SLOTS` = 5 × cycles), Golden Cove 6; over a run, every slot was either usefully used or wasted in one of these ways:
 
 ```
                         ┌─────────────────────────┐
@@ -207,7 +207,10 @@ $ perf record -e mem_load_retired.l3_miss:pp -g -- ./perf_demo rand
 $ perf report --stdio | head
 # Overhead  Command    Symbol
 #   98.7%   perf_demo  [.] main            <- the chasing loop, as expected
+$ perf annotate --stdio -s main | head -40       # which *instruction* the samples landed on
 ```
+
+`perf annotate` is the bridge from "which function" to "which load": it attributes samples to individual instructions (and source lines, with `-g`), which is exactly the view Ch. 4 teaches you to read. Group events that must be counted over the same interval — `-e '{cycles,instructions,LLC-load-misses}'` — so a ratio is not computed from two multiplexed, differently-scaled counts.
 
 That two-step — **stat to characterize, record to localize** — is the core loop of performance work. Every later chapter assumes you can run it.
 
@@ -254,7 +257,7 @@ When to reach for it: when `perf stat --topdown` has told you the *category* but
 ## 2.5 Pitfalls & anti-patterns: skid, multiplexed counters, profiling the wrong build
 
 - **Profiling the wrong build.** The single most common and most embarrassing mistake: profiling a debug (`-O0`) or unoptimized build, or one without LTO/`-march`, then optimizing code the release compiler would have deleted or vectorized. **Always profile the build you ship**, with its real flags (Ch. 22). A flame graph of a `-O0` binary is fiction.
-- **Counter multiplexing.** Ask for more events than the core has programmable counters and `perf` time-slices them and scales up — the output looks complete but is estimated. `perf stat` reports the `[ ... ]` enabled-percentage; if it's below 100%, your counts are extrapolations. Fix: request fewer events per run (group only what fits), or split across multiple runs. On a short or bursty hot path, multiplexing error can be large.
+- **Counter multiplexing.** Ask for more events than the core has programmable counters and `perf` time-slices them and scales up — the output looks complete but is estimated. `perf stat` prints a trailing `(NN.NN%)` enabled-percentage on a multiplexed counter's line; if it's below 100%, your counts are extrapolations. Fix: request fewer events per run (group only what fits), or split across multiple runs. On a short or bursty hot path, multiplexing error can be large.
 - **Skid.** In sampling mode the recorded instruction pointer can lag the instruction that truly caused the event by several instructions, because the pipeline is deep and out-of-order — so the "hot line" in `perf report` may sit a few lines past the real culprit. Use **precise (PEBS) events** (`:pp`/`:ppp` suffix) to pin the architectural state to the right instruction. Trusting non-precise skid blindly sends you optimizing the wrong line.
 - **Frequency scaling and warm-up contamination.** Turbo, C-states, and DVFS (Ch. 6) mean the same code runs at different clocks depending on thermal/idle history, so `cycles` and wall-time wobble run-to-run. Pin frequency, pin the thread (Ch. 42), warm the path (Ch. 46), and prefer counting *instructions/misses* (frequency-independent) over raw time when you can. This is Ch. 3's whole subject — don't trust a single noisy run.
 - **The observer effect.** Sampling at very high frequency, heavy `-g` DWARF unwinding, or attaching tracers perturbs the very latency you're measuring. Keep sampling rates sane (≤ a few kHz), prefer LBR/frame-pointer unwinding over DWARF on the hot path, and remember that the lowest-overhead observation is a hardware counter *count*, not a stack sample.
@@ -270,7 +273,7 @@ When to reach for it: when `perf stat --topdown` has told you the *category* but
 1. **Reproduce the gap.** Build `perf_demo.cpp` and run `perf stat -D -1 --control fifo:perf.ctl,perf.ack -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses` on both `seq` and `rand`; then once more without `-D -1 --control`, so the setup is counted too. Compute IPC and LLC-MPKI for each. By what factor does each metric change? Which one *doesn't* move, and why does that rule out a whole category of fix?
 2. **Top-down it.** Run `perf stat --topdown` (or `toplev -l1` from `pmu-tools`) on both modes. Which bucket dominates `rand`? Drill one level deeper (`-l2`) into that bucket. Does it say Memory Bound? Does it agree with your counter reading from exercise 1?
 3. **Localize it.** `perf record -e mem_load_retired.l3_miss:pp -g` on `rand`, then `perf report`. Now rerun *without* the `:pp` (non-precise) — does the attributed line move? That shift is skid.
-4. **Multiplexing in action.** Run `perf stat` requesting ~12 events at once and check the enabled-percentage in brackets. Are any below 100%? Split them into two runs of fewer events and compare the counts. How much did multiplexing distort them?
+4. **Multiplexing in action.** Run `perf stat` requesting ~12 events at once and check the trailing enabled-percentage in parentheses. Are any below 100%? Split them into two runs of fewer events and compare the counts. How much did multiplexing distort them?
 5. **Flame the misses.** Generate both a cycles flame graph and an `LLC-load-misses` flame graph of `rand`. How do they differ in what they emphasize? (Builds intuition for Ch. 7.)
 
 **Checklist — before you optimize anything**

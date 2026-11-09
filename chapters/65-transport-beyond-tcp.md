@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 51 (sockets, multicast), Ch. 53 (SBE and message encoding — the payload these transports carry), Ch. 63 (RDMA — a transport some of these ride), Ch. 54 (reliable multicast — the recovery ideas generalize here), Ch. 52 (TCP internals — the baseline these improve on), Ch. 37 (the Disruptor / mechanical sympathy — Aeron's lineage).
 >
-> **Leads into:** Ch. 57 (flow steering — how these transports get packets to the right core), Ch. 64 (lossless fabric — what RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
+> **Leads into:** Ch. 66 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 68 (MPI — collective messaging over the same fabrics), Ch. 74 (process topology — Aeron IPC as the data plane), Ch. 76 (the end-to-end path). Ties back to Ch. 57 (flow steering — getting these transports' packets to the right core) and Ch. 64 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
 
 ---
 
@@ -14,7 +14,7 @@ TCP is the default for reliable communication, and Ch. 52 showed how to tune it 
 
 - **Head-of-line (HOL) blocking** — because TCP delivers a strict *ordered stream*, a single lost segment blocks *every* later message behind it until the retransmit arrives (a round-trip, Ch. 52), even though those later messages are complete and independent. For a stream of independent orders/quotes, one loss stalls all of them — the single worst TCP property for messaging.
 - **Connection-oriented, one-to-one** — TCP is a point-to-point connection; a matching engine talking to thousands of participants, or a service handling many clients, pays per-connection state and can't easily express fan-out (which is why market data is multicast — Ch. 51/54, not TCP).
-- **Sender-driven flow / congestion control** tuned for fairness and bulk throughput, which under datacenter many-to-one *incast* (Ch. 64) can collapse, and which ramps and backs off in ways a controlled fabric doesn't need (Ch. 52).
+- **Sender-driven congestion control** (the receiver window is only a buffer bound) tuned for fairness and bulk throughput, which under datacenter many-to-one *incast* (Ch. 64) can collapse, and which ramps and backs off in ways a controlled fabric doesn't need (Ch. 52).
 
 So the state of the art is **purpose-built transports** that make different choices: message semantics instead of a stream, no HOL blocking, receiver-driven or credit-based flow control, connectionless or lightweight sessions, and designs tuned for datacenter fabrics and short messages. This chapter surveys the landmark ones — **Aeron** (the reference low-latency messaging transport, from the Disruptor lineage — Ch. 37), **eRPC** (microsecond RPC on commodity hardware), **Homa** (receiver-driven, connectionless, HOL-free), and the **custom reliable UDP** that many HFT shops build — and the design space they occupy (§65.2), measures them against TCP (§65.3), details each (§65.4), and warns about the trap of reinventing TCP badly (§65.5). It's the "TCP is the wrong shape; here's what fits" chapter.
 
@@ -26,15 +26,15 @@ Every transport makes choices along a few axes; TCP picks one corner, and the lo
    reliability:      unreliable (UDP) ......... reliable (TCP, Aeron, eRPC, Homa, custom)
    ordering:         unordered ......... per-message ......... total stream order (TCP)
    HOL blocking:     none (message) ......................... full (TCP stream)
-   flow control:     none ... sender-driven (TCP) ... receiver-driven (Homa) ... credit (Aeron)
+   congestion ctl:   none ... sender-driven (TCP) ... receiver-scheduled grants (Homa) ... receiver window + NAK (Aeron)
    connection:       connectionless (UDP, Homa) ... session (Aeron) ... connection (TCP, eRPC)
    fan-out:          multicast (Aeron, market data) ... unicast (TCP, eRPC)
-   substrate:        kernel UDP ... kernel-bypass UDP (Aeron) ... DPDK/RDMA (eRPC) ... RDMA (Homa impls)
+   substrate:        kernel UDP ... kernel-bypass UDP (Aeron) ... DPDK (eRPC, Homa/RAMCloud) / verbs UD (eRPC) ... in-kernel IP (the Homa Linux module)
 ```
 
 The key insight: **you rarely want a totally-ordered reliable byte stream (TCP's corner) — you want reliable, framed *messages* with no HOL blocking, flow control that suits your fan-in, and a substrate that matches your latency tier.** The transports:
 
-- **Reliable but message-oriented, no HOL blocking.** Deliver discrete messages reliably; a lost message is retransmitted *without* blocking later independent messages (the opposite of TCP's stream). Aeron and custom reliable-UDP designs live here.
+- **Reliable but message-oriented, no HOL blocking.** Deliver discrete messages reliably; a lost message is retransmitted *without* blocking later independent messages (the opposite of TCP's stream). Homa and gap-tolerant custom reliable-UDP designs live here. Aeron is reliable and *ordered within a stream* — a gap stalls that stream until the immediately NAK'd retransmit lands (no TCP RTO or cwnd ramp) — but isolates streams/sessions from each other, so one stream's loss never blocks another's.
 - **Receiver-driven flow control.** Instead of the sender guessing the rate (TCP), the *receiver* grants credits / schedules when senders may transmit — which handles many-to-one incast (Ch. 64) gracefully because the receiver controls its own inflow. Homa's core idea.
 - **Connectionless or lightweight sessions.** No per-connection handshake/state to set up and tear down (Homa is connectionless; Aeron uses lightweight publications/subscriptions); lower setup latency and better fan-out.
 - **Substrate-matched.** The same transport *idea* can run over kernel UDP (portable, slower), kernel-bypass UDP (Aeron over Onload/DPDK — Ch. 62), or DPDK/RDMA (eRPC — Ch. 63). The transport is the *protocol*; the substrate is *how fast the bytes move*. Fast transport + fast substrate = the state of the art.
@@ -47,9 +47,9 @@ The mental model: **a transport is a set of choices about reliability, ordering,
 
 Compare a purpose-built transport to tuned TCP (Ch. 52) on the metrics that matter for messaging:
 
-- **Short-message latency and the tail.** Send small messages (order-sized, Ch. 53) request-response and one-way; measure the latency *distribution* (Ch. 3). Representative shape (figures pending real runs): a well-implemented transport over a bypass/RDMA substrate delivers **single-digit-microsecond** RPCs (eRPC's headline result) with a *tight tail*, versus tuned kernel TCP's ~tens of µs with a fatter tail (Ch. 52) — and *much* better than mistuned TCP's millisecond tail (the delayed-ACK stall, Ch. 52).
-- **HOL blocking under loss — the decisive test.** Inject a single packet loss into a stream of independent messages and measure the latency of the messages *after* the lost one. TCP: they all stall until the retransmit (a round-trip — the HOL blocking, §65.1). A message-oriented transport: the later messages arrive on time; only the lost one is delayed by its retransmit. This is the single clearest demonstration of why TCP is the wrong shape — reproduce it and the case makes itself.
-- **Incast / many-to-one (Ch. 64).** Have many senders transmit to one receiver simultaneously (the matching-engine fan-in, or a scatter-gather — Ch. 68). TCP's sender-driven control can collapse (incast throughput collapse); a receiver-driven transport (Homa) or credit-based (Aeron) holds up because the receiver paces its own inflow. Measure the goodput and tail under increasing fan-in.
+- **Short-message latency and the tail.** Send small messages (order-sized, Ch. 53) request-response and one-way; measure the latency *distribution* (Ch. 3). Harness: Aeron's `aeron-samples` Ping/Pong (UDP) and EmbeddedPingPong (IPC), `eRPC`'s `apps/latency`, and `sockperf ping-pong --tcp --tcp-nodelay` for the TCP baseline, all with thread pinning (Ch. 42) and HdrHistogram output (Ch. 3). Representative shape (figures pending real runs): a well-implemented transport over a bypass/RDMA substrate delivers **single-digit-microsecond** RPCs (eRPC's headline result) with a *tight tail*, versus tuned kernel TCP's ~tens of µs with a fatter tail (Ch. 52) — and *much* better than mistuned TCP's millisecond tail (the delayed-ACK stall, Ch. 52).
+- **HOL blocking under loss — the decisive test.** Inject a single packet loss (`tc qdisc add dev <if> root netem loss 0.1%`, or an XDP program that drops every N-th packet — Ch. 61) into a stream of independent messages and measure the latency of the messages *after* the lost one. TCP: they all stall until the retransmit (a round-trip — the HOL blocking, §65.1). A message-oriented transport: the later messages arrive on time; only the lost one is delayed by its retransmit. This is the single clearest demonstration of why TCP is the wrong shape — reproduce it and the case makes itself.
+- **Incast / many-to-one (Ch. 64).** Have many senders transmit to one receiver simultaneously (the matching-engine fan-in, or a scatter-gather — Ch. 68; `iperf3 -P` or N `sockperf` clients for TCP, N Aeron publications to one subscription). TCP's sender-driven control can collapse (incast throughput collapse); a receiver-driven transport (Homa) or credit-based (Aeron) holds up because the receiver paces its own inflow. Measure the goodput and tail under increasing fan-in.
 - **Message rate (throughput of small messages).** Measure messages/second for tiny messages — where TCP's per-message overhead and the syscall path (Ch. 41) cap you, and batched/bypass transports (recvmmsg — Ch. 57, or bypass — Ch. 62) sustain far higher rates.
 
 The lessons: purpose-built transports over fast substrates hit microsecond RPCs with tight tails; the HOL-blocking test is the decisive one (TCP stalls a whole stream on one loss, message transports don't); receiver-driven/credit flow control survives incast where TCP collapses; and small-message rate is far higher without TCP's stream/syscall overhead. The numbers matter, but the *shape* mismatch (HOL blocking, incast collapse) is the real argument — measure those, not just the median.
@@ -69,7 +69,7 @@ The lessons: purpose-built transports over fast substrates hit microsecond RPCs 
 
 **eRPC** (Kalia, Kaminsky, Andersen) is a landmark showing that microsecond RPC doesn't require exotic hardware:
 
-- **μs RPC over DPDK/RDMA on commodity NICs.** eRPC achieves single-digit-microsecond RPCs and millions of RPCs/sec/core over DPDK (Ch. 62) or RDMA (Ch. 63) UD (unreliable datagram) transport — on *commodity* NICs, not custom silicon. The result challenged the assumption that low-latency RPC needs specialized hardware or kernel bypass with heavy machinery.
+- **μs RPC over DPDK/RDMA on commodity NICs.** eRPC achieves single-digit-microsecond RPCs and millions of RPCs/sec/core over DPDK (Ch. 62) or RDMA (Ch. 63) UD (unreliable datagram) transport — on *commodity* NICs, not custom silicon. The result challenged the assumption that microsecond RPC needs lossless fabrics, one-sided RDMA or specialized hardware — it uses commodity NICs and plain unreliable datagrams over lossy Ethernet without PFC (still kernel-bypassed, via DPDK or verbs UD).
 - **How it gets there (the design lessons).** Zero-copy, no per-message allocation (Ch. 23–24 — everything pre-allocated), a session-based design that keeps state small and cache-resident (Ch. 7), messages that fit in a cache line / packet where possible, and careful handling of congestion and the common (single-packet) case fast-pathed. It's a masterclass in applying this book's techniques (zero-alloc, cache-aware, batching) to a transport.
 - **Where it fits.** eRPC-style transports suit intra-datacenter request-response (risk checks, service RPCs, scatter-gather — Ch. 68) where you want μs latency without building your own transport. Study its design even if you don't adopt it — it codifies how to build a fast transport.
 
@@ -110,7 +110,7 @@ Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRP
 4. **Custom reliable UDP.** Build a minimal NAK-based reliable UDP with a bounded retransmit ring and no HOL blocking (§65.4.4); test it adversarially (loss, reorder, duplicates, slow receiver — Ch. 40) and observe where a naive design breaks (§65.5).
 5. **Substrate swap.** Run the same transport over kernel UDP vs kernel bypass (Ch. 62); quantify how much of the latency is the transport vs the substrate (§65.2, §65.5).
 
-**Checklist:**
+**Checklist — transport beyond TCP**
 
 - [ ] The transport choice matches the **message shape**: framed messages, **no HOL blocking**, fan-in-appropriate **flow control** — not a byte stream where messages are independent (§65.1, §65.2).
 - [ ] **HOL-blocking behavior is measured** (loss → do later messages stall?); if independent messages block each other, TCP's shape is the problem (§65.3).
@@ -125,13 +125,13 @@ Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRP
 
 - **Aeron** (Real Logic) documentation, design notes, and Martin Thompson's talks — the log/term-buffer architecture, reliable UDP/multicast, IPC unification, and Aeron Cluster (§65.4.1; Ch. 37).
 - **eRPC** — Kalia, Kaminsky, Andersen, "Datacenter RPCs can be General and Fast" (NSDI 2019) — the μs-RPC design on commodity hardware (§65.4.2).
-- **Homa** — Ousterhout et al., "Homa: A Receiver-Driven Low-Latency Transport Protocol" (and the Linux Homa implementation) — receiver-driven, connectionless, priority-based transport (§65.4.3).
+- **Homa** — Montazeri, Li, Alizadeh & Ousterhout, "Homa: A Receiver-Driven Low-Latency Transport Protocol Using Network Priorities" (SIGCOMM 2018); Ousterhout, "A Linux Kernel Implementation of the Homa Transport Protocol" (USENIX ATC 2021) — receiver-driven, connectionless, priority-based transport (§65.4.3).
 - The reliable-multicast/transport literature (PGM/NORM — Ch. 54) and *TCP/IP Illustrated* (Ch. 52) — the baseline and the recovery ideas custom UDP generalizes (§65.4.4).
 - Ch. 37 (Disruptor — Aeron's lineage), Ch. 53 (SBE payloads), Ch. 62/63 (bypass/RDMA substrates), Ch. 54 (reliable multicast recovery), Ch. 52 (TCP baseline), Ch. 64 (incast/lossless fabric).
 
 ## 65.8 Additional Reading
 
-- Talks on Aeron in production trading systems, and the Aeron Cluster / consensus material (Ch. 74) — the full messaging + clustering stack (§65.4.1).
+- Talks on Aeron in production trading systems, and the Aeron Cluster / Raft consensus material (external — the Aeron docs; Ch. 74 covers the single-process deterministic state machine that Aeron Cluster replicates) — the full messaging + clustering stack (§65.4.1).
 - The datacenter-transport research line (Homa, NDP, pFabric, DCTCP — Ch. 64) — receiver-driven flow, priorities, and incast (§65.4.3).
 - **Appendix B** (*Beyond C++*) — Chronicle (off-heap Java messaging) and cross-language transports; Ch. 57 (*Flow Steering*) — getting these transports' packets to the right core; Ch. 64 (*Lossless Ethernet*) — the fabric under RDMA-based transports; **Appendix F** — HOL-blocking / receiver-driven / reliable-UDP glossary; **Appendix G** — the eRPC/Homa/Aeron bibliography.
 

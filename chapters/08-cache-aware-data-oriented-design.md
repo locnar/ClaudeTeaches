@@ -79,7 +79,8 @@ struct LevelHot {              // small, dense, cache-line-friendly
     std::int64_t price;
     std::int64_t total_qty;
     std::uint32_t order_count;
-};                             // ~20 bytes -> 3 per cache line
+};                             // 20 bytes of fields, sizeof == 24 after tail padding (Ch. 9)
+                               //   -> ~2.7 per cache line; 16 B would give 4
 
 struct LevelCold {             // touched only on audit/logging/rare paths
     std::uint64_t last_update_ts;
@@ -233,7 +234,7 @@ When the hot path is a *bulk sweep* — recompute aggregate depth, find best bid
 2. **Find the break-even.** Shrink `N` until the AoS book fits in L3, then L2, then L1. At what working-set size does the AoS/SoA gap disappear? Explain via Ch. 7 (when everything's in L1, layout barely matters — and why that's a benchmarking trap).
 3. **Hot/cold split.** Add several cold fields to a hot struct and write a loop that uses one hot field. Measure. Now split hot/cold into parallel arrays indexed in lockstep and re-measure footprint and MPKI. How much of the SoA win did the simpler split capture?
 4. **Make the point-update pay.** Write the *other* access pattern — a loop that, for random levels, updates `price`, `total_qty`, and `order_count` together. Compare AoS vs full SoA for *this* loop. Which wins now, and why? Reconcile with exercise 1's verdict (§8.5).
-5. **SoA enables SIMD.** Sum `total_qty` over the SoA array at `-O2 -march=native` and read the asm (Ch. 4) — is it vectorized (`ymm`/`vpaddq`)? Now try to get the compiler to vectorize the *AoS* sum. Can it? Why is SoA the enabler (Ch. 29)?
+5. **SoA enables SIMD.** Sum `total_qty` over the SoA array in a `noinline` function taking a runtime `n` (so the compiler cannot vectorize across passes) at `-O3 -march=native` — with GCC 13 use `-O3` or `-O2 -fvect-cost-model=dynamic`, because the `-O2` very-cheap cost model skips reductions with an unknown trip count — and read the asm (Ch. 4): is it vectorized (`ymm`/`vpaddq`)? Now try to get the compiler to vectorize the *AoS* sum. Can it? Why is SoA the enabler (Ch. 29)?
 
 **Checklist — data-oriented layout**
 

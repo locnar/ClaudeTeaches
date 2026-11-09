@@ -50,15 +50,19 @@ Code & content guidelines:
 - **Use modern C++ where it helps, and name the standard + toolchain support.** Prefer
   C++23/26 niceties when they improve clarity or performance — `std::flat_map`/`std::flat_set`
   (cache-friendly ordered containers), `std::print`/`std::println` (`<print>`), `std::expected`
-  (hot-path error handling), `std::mdspan`, `std::span`, `std::bit_cast`. Show the C++17/20
-  fallback where the target toolchain lacks the feature, and note compiler/library availability.
+  (hot-path error handling), `std::mdspan` — all C++23 — and the C++20 `std::span`,
+  `std::bit_cast` and `<bit>` where the toolchain is C++20-capable. Show the C++17/20
+  fallback where the target toolchain lacks the feature, and note compiler/library availability
+  (Appendix H is the matrix).
 
 ## Table of Contents
 
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into twelve Parts with 76 chapters and twelve
 > appendices (A–L); **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below). Do not renumber against this list.
+> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–L)
+> at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
+> because the appendices themselves were written (or re-pointed) against that numbering.
 
 ### Part I — Foundations & Methodology
 1. **The Latency Mindset** — latency vs throughput, tail latency, jitter, the
@@ -322,12 +326,12 @@ Code & content guidelines:
 ### Appendices
 - **Appendix A — ARM / Graviton & Non-x86 Targets** — porting the low-latency toolkit to
   AArch64 (AWS Graviton, Ampere Altra): the ARM memory model (weaker ordering, `LDAR`/`STLR`,
-  `DMB`) vs x86-TSO and what changes for the atomics/seqlock/lock-free chapters (Ch. 29–35);
-  NEON/SVE/SVE2 vs AVX (Ch. 28), cache-line size differences (64 vs 128 bytes) and their
-  effect on `hardware_destructive_interference_size` and false sharing (Ch. 32); timers
-  (`CNTVCT_EL0` vs `rdtsc` — Ch. 16), `WFE`/`YIELD` vs `pause` (Ch. 31), big.LITTLE /
-  heterogeneous cores and SMT differences (Ch. 41); `-mcpu`/`-mtune` tuning (Ch. 21),
-  spec-exec mitigations on ARM (Ch. 5), and where Graviton in the cloud fits a latency-
+  `DMB`) vs x86-TSO and what changes for the atomics/seqlock/lock-free chapters (Ch. 30–36);
+  NEON/SVE/SVE2 vs AVX (Ch. 29), cache-line size differences (64 vs 128 bytes) and their
+  effect on `hardware_destructive_interference_size` and false sharing (Ch. 33); timers
+  (`CNTVCT_EL0` vs `rdtsc` — Ch. 17), `WFE`/`YIELD` vs `pause` (Ch. 32), big.LITTLE /
+  heterogeneous cores and SMT differences (Ch. 43); `-mcpu`/`-mtune` tuning (Ch. 22),
+  spec-exec mitigations on ARM (Ch. 6), and where Graviton in the cloud fits a latency-
   sensitive workload (and where bare-metal colocation still wins).
 - **Appendix B — Beyond C++: Alternative Languages for Low-Latency** — surveying Rust
   (ownership, `unsafe`, no GC, fearless concurrency), C, Zig, and the case against managed
@@ -342,8 +346,8 @@ Code & content guidelines:
   (`cpupower`/governor, IRQ affinity and `irqbalance` off, `tuned` profiles, RPS/XPS, NIC
   ring/coalescing, `sysctl` net/VM, transparent-huge-page mode, `mlockall`); per-process
   (affinity/`taskset`, RT priority, `numactl`); and a verification pass (`cyclictest`, jitter
-  measurement). Each item links to the chapter that explains *why* (consolidates Ch. 5, 14,
-  39–43, 47, 49).
+  measurement). Each item links to the chapter that explains *why* (consolidates Ch. 6, 15, 16,
+  41–46, 51, 55, 57).
 - **Appendix D — Compiler Flag Reference** — a categorized GCC/Clang flag cheat sheet with
   the latency-relevant ones called out: optimization levels (`-O2`/`-O3`/`-Ofast` caveats),
   arch/tuning (`-march`/`-mtune`/`-mcpu`), FP and math (`-ffast-math` hazards, `-fno-math-errno`,
@@ -351,14 +355,14 @@ Code & content guidelines:
   `-fno-omit-frame-pointer` for profiling), inlining/layout (`-finline-limit`,
   `-freorder-blocks-and-partition`, `-falign-*`), LTO/PGO/BOLT, diagnostics (`-Wpadded`,
   `-Wfloat-equal`, `-fopt-info`), and sanitizers; what each costs and when to drop it on the
-  hot path (consolidates Ch. 5, 16, 19–21, 26).
+  hot path, plus the hardening/mitigation flags (consolidates Ch. 6, 17, 20–22, 27, 72).
 - **Appendix E — Latency Numbers Every Trading Developer Should Know** — the
   Norvig/Jeff-Dean "latency numbers" table, refreshed for modern x86-64 server hardware and
   annotated for trading: L1 / L2 / L3 hit, local-DRAM and NUMA-remote-DRAM access, branch
   mispredict, cache-line transfer between cores (HITM), uncontended mutex lock/unlock, a
   null syscall, a context switch, kernel-stack NIC RX vs kernel-bypass RX, and a PCIe
   round-trip — each in ns and in cycles, with how-it-was-measured notes and pointers to the
-  chapter that derives it (ties Ch. 3, 6, 12, 15, 16, 31–32, 39, 44, 49 & 52).
+  chapter that derives it (ties Ch. 3, 7, 13, 16, 17, 32–33, 41, 47, 55 & 62).
 - **Appendix F — Glossary (HFT & Microarchitecture Terms)** — an alphabetized quick
   reference for the acronyms and jargon used throughout, each entry a line or two with a
   pointer to the chapter that develops it: trading & market-structure (tick-to-trade,
@@ -380,7 +384,7 @@ Code & content guidelines:
   blogs (CppCon performance talks, Carl Cook's "When a Microsecond Is an Eternity," the
   Mechanical Sympathy community); and tooling documentation (Google Benchmark, VTune,
   `liburing`, DPDK, bpftrace). Organized to mirror the Parts of the book.
-- **Appendix H — C++23/26 Feature Availability Matrix** — a support table for the
+- **Appendix H — Modern C++ (C++20/23/26) Feature Availability Matrix** — a support table for the
   modern-library/language features the book reaches for (`std::expected`, `std::flat_map`/
   `std::flat_set`, `std::print`, `std::mdspan`, `std::span`, `std::bit_cast`, `<bit>`,
   senders/receivers): first GCC/libstdc++ and Clang/libc++ version each landed in, the
@@ -405,7 +409,7 @@ Code & content guidelines:
   vs. copper vs. microwave/millimeter-wave, exchange access/entitlements/throttles and
   pre-trade-risk mandates, venue-side time distribution (grandmaster/PPS/PTP boundary clocks),
   path diversity, and the latency/cost/regulation trade-offs — the physical constraints the
-  rest of the book optimizes within (ties Ch. 54, 55, 56, 60, 76).
+  rest of the book optimizes within (ties Ch. 54, 55, 58, 60, 76).
 - **Appendix L — Reproducible Benchmark & Measurement Harness** — the reusable
   scaffold behind every measurement in the book: a copy-paste Google Benchmark skeleton
   (`DoNotOptimize`/`ClobberMemory`, fixture setup vs. steady-state split), a tail-latency
@@ -414,7 +418,8 @@ Code & content guidelines:
   method as copy-paste code (consolidates Ch. 1, 3, 4, 17, 46 and Appendices C, E, I).
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices, A–G).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 76
+  chapters and appendices A–L — see Phases 2–3).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
   **STATUS: COMPLETE — front matter (`00-preface.md`) + 76 chapters + 12 appendices (A–L);
@@ -452,14 +457,16 @@ Code & content guidelines:
   A full consistency sweep (title/section numbering, teaser chaining N→N+1, cross-ref range,
   README link resolution, no-hard-wrap) is clean. A PDF build toolchain lives in `tools/book-pdf/`
   (pandoc + tectonic). Remaining work is *revision*: backfill real measured benchmark runs.
-- When generating a chapter, confirm scope against this TOC and keep cross-references
-  to other chapters by number/title.
+- When generating or revising a chapter, confirm scope against `chapters/README.md` (the
+  authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
+  and has no entries for the twelve chapters added in Phase 3) and keep cross-references to
+  other chapters by number/title.
 - Benchmark output blocks in drafts are **representative** for the stated reference
   machine (authoring is on macOS; target is Linux x86-64); code/flags/`perf` commands are
   reproducible. Real measured runs must be backfilled before a chapter is final.
-- Reference machine: the CPU-microarchitecture chapters (Part II, Ch. 7–15) use a single-socket
-  Xeon Gold 6326 (Ice Lake-SP); the NUMA chapter (Ch. 16) uses a **dual-socket 2× Xeon Gold 6326**
-  because NUMA effects need two sockets. Keep the per-chapter machine description consistent with
+- Reference machine: every chapter that shows numbers uses a single-socket Xeon Gold 6326
+  (Ice Lake-SP) — in Part II that is Ch. 7–15 and 17 — except the NUMA chapter (Ch. 16), which
+  uses a **dual-socket 2× Xeon Gold 6326** because NUMA effects need two sockets. Keep the per-chapter machine description consistent with
   these unless a chapter needs otherwise.
   The full **reference toolchain and machine statement** (GCC 14.2 / Clang 18.1, Linux 6.18 LTS,
   `performance` governor with turbo off, ns↔cycles at 2.9 GHz = 0.345 ns/cycle) lives in **Appendix L.3**
@@ -490,15 +497,16 @@ The searchable sub-topics live as numbered sub-bullets under **§N.2 (Mental mod
 **§N.4 (Techniques)**; per-chapter §8 References / §9 Additional Reading are **not** listed in the
 index. Appendices use the same outline at one level (`A.1`, `A.2`, …). A short legend at the top
 of the file states the convention: a **linked** chapter title (`[N. Title](NN-slug.md)`) points at
-a drafted file; a **plain** title is planned but not yet written. Drafting/revision status is tracked
+its file. (Drafting is complete, so the earlier "plain title = planned, not yet written" half of the
+convention is retired; every chapter and appendix is linked.) Drafting/revision status is tracked
 **here in CLAUDE.md** (the Phase 2/3 status block under *Status / Workflow* above), NOT in README.
 
 After generating (or materially revising) any chapter `chapters/NN-slug.md`, always, in the same
 change:
 
 1. **Refresh that chapter's README outline:**
-   - Turn the plain chapter title into a link to its file (`[N. Title](NN-slug.md)`).
-   - Replace the planned outline with one that mirrors the chapter's *actual* sections — the
+   - Keep the chapter title linked to its file (`[N. Title](NN-slug.md)`); a new chapter gets a link.
+   - Replace the outline with one that mirrors the chapter's *actual* sections — the
      `### N.2.x` (Mental model) and `### N.4.x` (Techniques) subsection titles map directly onto
      the README's `N.2.x` / `N.4.x` sub-bullets; keep the `N.1`/`N.3`/`N.5`/`N.6`/`N.7` lines in
      sync with the chapter's real one-line section summaries.
@@ -508,8 +516,7 @@ change:
    block under *Status / Workflow* — counts, Part ranges and the remaining-work note.
 3. **Consistency sweep of the new chapter:** confirm it opens with the Part header +
    Prerequisites/Leads-into blockquote, follows the §1–§9 section structure, and ends with a
-   `*Next: Ch. NN — …*` teaser pointing at the next planned chapter. Also catch up any earlier
-   chapters whose README title is still unlinked (plain) but which now exist on disk.
+   `*Next: Ch. NN — …*` teaser pointing at the next chapter.
 
 Treat this as part of "generating a chapter," not an optional follow-up — a chapter is not done
 until its README outline reflects its real contents and CLAUDE.md's progress line is current.

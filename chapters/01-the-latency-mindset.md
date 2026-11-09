@@ -2,7 +2,7 @@
 
 # Chapter 1 — The Latency Mindset
 
-> **Prerequisites:** Solid C++17/20 and Linux fundamentals. No special hardware or tooling yet — this chapter is about *how to think*, not what to install. The one worked example uses C++23's `<print>` as written (GCC 14+, or Clang 18+ with libc++); GCC 13 / Clang 17 can use the `std::format` fallback in §1.3, and older compilers `printf`/iostreams.
+> **Prerequisites:** Solid C++17/20 and Linux fundamentals. No special hardware or tooling yet — this chapter is about *how to think*, not what to install. If order books, price-time priority and market-data feeds are new to you, read Appendix J (*HFT Market-Structure & Protocol Primer*) first. The one worked example uses C++23's `<print>` as written (GCC 14+, or Clang 18+ with libc++); GCC 13 / Clang 17 can use the `std::format` fallback in §1.3, and older compilers `printf`/iostreams.
 >
 > **Leads into:** Ch. 2 (*Measure First: Profiling & Hardware Performance Counters*) and Ch. 3 (*Micro-benchmarking Done Right*) turn the mindset established here into tools and rigor. Appendix E (*Latency Numbers Every Trading Developer Should Know*) is the quantitative companion to §1.2.3's budget.
 
@@ -90,7 +90,7 @@ The discipline is to treat that end-to-end number as a **budget** and to allocat
 | Wire → NIC → host memory (DMA, kernel bypass) | 0.5–1 µs | Ch. 55, 62, 66 |
 | Feed decode / book update | 100–400 ns | Ch. 25, 53 |
 | Strategy / signal logic | 50–300 ns | Ch. 8–14, 18–21 |
-| Risk checks & order encode | 50–200 ns | Ch. 27, 53, 72 |
+| Risk checks & order encode | 50–200 ns | Ch. 27, 53, 72, 74 |
 | Host memory → NIC → wire | 0.4–0.8 µs | Ch. 55, 62, 66 |
 | **Tick-to-trade total** | **≈ 1–3 µs** | the whole book |
 
@@ -104,7 +104,7 @@ Crucially, **every number in that table is itself a distribution.** The budget m
 
 Let us make the abstract concrete and demonstrate, with running code, *why means lie*. We will generate a latency sample with the characteristic shape of a real hot path — a tight bulk plus a sparse heavy tail — and then look at it two ways: through the mean, and through percentiles.
 
-The sample is synthetic so the chapter is self-contained and reproducible on the macOS authoring machine; the *analysis* is exactly what you would run on a real captured sample. (Capturing the real thing — with a trustworthy clock — is Ch. 17; doing it without coordinated omission is Ch. 3.)
+The sample is synthetic so the chapter is self-contained and runs on any machine with no special hardware; the *analysis* is exactly what you would run on a real captured sample. (Capturing the real thing — with a trustworthy clock — is Ch. 17; doing it without coordinated omission is Ch. 3.)
 
 ```cpp
 // latency_shape.cpp — why the mean lies on a heavy-tailed latency sample.
@@ -118,8 +118,9 @@ The sample is synthetic so the chapter is self-contained and reproducible on the
 #include <vector>
 
 // Returns the value at the given percentile (0..100) of an already-sorted vector,
-// using nearest-rank. For real analysis prefer HdrHistogram (Ch. 3); this is the
-// from-scratch version so the arithmetic is visible.
+// by rounding the fractional index (p/100)*(n-1) (nearest-rank would be
+// ceil(p*n/100)-1; they differ by at most one sample). For real analysis prefer
+// HdrHistogram (Ch. 3); this is the from-scratch version so the arithmetic is visible.
 static double percentile(const std::vector<double>& sorted, double p) {
     if (sorted.empty()) return 0.0;
     const auto n = sorted.size();
@@ -189,7 +190,7 @@ max       :   83.205 us
 fraction of events slower than the mean : 8.62%
 ```
 
-(Numbers above are from one real run on the libc++ toolchain; the exact figures shift a little across standard-library implementations because `lognormal_distribution` is not specified bit-for-bit, but the *shape* — tight bulk, sharp cliff, long max — is the point and is stable.)
+(Numbers above are from one real run with Clang 18 / libc++ 18; the exact figures shift a little across standard-library implementations because `lognormal_distribution` is not specified bit-for-bit, but the *shape* — tight bulk, sharp cliff, long max — is the point and is stable.)
 
 Read that output the way a hot-path engineer reads it:
 
@@ -199,7 +200,7 @@ Read that output the way a hot-path engineer reads it:
 
 This is the entire mindset in one program: **the mean told you the system was fine; the percentiles told you the truth.**
 
-> **C++20 fallback for `<print>`.** `std::println` (`<print>`, P2093) ships in GCC 14+ (libstdc++ 14) and Clang 18+ (libc++ 18; the `stdout`/`FILE*` overloads used here were already in libc++ 17) — see Appendix H — and needs `-std=c++23`. On an older toolchain, replace the `std::println(...)` calls with `std::cout << std::format(...) << '\n';` (`<format>`, C++20, GCC 13+/Clang 14+), or with classic `printf`/iostreams. We use `<print>` throughout the book for *off-hot-path* output and explain in Ch. 71 why formatted I/O never belongs on the hot path itself.
+> **C++20 fallback for `<print>`.** `std::println` (`<print>`, P2093) ships in GCC 14+ (libstdc++ 14) and Clang 18+ (libc++ 18; the `stdout`/`FILE*` overloads used here were already in libc++ 17) — see Appendix H — and needs `-std=c++23`. On an older toolchain, replace the `std::println(...)` calls with `std::cout << std::format(...) << '\n';` (`<format>`, C++20: GCC 13+/libstdc++ 13, or libc++ 17+ — `<format>` was experimental in libc++ 14–16), or with classic `printf`/iostreams. We use `<print>` throughout the book for *off-hot-path* output and explain in Ch. 71 why formatted I/O never belongs on the hot path itself.
 
 ---
 

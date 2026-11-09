@@ -51,7 +51,7 @@ Direction prediction (Ch. 13) answers taken/not-taken; **target** prediction ans
 
 - **Monomorphic** (one target): the BTB nails it every time — prediction ~100%, cost ≈ a direct call. The common, benign case.
 - **Polymorphic** (a few targets, ~2–4): a good indirect predictor can often learn the pattern *if* it correlates with history (e.g. alternating types in a regular order). If the sequence is data-dependent and irregular, mispredicts climb.
-- **Megamorphic** (many targets, interleaved unpredictably): the BTB capacity and the predictor's ability are exceeded; target mispredicts approach worst case. **This is the expensive regime** — and it's the shape of a feed handler dispatching a stream of mixed message types through one `handler->on_message()` site.
+- **Megamorphic** (many targets, interleaved unpredictably): the history-indexed indirect predictor cannot learn a pattern for the target sequence, so it mispredicts at roughly (1 − 1/k) for k uniformly random targets; BTB *capacity* only becomes the limit with hundreds of hot indirect sites. **This is the expensive regime** — and it's the shape of a feed handler dispatching a stream of mixed message types through one `handler->on_message()` site.
 
 A target mispredict costs the same ~15–20-cycle flush as a direction mispredict (Ch. 13.2.2): the front-end speculated down the wrong target's code, the back-end's in-flight work is squashed, refetch and refill. But indirect mispredicts carry an extra tax: each distinct target is *different code*, so a megamorphic site also thrashes the **L1i and I-TLB** (Ch. 12) — many target bodies competing for instruction-cache space — compounding the front-end cost. The signature (§14.3) is therefore high `branch-misses` **localized to indirect branches** (`perf` can break out `BR_MISP_RETIRED.INDIRECT`), often alongside elevated front-end stalls.
 
@@ -63,7 +63,9 @@ A target mispredict costs the same ~15–20-cycle flush as a direction mispredic
 - **It may allocate.** A callable larger than the small-buffer optimization (SBO) capacity (a few pointers — typically capturing more than ~2 pointers' worth of state) is **heap-allocated** on construction. On a hot path that constructs `std::function`s, that's a `malloc` (Ch. 23) — a latency catastrophe. Even when SBO applies, the object is larger and copies are non-trivial.
 - **It blocks inlining and bloats.** Like `virtual`, the call target is opaque; the compiler inlines nothing through it. Worse, each distinct callable type instantiates its own manager/invoker, inflating code size (Ch. 12).
 
-The upshot: **`std::function` in a hot loop is an anti-pattern** (§14.6). It's a fine tool for *setup*, configuration, and cold paths where flexibility matters and the call is rare; on the steady-state hot path, prefer a concrete callable type (a template parameter — Ch. 19), a function pointer (lighter, single indirection, no allocation), `std::variant`+visitor (§14.4.3, closed set, no allocation), or CRTP (§14.4.2, no indirection at all). The same caution applies to other type-erased callbacks (e.g. a hand-rolled `void* + fn-ptr`): the erasure that buys flexibility costs an un-inlinable indirect call.
+The upshot: **`std::function` in a hot loop is an anti-pattern** (§14.6). It's a fine tool for *setup*, configuration, and cold paths where flexibility matters and the call is rare; on the steady-state hot path, prefer a concrete callable type (a template parameter — Ch. 19), a function pointer (lighter, single indirection, no allocation), `std::variant`+visitor (§14.4.3, closed set, no allocation), or CRTP (§14.4.2, no indirection at all). The same caution applies to other type-erased callbacks (e.g. a hand-rolled `void* + fn-ptr`): the erasure that buys flexibility costs an un-inlinable indirect call. The newer standard erasers do not change the dispatch cost but fix the other problems: `std::move_only_function` (C++23, libstdc++ 12+/libc++ 20; `__cpp_lib_move_only_function`) drops the copyability requirement and the empty-check, and `std::function_ref` (C++26, P0792; `__cpp_lib_function_ref`) is a non-owning two-word view — no allocation ever — for passing a callable *down* a call chain; see Appendix H.
+
+**Indirect calls you did not write.** Two more sources of indirect branches sit on most trading hot paths uninvited. First, **PLT stubs**: every call into a shared library — libc, libm, a vendor NIC library — is an indirect `jmp [GOT]` through the procedure-linkage table, and under `-fPIC`'s default *semantic interposition* even calls between functions of the same shared library go through it. `-fno-plt` (call through the GOT directly), `-fno-semantic-interposition`, `-Wl,-Bsymbolic`, or static linking remove them (Ch. 22). Second, **Spectre-v2 mitigations**: code compiled with retpolines (`-mindirect-branch=thunk`) turns every indirect call into a `call`/`ret` trampoline that defeats the indirect predictor by design, and IBRS/eIBRS restrict target speculation across privilege levels (Ch. 6 §6.2.3). Measure both the same way as the rest of this chapter — `br_inst_retired.indirect` tells you how many indirect branches you execute per message; a number far above the dispatch sites you wrote is PLT or thunk traffic.
 
 ---
 
@@ -92,6 +94,15 @@ struct XorH  : IH { std::int64_t handle(std::int64_t x) const noexcept override 
 struct MulH  : IH { std::int64_t handle(std::int64_t x) const noexcept override { return x * 3; } };
 struct ShrH  : IH { std::int64_t handle(std::int64_t x) const noexcept override { return x >> 1; } };
 
+// Opaque factories: constructing AddH in the same function as the call site would let GCC's
+// speculative devirtualization (-fdevirtualize-speculatively, on at -O2) see the dynamic type
+// and inline x + 1, and the std::function's lambda would be constant-folded likewise.
+// noinline hides the type from the call site regardless of compiler version.
+[[gnu::noinline]] std::unique_ptr<IH> make_handler() { return std::make_unique<AddH>(); }
+[[gnu::noinline]] std::function<std::int64_t(std::int64_t)> make_func() {
+    return [](std::int64_t x) { return x + 1; };
+}
+
 // CRTP / static dispatch: the type is known at compile time → inlinable, no indirection.
 template <class Derived> struct Base { std::int64_t handle(std::int64_t x) const noexcept {
     return static_cast<const Derived*>(this)->do_handle(x); } };
@@ -115,7 +126,7 @@ int main(int argc, char** argv) {
     };
 
     if (std::strcmp(mode,"mono")==0) {                       // monomorphic virtual
-        std::unique_ptr<IH> h = std::make_unique<AddH>();
+        std::unique_ptr<IH> h = make_handler();              // opaque: see factory above
         run([&](std::size_t, std::int64_t x){ return h->handle(x); });
     } else if (std::strcmp(mode,"mega")==0) {                // megamorphic virtual
         std::vector<std::unique_ptr<IH>> hs;                 // 4 types, interleaved by data
@@ -123,7 +134,7 @@ int main(int argc, char** argv) {
         hs.emplace_back(new MulH); hs.emplace_back(new ShrH);
         run([&](std::size_t i, std::int64_t x){ return hs[data[i] & 3]->handle(x); });
     } else if (std::strcmp(mode,"func")==0) {                // std::function
-        std::function<std::int64_t(std::int64_t)> f = [](std::int64_t x){ return x + 1; };
+        std::function<std::int64_t(std::int64_t)> f = make_func();   // opaque, see above
         run([&](std::size_t, std::int64_t x){ return f(x); });
     } else {                                                 // CRTP / static
         AddS s; run([&](std::size_t, std::int64_t x){ return s.handle(x); });
@@ -140,15 +151,15 @@ ns / call                   ~0.3 ns        ~0.9 ns        ~1.4 ns        ~3.5 ns
 IPC                          high           good           lower          LOW
 indirect branch-misses       ~0             ~0 (BTB nails) ~0–low         HIGH (~50–75%)
 inlined?                     YES            no             no             no
-notes                     no indirection  predicted     double indir.  BTB exceeded
+notes                     no indirection  predicted     no inlining    unpredictable
 ```
 
 Read it the Ch. 2 / Ch. 13 way:
 
 - **CRTP/static is fastest** because the call is *inlined away* — no indirection, no prediction, and the callee folds into the loop (Ch. 11). This is the "zero-cost abstraction" (Ch. 19) ideal.
 - **Monomorphic virtual is cheap but not free:** the BTB predicts the single target perfectly (`indirect branch-misses ~0`), so the cost is the vtable load + the *lost inlining* of the trivial callee — a real but modest gap vs CRTP.
-- **`std::function` is worse** — double indirection and no inlining — even though its target is also monomorphic here.
-- **Megamorphic virtual is the disaster:** ~4 unpredictably-interleaved targets blow the BTB, `br_misp_retired.indirect` spikes to ~50–75%, IPC craters, and each dispatch eats a flush (Ch. 13.2.2) plus I-cache thrash (Ch. 12). ~10× the CRTP cost, all of it dispatch overhead.
+- **`std::function` is worse** — an empty-check plus an indirect call to the invoker, and no inlining — even though its target is also monomorphic here.
+- **Megamorphic virtual is the disaster:** 4 unpredictably-interleaved targets give the indirect predictor nothing to learn, `br_misp_retired.indirect` spikes to ~50–75%, IPC craters, and each dispatch eats a flush (Ch. 13.2.2) plus I-cache thrash (Ch. 12). ~10× the CRTP cost — most of it dispatch overhead, though note the `mega` column also carries one extra dependent load (`hs[data[i] & 3]` before the vptr load) that `mono` does not.
 
 The fingerprint to recognize: **high `br_misp_retired.indirect` with low IPC on a dispatch-heavy loop** = megamorphic indirect-call bottleneck. That's the signal §14.4 addresses; a clean (monomorphic) indirect predictor means the call is *not* your problem and CRTP-ifying it buys little.
 
@@ -190,7 +201,7 @@ struct AddHandler : Handler<AddHandler> {
 template <class H> std::int64_t run(const H& h, std::int64_t x) { return h.handle(x); }
 ```
 
-This is the **zero-cost abstraction** (Ch. 19) and the right default for hot-path policy/ strategy dispatch when the strategy is chosen at compile time (a templated order-book, a templated feed parser specialized per protocol). Trade-offs: it's compile-time only (you can't choose the type from a config file at runtime), it can increase code size (one instantiation per type — Ch. 12), and it changes interfaces from `Base*` to templates (more compile time, template error messages — Ch. 18). When you genuinely need *runtime* selection, CRTP doesn't apply; use §14.4.1, §14.4.3, or §14.4.4.
+This is the **zero-cost abstraction** (Ch. 19) and the right default for hot-path policy/strategy dispatch when the strategy is chosen at compile time (a templated order-book, a templated feed parser specialized per protocol). Trade-offs: it's compile-time only (you can't choose the type from a config file at runtime), it can increase code size (one instantiation per type — Ch. 12), and it changes interfaces from `Base*` to templates (more compile time, template error messages — Ch. 18). When you genuinely need *runtime* selection, CRTP doesn't apply; use §14.4.1, §14.4.3, or §14.4.4.
 
 ### 14.4.3 `std::variant`/visitor alternatives
 
@@ -218,7 +229,7 @@ The lowest-level dispatch is a `switch` on an integer type tag — and how the c
 - **Jump table.** A `switch` over a *dense* range of integer tags compiles to an **indexed indirect jump** through a table of code addresses — O(1), but it's an *indirect branch* with the same BTB target-prediction problem (§14.2.2). For a dense, megamorphic tag stream it can mispredict as badly as a vtable.
 - **Data lookup (Ch. 13.4.2).** Often best: if each case maps to *data* (a parameter, a small computation) rather than wildly different *code*, index a **data table** and avoid the indirect jump entirely — no target prediction needed. This is the Ch. 13 lookup-table idea applied to dispatch.
 
-The decision: dispatching to genuinely different *code* over a closed set → prefer `variant`/visit (§14.4.3) or a `switch` (let the compiler pick the lowering — verify in §14.5); dispatching to different *data*/parameters → a data lookup table beats them all by removing the indirect branch. And recall Ch. 13's other lever: if the tag stream is unpredictable, **sort/ batch by type** upstream so even a `switch`/vtable sees long monomorphic runs the predictor loves — turning a megamorphic site monomorphic without changing the dispatch mechanism.
+The decision: dispatching to genuinely different *code* over a closed set → prefer `variant`/visit (§14.4.3) or a `switch` (let the compiler pick the lowering — verify in §14.5); dispatching to different *data*/parameters → a data lookup table beats them all by removing the indirect branch. And recall Ch. 13's other lever: if the tag stream is unpredictable, **sort/batch by type** upstream so even a `switch`/vtable sees long monomorphic runs the predictor loves — turning a megamorphic site monomorphic without changing the dispatch mechanism.
 
 ---
 
@@ -302,7 +313,7 @@ The verification habit: **for a hot dispatch site, disassemble and check whether
 
 - Intel, *64 and IA-32 Architectures Optimization Reference Manual* — indirect-branch prediction (the BTB), indirect-call mispredict cost, and the `BR_MISP_RETIRED.INDIRECT` event used in §14.3.
 - A. Fog, *The Microarchitecture of Intel, AMD and VIA CPUs* and *Optimizing C++* — the cost of virtual calls, indirect-branch prediction behavior, and devirtualization in practice.
-- The Itanium C++ ABI (vtable layout) and the GCC/Clang documentation on devirtualization, `-fdevirtualize`, `-fwhole-program`/LTO, and `__attribute__((final))` semantics — the machinery of §14.4.1.
+- The Itanium C++ ABI (vtable layout) and the GCC/Clang documentation on devirtualization, `-fdevirtualize`/`-fdevirtualize-speculatively`/`-fdevirtualize-at-ltrans`, `-fwhole-program`/LTO, the C++11 `final` specifier, and Clang's `-fwhole-program-vtables`/`-fstrict-vtable-pointers` — the machinery of §14.4.1.
 - ISO C++ — `std::variant`/`std::visit`, `std::function` and the small-buffer optimization; cppreference for the type-erasure and visitation semantics of §14.2.3 and §14.4.3.
 - A. Yasin, *"A Top-Down Method for Performance Analysis"* (Ch. 2) — isolating Bad Speculation to indirect branches before redesigning dispatch.
 

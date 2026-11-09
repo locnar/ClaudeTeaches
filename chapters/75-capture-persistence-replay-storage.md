@@ -12,7 +12,7 @@
 
 Chapter 74 built a deterministic state machine: feed it the same input sequence and it produces the same outputs, bit-for-bit. That property is worthless unless you **captured the input sequence** — every inbound tick, every timer fire, every fill, every config change, in order, with accurate timestamps. Capture is what turns "deterministic in principle" into "replayable in practice," and it serves three demanding masters at once. **Debugging:** a strategy did something wrong at 09:31:42.000123456 — with a capture you *replay the exact session* through the core (Ch. 74) and watch it happen in a debugger, deterministically, as many times as you like, instead of guessing from logs. **Research/backtesting:** a new strategy must be evaluated against *real* historical market data — the capture *is* the backtest input, and replaying it through the strategy gives a faithful "what would we have done" (far better than synthetic or vendor-aggregated data, which lacks the exact timing and microstructure). **Compliance:** regulators require firms to reconstruct what they did and why — a complete, time-stamped, tamper-evident record of market data in and orders out is a legal obligation, not a nicety.
 
-The hard constraint is the one this whole book has hammered: **capture must not slow the hot path.** You are recording *everything* — a market-data feed at open can be millions of messages per second (Ch. 53 microbursts) — and writing it to disk, which is *milliseconds*-slow and syscall-heavy (Ch. 47), the antithesis of a microsecond hot path. If capture writes to disk synchronously on the path that trades, you've destroyed the latency you spent the book building. So capture obeys the exact same discipline as logging (Ch. 71): **the hot path does the cheap part — copy the raw bytes into a lock-free buffer and move on; a separate writer thread/process does the expensive part — getting bytes to disk — off the path.** Capture is zero-overhead logging's bigger sibling: same producer→ring→async-writer shape, but lossless (you can drop a log line; you cannot drop a tick you're legally required to keep) and higher-volume.
+The hard constraint is the one this whole book has hammered: **capture must not slow the hot path.** You are recording *everything* — a market-data feed at open can be millions of messages per second (Ch. 53 microbursts) — and writing it to disk, which costs microseconds per syscall and tens of microseconds to milliseconds when the device or writeback stalls — syscall-heavy (Ch. 47) and with exactly the fat tail Ch. 1 warns about — the antithesis of a microsecond hot path. If capture writes to disk synchronously on the path that trades, you've destroyed the latency you spent the book building. So capture obeys the exact same discipline as logging (Ch. 71): **the hot path does the cheap part — copy the raw bytes into a lock-free buffer and move on; a separate writer thread/process does the expensive part — getting bytes to disk — off the path.** Capture is zero-overhead logging's bigger sibling: same producer→ring→async-writer shape, but lossless (you can drop a log line; you cannot drop a tick you're legally required to keep) and higher-volume.
 
 And it must be **lossless and gap-free**: a capture with holes is useless for replay (the deterministic core diverges at the gap), wrong for backtesting (missing data = wrong P&L), and non-compliant (an incomplete record). This is in tension with "don't slow the hot path" — under a microburst, the writer may not keep up, and you must *never* block the hot path to wait for it, yet you must *not* lose data. Resolving that tension (large buffers, fast storage, back-pressure that doesn't reach the hot path, and capturing *off the NIC* below the application — §75.4.1) is the engineering of this chapter. It covers the append-only/WAL journal model (§75.2), measuring capture throughput and hot-path impact (§75.3), the lossless-capture / binary-format / off-path-write / gap-free / replay techniques (§75.4), and the ways storage stalls and drops bleed into the hot path (§75.5).
 
@@ -32,8 +32,8 @@ Capture is an **append-only journal**: events are written once, in arrival order
 
 The model's properties:
 
-- **Append-only / write-ahead.** Events are appended in order; nothing is updated in place. Append-only writes are *sequential* (the fastest disk access pattern, even on NVMe — §75.4.3), recovery-friendly (replay the log forward), and naturally tamper-evident (you detect edits to an append-only signed log). This is the write-ahead-log idea ("persist before you act", generalized): the journal *is* the durable truth.
-- **Each record is self-describing and sequenced:** a monotonic **sequence number** (for gap detection — §75.4.4), an accurate **timestamp** (NIC hardware / PTP — Ch. 55, 58, so the time is *wire-accurate*, not when software happened to look), the **raw bytes** (captured losslessly — §75.4.1), and enough framing to parse it back. Compact binary (§75.4.2), not text.
+- **Append-only / write-ahead.** Events are appended in order; nothing is updated in place. Append-only writes are *sequential* (the fastest disk access pattern, even on NVMe — §75.4.3), recovery-friendly (replay the log forward), and tamper-evident *if* you hash-chain the records and periodically sign the chain head (or store to WORM media) — append-only is the precondition; the chain/signature is what detects an edit. This is the write-ahead-log idea ("persist before you act", generalized): the journal *is* the durable truth.
+- **Each record is self-describing and sequenced:** a monotonic **sequence number** assigned by the Ch. 74 shell — the *sequencer* — to every input before the core sees it (for gap detection — §75.4.4; it is this sequenced stream, not the raw sources, that replay feeds back), an accurate **timestamp** (NIC hardware / PTP — Ch. 55, 58, so the time is *wire-accurate*, not when software happened to look), the **raw bytes** (captured losslessly — §75.4.1), and enough framing to parse it back. Compact binary (§75.4.2), not text.
 - **Time-indexed.** The journal is indexed by time (and sequence) so replay and research can seek to "09:31:42" or "sequence N" without scanning from the start — periodic index checkpoints / snapshots (§75.4.4) bound the seek and the replay-from cost (ties Ch. 74's snapshot-bounded recovery).
 - **Two capture altitudes.** You can capture at the **line/wire level** (every packet off the NIC, below the application — §75.4.1, the most faithful and the compliance gold standard) and/or at the **application level** (normalized events, the inputs the Ch. 74 core actually consumed). Wire capture replays the *whole stack*; application capture replays the *core*. Production systems often do both: wire for compliance/forensics, application for fast deterministic core replay.
 
@@ -50,10 +50,10 @@ Two things to measure, and they pull against each other: **hot-path impact** (ca
 | Capture approach | Hot-path cost per event | Lossless under burst? | Verdict |
 |---|---|---|---|
 | **Synchronous write to disk** (`write()`/`fwrite` on the path) | **µs–ms** (syscall + I/O stall, Ch. 47) | only if disk keeps up (it won't) | ✗ destroys the hot path |
-| **App-level: copy raw bytes + seq to SPSC ring** (§75.4.1-2) | **~5–20 ns** (a few stores, Ch. 34) | depends on ring size + writer speed (§75.4.3) | ✓ the in-process capture path |
+| **App-level: copy raw bytes + seq to SPSC ring** (§75.4.1-2) | **~5–20 ns** for a ≤64 B message record (a few stores, Ch. 34); ~50–150 ns for a full MTU-sized datagram — the copy scales with bytes, so capture per message where the hot path pays it | depends on ring size + writer speed (§75.4.3) | ✓ the in-process capture path |
 | **Off-NIC / off-host capture** (tap, mirror port, SmartNIC — §75.4.1, Ch. 70) | **~0 on the application** (capture happens *below/beside* the app) | depends on the capture appliance | ✓ best for compliance/lossless wire capture |
 
-**Sustained throughput & loss** — drive the worst burst and measure (a) whether the ring ever fills (→ drop or back-pressure, §75.5), (b) the writer's sustained MB/s vs the burst's peak, (c) end-to-end durability latency (event → durably on disk). Representative shape (NVMe, io_uring, batched — figures pending real runs): sequential batched writes sustain **multiple GB/s**, enough for a full normalized feed, *if* the ring is large enough to absorb the burst peak above the disk's sustained rate while the writer catches up in the troughs.
+**Sustained throughput & loss** — drive the worst burst and measure (a) whether the ring ever fills (→ drop or back-pressure, §75.5), (b) the writer's sustained MB/s vs the burst's peak, (c) end-to-end durability latency (event → durably on disk). Harness: a producer thread enqueueing fixed-size records at a controlled burst rate into the SPSC ring, the §75.4.3 writer draining with `io_uring` (`io_uring_prep_write_fixed`, registered buffers, one `io_uring_submit` per batch) onto an `O_DIRECT`, preallocated file; record the ring's high-water mark and drop count per burst, the writer's MB/s from the completion offsets, and event → completion latency (`rdtscp` in the record vs the CQE time) as a histogram (Ch. 3); `iostat -x 1` for device queue depth. Representative shape (NVMe, Linux 6.x, liburing 2.5, io_uring, batched — figures pending real runs): sequential batched writes sustain **multiple GB/s**, enough for a full normalized feed, *if* the ring is large enough to absorb the burst peak above the disk's sustained rate while the writer catches up in the troughs.
 
 The lessons:
 
@@ -68,17 +68,63 @@ The lessons:
 
 The most faithful capture is **at the wire**, below the application, with hardware timestamps:
 
-- **Capture off the NIC / off the host.** A network **tap**, a switch **mirror/SPAN port**, NIC **RX capture**, or a **SmartNIC/DPU** (Ch. 70) records every packet *without* the application doing the writing — so capture can't be slowed by, or lost to, application back-pressure (§75.3). This is the compliance gold standard: a complete, independent record of exactly what was on the wire. Tools/stacks: kernel-bypass capture (Ch. 62), `AF_PACKET`/`PF_RING`, or a dedicated capture appliance.
+- **Capture off the NIC / off the host.** A network **tap**, a switch **mirror/SPAN port**, NIC **RX capture**, or a **SmartNIC/DPU** (Ch. 70) records every packet *without* the application doing the writing — so capture can't be slowed by, or lost to, application back-pressure (§75.3). This is the compliance gold standard: a complete, independent record of exactly what was on the wire. Tools/stacks: kernel-bypass capture (Ch. 62), `AF_PACKET`/`PF_RING`, or a dedicated capture appliance. Formats: `pcapng` (per-packet nanosecond timestamps, interface and drop-count blocks — the interchange format every tool reads; `pcap` only microseconds unless the nanosecond link type is used) for the wire capture, and the chapter's own compact journal (§75.4.2) for the normalized stream; `tcpdump -j adapter_unsynced`/`--time-stamp-precision=nano` and `tshark` read the hardware stamps back.
 - **Nanosecond hardware timestamps (Ch. 55, 58).** Stamp each packet with the **NIC hardware timestamp**, disciplined by **PTP** (Ch. 58) so times are accurate *and comparable across hosts* (wire-to-wire, tick-to-trade reconstruction — Ch. 58). Software timestamps (when the app looked) are both less accurate and perturbed by load; hardware/PTP timestamps are the truth you replay and audit against.
 - **Lossless = capture below the lossy layer.** The reason wire capture is lossless is that it sits *below* the place drops happen (application back-pressure, ring-full). Combined with adequate NIC RX rings and capture buffers (Ch. 53's microburst tuning), off-NIC capture records the burst the application itself might shed.
-- **Capture the redundant feeds (Ch. 53).** Record *both* A/B lines — replay and gap-recovery (§75.4.4) need both, and a gap on one line is filled from the other.
+- **Capture the redundant feeds (Ch. 53 §53.2.3, Ch. 54).** Record *both* A/B lines — replay and gap-recovery (§75.4.4) need both, and a gap on one line is filled from the other.
 
 ### 75.4.2 Compact binary log formats
 
 The record format is **compact binary**, for the same reasons and with the same machinery as Ch. 71's binary logging:
 
-- **Raw bytes + minimal framing.** Store the original wire bytes (lossless — you can re-decode with any future parser, important for compliance and research) plus a small fixed header: sequence number, hardware timestamp (Ch. 58), length, source/feed ID, and a record type. No text, no per-field formatting on the path (Ch. 71) — just the bytes and a header.
-- **Self-describing and versioned.** The format carries a version and enough framing to parse it back years later (compliance retention is long). Pair the journal with the *schema*/decoder (and the strategy/config versions that consumed it — Ch. 73.4.2) so a replay is fully reproducible.
+- **Raw bytes + minimal framing.** Store the original wire bytes (lossless — you can re-decode with any future parser, important for compliance and research) plus a small fixed header: sequence number, hardware timestamp (Ch. 58), length, source/feed ID, and a record type. No text, no per-field formatting on the path (Ch. 71) — just the bytes and a header. The record and the writer that gets it to disk (§75.4.3), in one listing:
+
+```cpp
+// journal_writer.cpp — the capture writer: drain the SPSC ring into 4 KiB-aligned batches, submit with io_uring to an
+// O_DIRECT, preallocated file. Build: g++ -O2 -std=c++20 journal_writer.cpp -o journal_writer -luring   (liburing 2.5)
+#include <atomic>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <liburing.h>
+
+struct RecHdr { std::uint64_t seq, hw_ts_ns; std::uint32_t len; std::uint16_t source; std::uint8_t type, ver; };   // 24 B
+struct Ring { static constexpr std::size_t N = 1 << 24; alignas(64) std::atomic<std::uint64_t> head{0}; alignas(64) std::atomic<std::uint64_t> tail{0}; alignas(64) std::uint8_t buf[N]; };
+extern Ring* g_capture;                                           // the hot path appends RecHdr + raw bytes (Ch. 71's producer)
+
+int main(int argc, char** argv) {
+    constexpr std::size_t kBlock = 4096, kBatch = 1 << 20, kDepth = 8;    // O_DIRECT: addr, offset AND length multiples of
+    int fd = open(argc > 1 ? argv[1] : "capture.bin", O_WRONLY | O_CREAT | O_DIRECT, 0600);   //  the logical block (BLKSSZGET)
+    posix_fallocate(fd, 0, 64ull << 30);                          // preallocate: no block allocation on the write path
+    io_uring ring; io_uring_queue_init(kDepth, &ring, 0);
+    io_uring_register_files(&ring, &fd, 1);
+    void* batches[kDepth]; iovec iov[kDepth];
+    for (auto i = 0u; i < kDepth; ++i) { batches[i] = std::aligned_alloc(kBlock, kBatch); iov[i] = {batches[i], kBatch}; }
+    io_uring_register_buffers(&ring, iov, kDepth);                // registered buffers: pinned once, no per-write map
+    std::uint64_t file_off = 0, inflight = 0; unsigned slot = 0;
+    for (;;) {
+        io_uring_cqe* cqe;                                            // reap first: durability watermark = highest contiguous
+        while (inflight && io_uring_peek_cqe(&ring, &cqe) == 0) {    //   completed offset (publish it for §75.4.4 readers)
+            if (cqe->res < 0) { /* count + alert: a failed write is a gap in the journal (§75.5) */ }
+            io_uring_cqe_seen(&ring, cqe); --inflight;
+        }
+        std::uint64_t t = g_capture->tail.load(std::memory_order_relaxed), h = g_capture->head.load(std::memory_order_acquire);
+        if (h - t < kBatch || inflight == kDepth) { usleep(50); continue; }   // or a time-based flush for a quiet feed
+        std::size_t n = kBatch & ~(kBlock - 1);                      // whole blocks only; a partial tail block waits for the next batch
+        for (std::size_t i = 0; i < n; ++i) static_cast<std::uint8_t*>(batches[slot])[i] = g_capture->buf[(t + i) & (Ring::N - 1)];
+        g_capture->tail.store(t + n, std::memory_order_release);    // ring space is free once COPIED, not once durable
+        io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+        io_uring_prep_write_fixed(sqe, 0, batches[slot], unsigned(n), file_off, int(slot));
+        io_uring_sqe_set_flags(sqe, IOSQE_FIXED_FILE); io_uring_sqe_set_data64(sqe, file_off);
+        io_uring_submit(&ring); file_off += n; ++inflight; slot = (slot + 1) % kDepth;
+    }
+}
+```
+
+- **Self-describing and versioned.** The format carries a version and enough framing to parse it back years later (compliance retention is long). Pair the journal with the *schema*/decoder (and the strategy/config versions that consumed it — §73.4.2) so a replay is fully reproducible.
 - **Compact = cheaper everywhere.** Binary records are small → less disk bandwidth (helps the writer keep up, §75.4.3), less storage (retention is expensive at feed volumes), faster to read back for replay. This is the Ch. 71 win at capture scale.
 - **Optionally compress off-path.** Compression (for retention) happens on the writer/archival side (off the hot path), never on the capture path — and often *after* the capture is durable, during compaction (§75.4.4).
 
@@ -88,7 +134,7 @@ The writer's job: drain the ring and get bytes durably to storage **fast enough 
 
 - **A dedicated writer thread/process** on a housekeeping core (Ch. 42), draining the capture ring (Ch. 34), **batched** (Ch. 37 — accumulate many records, write them in one large sequential I/O to amortize syscall and seek cost). Batching is what turns millions of tiny events into a few big efficient writes.
 - **io_uring (Ch. 48)** for asynchronous, batched, low-overhead submission — submit many writes without a syscall each, reap completions asynchronously. The modern way to sustain capture bandwidth without the writer stalling.
-- **`O_DIRECT`** to bypass the page cache for large sequential capture writes — avoids double-buffering and page-cache pressure that would evict the hot path's working set (Ch. 7/15); the capture stream is write-once, so caching it is pure pollution. (Mind `O_DIRECT`'s alignment requirements.)
+- **`O_DIRECT`** to bypass the page cache for large sequential capture writes — avoids double-buffering: the extra copy into the page cache streams through the shared L3 (Ch. 7, 56) and burns memory bandwidth the hot cores share, and dirty-page writeback throttling can stall the writer; `O_DIRECT` DMA's straight from the aligned user buffer. The capture stream is write-once, so caching it is pure pollution. `O_DIRECT` requires buffer address, file offset *and* length to be multiples of the device's logical block size (512 B / 4 KiB — `ioctl(BLKSSZGET)` or `statx`), hence the 4 KiB-aligned batch buffers in the §75.4.2 listing; `posix_fallocate` the file up front so no block allocation happens on the write path, and choose the sync mode deliberately — `O_DSYNC` per batch for a durability watermark, or periodic `fdatasync` with the watermark published to readers (§75.4.4).
 - **NVMe / fast sequential storage.** Append-only writes are *sequential* (§75.2), the pattern NVMe and SSDs handle best (GB/s, §75.3). Provision storage for the *peak sustained* feed rate, and put capture on its own device so it never contends with anything the hot path touches (§75.5).
 - **Durability vs latency of the journal.** Decide how durable each record must be before you "trust" it: an `fsync`/write barrier per batch (durable but slower) vs relying on the OS/device to flush (faster, small loss window on power failure). For compliance you need durability; tune the batch/fsync granularity so durability latency is bounded *without* the writer falling behind. None of this is on the hot path — but it bounds how much capture sits in volatile buffers at any instant.
 
@@ -96,7 +142,7 @@ The writer's job: drain the ring and get bytes durably to storage **fast enough 
 
 A capture is only useful if it's **complete and ordered** — and manageable over long retention:
 
-- **Sequence every record; detect gaps.** A monotonic sequence number per record (and the *feed's own* sequence numbers from the protocol — Ch. 53) lets you *prove* the capture is gap-free, and detect/locate any hole. On a gap in one feed line, fill from the redundant line (Ch. 53 A/B, §75.4.1); an unrecoverable gap is flagged (replay can't be trusted across it — §75.5).
+- **Sequence every record; detect gaps.** A monotonic sequence number per record (and the *feed's own* sequence numbers from the protocol — Ch. 53) lets you *prove* the capture is gap-free, and detect/locate any hole. On a gap in one feed line, fill from the redundant line (Ch. 53–54 A/B and recovery, §75.4.1); an unrecoverable gap is flagged (replay can't be trusted across it — §75.5).
 - **Gap-free persistence under burst.** The lossless guarantee (§75.3) plus sequence-checking: size buffers for the burst, capture off-NIC where possible, and *verify* no sequence holes in the persisted journal. "We think it's complete" isn't good enough for replay or compliance — *check* the sequence.
 - **Time-indexing and snapshots.** Periodically write an **index checkpoint** and a **state snapshot** (the Ch. 74 core's state at a sequence point) so replay/seek starts from a recent checkpoint, not session-start — bounding both seek time and replay-from cost (ties Ch. 74.3's snapshot-bounded recovery).
 - **Retention and compaction.** Feed-volume capture is large; manage it with tiered retention (hot recent capture on fast NVMe, older archived/compressed off to cheaper storage), compaction (merge/compress sealed journal segments off-path), and a retention policy that meets the *compliance* minimum (often years) while controlling cost. Compaction runs off the hot path and off the capture device.
@@ -152,7 +198,7 @@ Capture's payoff is replaying it through the deterministic core (Ch. 74) — for
 - Talks and write-ups on market-data capture, packet capture at line rate, and trading-system journaling — lossless capture and replay in production (§75.4).
 - The event-sourcing / log-as-source-of-truth literature (Kafka, the "turning the database inside out" line of thinking) adapted to a low-latency capture journal (§75.2).
 - Ch. 76 (*Production Profiling & Case Study*) — deterministic replay + latency-regression gates in CI, the direct consumer of capture; Ch. 74 (*Process Topology / State Machine*) — what replay runs through; Ch. 58 (*PTP*) — the timestamps; Ch. 48 (*io_uring*) — the write path; Ch. 71 (*Logging*) — the sibling off-path writer.
-- **Appendix E** — disk/`fsync`/NVMe latency numbers (why capture can't be synchronous); **Appendix F** — WAL/journal/capture/replay glossary.
+- **Appendix E** — the syscall and page-fault rows (the floor under why capture can't be synchronous; NVMe write ~10–30 µs and `fdatasync` ~20–100 µs are measured in §75.3); **Appendix F** — WAL/journal/capture/replay glossary.
 
 ---
 
