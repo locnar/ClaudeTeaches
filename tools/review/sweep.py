@@ -5,6 +5,8 @@ D = "chapters"
 files = sorted(os.listdir(D))
 chap = [f for f in files if re.match(r"^\d{2}-.*\.md$", f) and not f.startswith("00-")]
 apps = [f for f in files if f.startswith("appendix-")]
+MAXCH = max(int(f[:2]) for f in chap)            # highest chapter number on disk
+LASTAPP = max(f.split("-")[1] for f in apps)     # highest appendix letter on disk
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 def lines_outside_fences(path):
@@ -57,15 +59,15 @@ for f in chap:
     if not mt: issues[f].append(f"no Next teaser at end: {tail[:80]!r}")
     else:
         nxt=mt.group(1)
-        if nxt.isdigit() and int(nxt)!=n+1 and n!=76: issues[f].append(f"teaser points to {nxt}, expected {n+1}")
-        if n==76 and nxt!="A": issues[f].append(f"ch76 teaser -> {nxt}")
+        if nxt.isdigit() and int(nxt)!=n+1 and n!=MAXCH: issues[f].append(f"teaser points to {nxt}, expected {n+1}")
+        if n==MAXCH and nxt!="A": issues[f].append(f"last chapter teaser -> {nxt}, expected Appendix A")
     # cross refs out of range
     for r in re.findall(r"\bCh(?:\.|apter)\s*(\d+)", text):
-        if int(r)<1 or int(r)>76: issues[f].append(f"cross-ref Ch. {r} out of range")
+        if int(r)<1 or int(r)>MAXCH: issues[f].append(f"cross-ref Ch. {r} out of range")
     for r in re.findall(r"§\s*(\d+)\.", text):
-        if int(r)<1 or int(r)>76: issues[f].append(f"cross-ref §{r} out of range")
+        if int(r)<1 or int(r)>MAXCH: issues[f].append(f"cross-ref §{r} out of range")
     for r in re.findall(r"Appendix\s+([A-Z])\b", text):
-        if r>"L": issues[f].append(f"Appendix {r} out of range")
+        if r>LASTAPP: issues[f].append(f"Appendix {r} out of range")
     # self-reference check: "Ch. N" where N == own number used as if other
     # hard-wrapped lines? (lines of prose < 100 chars ending mid-sentence) skip
     # reference-machine
@@ -84,9 +86,9 @@ for f in apps:
     nums=[int(s) for c,s,t in secs]
     if nums!=list(range(1,len(nums)+1)): issues[f].append(f"section numbering gap: {nums}")
     for r in re.findall(r"\bCh(?:\.|apter)\s*(\d+)", text):
-        if int(r)<1 or int(r)>76: issues[f].append(f"cross-ref Ch. {r} out of range")
+        if int(r)<1 or int(r)>MAXCH: issues[f].append(f"cross-ref Ch. {r} out of range")
     tail=[l for _,l in ls if l.strip()][-1] if ls else ""
-    if "Next:" not in tail and L!="L": issues[f].append(f"no Next teaser: {tail[:80]!r}")
+    if "Next:" not in tail and L!=LASTAPP: issues[f].append(f"no Next teaser: {tail[:80]!r}")
     sections[L]=[(int(s),t) for c,s,t in secs]
     titles[L]=m.group(2).strip() if m else None
 
