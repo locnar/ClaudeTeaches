@@ -122,12 +122,12 @@ long sum(const int* a, unsigned long n) {
 }
 ```
 
-With vectorization disabled (`-O2 -fno-vectorize -fno-unroll-loops`, to see the bare loop), Clang emits this — verified output, lightly annotated:
+With vectorization disabled (`-O2 -fno-vectorize -fno-unroll-loops`, to see the bare loop), Clang emits this — verified output (Clang 18), lightly annotated, with the compiler's `.LBB0_n` labels renamed:
 
 ```asm
 sum(int const*, unsigned long):
         test    rsi, rsi              ; n == 0 ?         (rsi = arg2 = n)
-        je      .done                 ;   if so, skip the loop
+        je      .n_is_zero            ;   if so, skip the loop
         xor     ecx, ecx              ; i = 0
         xor     eax, eax              ; s = 0           (eax/rax = return value)
 .loop:
@@ -136,8 +136,10 @@ sum(int const*, unsigned long):
         inc     rcx                   ; ++i
         cmp     rsi, rcx              ; i == n ?
         jne     .loop                 ;   if not, loop
-.done:
         ret
+.n_is_zero:
+        xor     eax, eax              ; s = 0 for the empty range: the zeroing is DUPLICATED here
+        ret                           ;   (jumping to a shared `ret` would return an uninitialised rax)
 ```
 
 Everything you need to read a loop is here. The **loop body is the block between the label (`.loop`) and the conditional jump back to it**. Count what's in it: one load (`movsxd` — and note it *sign-extends*, because `int` is 32-bit but `s` is 64-bit, a detail with real codegen consequences), one `add`, the index increment, the compare, the branch. Five instructions per element, a single dependent `add` chain. The `[rdi + 4*rcx]` is x86's scaled-index addressing: base pointer + index×4 (the `int` size), computing `&a[i]` for free inside the load. This is what a clean, scalar, non-vectorized reduction looks like — your reference point for spotting when something is *wrong* (an unexpected `call` in the body, a `div`, a spill `mov [rsp+...]`).
@@ -189,7 +191,7 @@ Two high-value diffs:
   abs_branchless(int):
           mov     eax, edi
           neg     eax              ; eax = -x
-          cmovs   eax, edi         ; if x was negative (sign flag), keep -x; else x
+          cmovs   eax, edi         ; SF set by neg <=> -x < 0 <=> x > 0: take x (edi) back; else keep -x
           ret
   ```
 

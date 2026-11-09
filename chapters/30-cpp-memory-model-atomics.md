@@ -60,6 +60,17 @@ The cost of an atomic depends on (1) the **memory order** (barriers emitted) and
 
 std::atomic<std::uint64_t> g{0};
 
+// The memory order MUST be a compile-time constant. GCC's __atomic builtins (which std::atomic
+// inlines to) map any run-time memory_order to seq_cst, so `g.store(i, order)` with a variable
+// `order` emits one xchg for all three modes and measures nothing (verified: GCC 13 -O2).
+template <std::memory_order O>
+double store_loop(long N) {
+    auto t0 = std::chrono::steady_clock::now();
+    for (long i = 0; i < N; ++i) g.store(i, O);            // uncontended store, this thread only
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count() / (double)N;
+}
+
 int main(int argc, char** argv) {
     const char* mode = argc > 1 ? argv[1] : "seqcst";
     constexpr long N = 200'000'000;
@@ -78,14 +89,10 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    auto order = !std::strcmp(mode,"relaxed") ? std::memory_order_relaxed
-               : !std::strcmp(mode,"release") ? std::memory_order_release
-               : std::memory_order_seq_cst;
-    auto t0 = std::chrono::steady_clock::now();
-    for (long i = 0; i < N; ++i) g.store(i, order);        // uncontended store, this thread only
-    auto t1 = std::chrono::steady_clock::now();
-    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
-    std::printf("%-8s %.3f ns/store\n", mode, ns/N);
+    double ns = !std::strcmp(mode,"relaxed") ? store_loop<std::memory_order_relaxed>(N)   // dispatch ONCE,
+              : !std::strcmp(mode,"release") ? store_loop<std::memory_order_release>(N)   // outside the loop
+              :                                store_loop<std::memory_order_seq_cst>(N);
+    std::printf("%-8s %.3f ns/store\n", mode, ns);
     return 0;
 }
 ```

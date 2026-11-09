@@ -83,12 +83,15 @@ int main() {
     // (2) context switch: two threads ping-pong via futex (each exchange = 2 switches)
     std::atomic<int> turn{0};
     auto t2 = std::chrono::steady_clock::now();
+    // FUTEX_WAIT(&turn, v) sleeps only if *turn == v, checked atomically in the kernel (else EAGAIN).
+    // Pass the value the loop condition OBSERVED: re-reading turn for the argument opens a window in
+    // which the peer's store+WAKE lands between the two loads -> both threads sleep forever (lost wakeup).
     std::thread other([&]{ for (long i = 0; i < N; ++i) {
-        while (turn.load() != 1) futex(&turn, FUTEX_WAIT, turn.load());  // sleep until our turn
-        turn.store(0); futex(&turn, FUTEX_WAKE, 1); } });                // wake the other (switch)
+        for (int v; (v = turn.load()) != 1; ) futex(&turn, FUTEX_WAIT, v);  // sleep until our turn
+        turn.store(0); futex(&turn, FUTEX_WAKE, 1); } });                  // wake the other (switch)
     for (long i = 0; i < N; ++i) {
         turn.store(1); futex(&turn, FUTEX_WAKE, 1);
-        while (turn.load() != 0) futex(&turn, FUTEX_WAIT, turn.load());
+        for (int v; (v = turn.load()) != 0; ) futex(&turn, FUTEX_WAIT, v);
     }
     other.join();
     auto t3 = std::chrono::steady_clock::now();

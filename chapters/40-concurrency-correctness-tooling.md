@@ -43,11 +43,12 @@ The demonstration: take a deliberately-buggy lock-free queue (missing the acquir
 #include <cstdio>
 #include <cstdint>
 #include <thread>
-#include <vector>
+#include <array>
 
 template <class T, std::size_t CAP>
 class BadRing {
-    std::vector<T> buf_{CAP};
+    static_assert((CAP & (CAP - 1)) == 0, "power of two");
+    std::array<T, CAP> buf_{};   // NOT std::vector<T>{CAP}: that is a one-element initializer list (UB on every push)
     std::atomic<std::size_t> head_{0}, tail_{0};
 public:
     bool push(const T& v) {

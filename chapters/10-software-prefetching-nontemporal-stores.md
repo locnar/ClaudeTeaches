@@ -169,7 +169,7 @@ The rules from §10.2.3, operationally: write **full cache lines, sequentially**
 
 Prefetch and non-temporal stores are **hints** the compiler can drop or alter, and the *locality hint* must map to the instruction you intended — so verify with the asm (Ch. 4).
 
-**Prefetch hints → the right instruction** (verified, Clang `--target=x86_64-linux-gnu -O2 -march=x86-64-v3`):
+**Prefetch hints → the right instruction** (verified, GCC 13 and Clang 18, `-O2 -march=x86-64-v3` with and without `-mprfchw` — the psABI x86-64-v3 level does *not* include PRFCHW):
 
 ```cpp
 __builtin_prefetch(p, 0, 3);   // read,  high locality
@@ -177,12 +177,16 @@ __builtin_prefetch(p, 0, 0);   // read,  no  locality (NTA)
 __builtin_prefetch(p, 1, 1);   // write intent
 ```
 ```asm
+; -O2 -march=x86-64-v3                (PRFCHW not in the v3 level)
         prefetcht0   byte ptr [rdi]    ; locality 3  -> into all levels
         prefetchnta  byte ptr [rdi]    ; locality 0  -> non-temporal, minimal pollution
-        prefetchw    byte ptr [rdi]    ; rw=1        -> fetch for write (needs PRFCHW; -mprfchw)
+        prefetcht2   byte ptr [rdi]    ; rw=1        -> SILENTLY demoted to a READ prefetch at the
+                                       ;                requested locality (1 -> t2); no RFO saving
+; -O2 -march=x86-64-v3 -mprfchw       (or -march=native on a PRFCHW part: Intel Broadwell+, all AMD)
+        prefetchw    byte ptr [rdi]    ; rw=1        -> fetch for write (line arrives in E/M state)
 ```
 
-The thing to *check*: that locality `0` actually became `prefetchnta` (not `prefetcht0`) when you wanted touch-once semantics, and that a write-intent prefetch became `prefetchw` (it requires the `PRFCHW` ISA bit — without the right `-march`/`-mprfchw`, the compiler may silently emit a plain `prefetcht0`, costing you the read-for-ownership saving). The hint you wrote and the instruction you got are not always the same — confirm it.
+The thing to *check*: that locality `0` actually became `prefetchnta` (not `prefetcht0`) when you wanted touch-once semantics, and that a write-intent prefetch became `prefetchw` (it requires the `PRFCHW` ISA bit — without `-mprfchw` or a `-march` that implies it, both GCC and Clang silently emit a *read* prefetch at the requested locality, `prefetcht0/1/2`, costing you the read-for-ownership saving). The hint you wrote and the instruction you got are not always the same — confirm it.
 
 **Non-temporal stores → `movnt*`** (verified; GCC 13 and Clang 17, `-O2 -march=x86-64-v3`). `__builtin_nontemporal_store` is a **Clang-only** builtin — GCC has no equivalent, so the portable spelling on the book's default toolchain is the `<immintrin.h>` streaming intrinsics, which both compilers accept:
 

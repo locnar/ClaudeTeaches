@@ -222,8 +222,9 @@ process(Msg const&, unsigned int, long):        ; hot body in .text
         mov     eax, dword ptr [rdi]            ; m.type
         cmp     eax, esi                        ; m.type != expected ?
         jne     .Lcold                          ; rare → jump OUT of the hot stream
-        mov     rax, qword ptr [rdi + 8]        ; hot fall-through: m.px
-        imul    rax, qword ptr [rdi + 16]       ;   * m.qty   (sign-extended qty elided)
+        movsxd  rax, dword ptr [rdi + 16]       ; hot fall-through: m.qty, sign-extended 32->64
+        imul    rax, qword ptr [rdi + 8]        ;   * m.px   (qty is int32 — a qword load here would
+                                                ;    multiply in the 4 bytes of tail padding too)
         add     rax, rdx                        ;   + acc
         ret                                     ; hot path: contiguous, no cold bytes
 .Lcold:                                         ; emitted into .text.unlikely (cold region)
