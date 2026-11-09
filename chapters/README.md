@@ -73,7 +73,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 ### [5. Debugging Low-Latency & Optimized Code](05-debugging-low-latency-optimized-code.md)
 - 5.1 Why it matters: you can't `printf` your way out of a nanosecond bug
 - 5.2 Mental model: optimized code, the observer effect, and reproduce-then-debug
-- 5.3 Measure it: reproducing and capturing the bug
+- 5.3 Measure it: debugging an `-O2` binary with gdb and `rr`, and what debug info costs
 - 5.4 Techniques
   - 5.4.1 Debugging optimized and LTO builds
   - 5.4.2 Record/replay, reverse debugging, and core-dump analysis
@@ -650,13 +650,13 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ### [52. Advanced TCP Internals & Tuning](52-advanced-tcp-internals-tuning.md)
 - 52.1 Why it matters: TCP's defaults optimize for the wrong thing
-- 52.2 Mental model: the send path, Nagle, delayed ACK, and congestion control
-- 52.3 Measure it: the delayed-ACK stall, cold start, and offload latency
+- 52.2 Mental model: the send path, the ACK clock, and congestion control
+- 52.3 Measure it: the connection's internal state across a burst and an idle gap
 - 52.4 Techniques
-  - 52.4.1 Killing the stalls: NODELAY, QUICKACK, and warming
+  - 52.4.1 Send-path internals: autocorking, the ACK clock, the cold window, pacing
   - 52.4.2 Offloads, congestion control, and buffer tuning
   - 52.4.3 Bypassing the stack where TCP itself is the tax
-- 52.5 Pitfalls & anti-patterns: the 40ms stall and offload latency
+- 52.5 Pitfalls & anti-patterns: autocorking, spurious recovery and offload latency
 - 52.6 Exercises & checklist
 
 ## Part IX — Market Data, NIC & Fabric
@@ -674,7 +674,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 53.4 Techniques
   - 53.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing
   - 53.4.2 Scatter/gather and zero-copy receive paths
-  - 53.4.3 A/B line arbitration; sequence-gap detection and recovery
+  - 53.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 54)
   - 53.4.4 Tuning RX ring sizes, managing UDP reordering in software ring buffers, detecting hardware packet drops
 - 53.5 Verify the codegen: parse loop
 - 53.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 72)*

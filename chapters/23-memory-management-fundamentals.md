@@ -128,13 +128,7 @@ The two hot-path-safe ways to get memory, in order of preference:
 
 ### 23.4.2 Pre-faulting pages
 
-Allocating memory isn't enough — until each page is *touched*, the first hot-path access **page-faults** (§23.2, Ch. 15). Pre-faulting moves that fault to startup:
-
-- **Touch every page during warm-up.** After allocating (or `mmap`ing) a region, write one byte per page (stride by page size, 4 KB or the huge-page size — Ch. 15) *before* the hot path runs, so the kernel wires up all the physical frames during setup. This is the difference between the §23.3 heap tail and the flat reuse line: the reuse buffer was faulted once and never again.
-- **`mlock`/`mlockall` to keep pages resident (Ch. 26).** Touching a page maps it; `mlock`/`mlockall(MCL_CURRENT|MCL_FUTURE)` *pins* it so the kernel can't reclaim/swap it back out — guaranteeing no **major fault** (the millisecond catastrophe) ever hits the hot path. On a latency box this is standard (disable swap too — Appendix C).
-- **`MAP_POPULATE` / pre-faulting `mmap` (Ch. 26).** `mmap(..., MAP_POPULATE, ...)` pre-faults the mapping at map time; combined with huge pages (Ch. 15) and `mlock`, you get a region that's fully resident and TLB-friendly before the first message.
-- **First-touch on the right thread/NUMA node (Ch. 16).** Pre-faulting decides *placement* — the page lands on the node of the touching thread (Ch. 16's first-touch). Pre-fault each thread's hot memory *from that thread*, pinned to its node, so warming and NUMA-locality happen together. A coarse mistake here strands a whole region remote.
-- **This is part of warming (Ch. 46).** Pre-faulting sits alongside cache/TLB/branch-predictor warming: the first real message must hit memory that's allocated, faulted, resident, and local. Pre-faulting handles the "faulted + resident" part; Ch. 46 is the full warm-up discipline.
+Allocating memory isn't enough — until each page is *touched*, the first hot-path access **page-faults** (§23.2, Ch. 15). Pre-faulting moves that fault to startup: after allocating (or `mmap`ing) a region, write one byte per page (stride by page size, 4 KB or the huge-page size — Ch. 15) *before* the hot path runs, so the kernel wires up every physical frame during setup — and do it **from the thread that will use the memory, pinned to its NUMA node**, because first-touch decides placement (Ch. 16) and a coarse mistake strands a whole region remote. This is the difference between the §23.3 heap tail and the flat reuse line: the reuse buffer was faulted once and never again. The knobs that make the faulted state *stick* — `MAP_POPULATE`, `mlock`/`mlockall(MCL_CURRENT|MCL_FUTURE)` and `RLIMIT_MEMLOCK`, `madvise`, huge-page backing, swap off — live where the mappings do, in **Ch. 26 §26.4.2**; the warm-up schedule this belongs to is Ch. 46.
 
 ## 23.5 Pitfalls & anti-patterns: hidden allocations; minor/major faults
 

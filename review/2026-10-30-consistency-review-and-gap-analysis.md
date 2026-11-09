@@ -349,6 +349,78 @@ none added — three new entries were worded so the keyword heuristic does not m
 **Status (2026-11-09):** the Ch. 21/22 row is fixed (work-queue item P1-6 — `21:7` now reads "Ch. 22 … closes
 **Part III**"; see the P1-6 note at the end of §3). The duplication rows above are content work and remain open.
 
+**Status (2026-11-09): fixed** (work-queue item P2-1, branch `work/item-12-duplication-placement`) — every
+remaining row above is resolved; decisions, edits and leftovers per row:
+
+- **Ch. 51 ↔ Ch. 52 — decision: split by owner, no merge.** Ch. 51 keeps the socket knobs (`TCP_NODELAY`/`TCP_QUICKACK`,
+  buffers, `tcp_slow_start_after_idle`, multicast) and the single 40 ms measurement (P1-1's `nodelay.cpp`, `51:52-116`).
+  Ch. 52 was rewritten as the internals chapter and no longer re-teaches Nagle/delayed-ACK, the 40 ms table,
+  NODELAY/QUICKACK/warming or their pitfalls: `52:11-15` (framing), `52:19-37` (§52.2 — autocorking, which
+  `TCP_NODELAY` does *not* disable; the delayed-ACK timer internals `ato`/pingpong/quickack counter and therefore
+  *why* `TCP_QUICKACK` is not sticky, per-route `quickack`; cwnd/`initcwnd`/idle restart and the CUBIC-vs-BBR
+  difference; SACK/RACK-TLP and the 200 ms `TCP_RTO_MIN` with per-route `rto_min`; pacing; offloads; autotuning;
+  `TCP_INFO`), `52:41-140` (§52.3 — the Nagle table replaced by a one-line pointer to §51.3 and a compiled, run
+  `TCP_INFO` harness `tcpinfo.cpp` whose output shows `ato`=40 000 µs, CUBIC's cwnd reset after a 1 s idle and
+  BBR's exemption), `52:142-150` (§52.4.1 renamed "Send-path internals: autocorking, the ACK clock, the cold window,
+  pacing"), `52:169-180` (§52.5 renamed; the Nagle and QUICKACK-sticky pitfalls replaced by autocorking/`rto_min`
+  pitfalls), `52:182-199` (exercise 1 → `TCP_INFO`; checklist). Ch. 51's pointer and teaser updated (`51:196`,
+  `51:201`). README §52.2/§52.3/§52.4.1/§52.5 lines refreshed. Rationale: the finding rows (part 2, Ch. 52 rows at
+  `780`/`796`) showed Ch. 52 *does* have distinct material (cwnd, offloads, `TCP_NOTSENT_LOWAT`, userspace TCP) once
+  the Nagle half is removed, so option (a) resolves the row without a 75-chapter stub or a merge.
+- **Ch. 53 §53.2.3/§53.4.3 ↔ Ch. 54 — Ch. 54 owns recovery.** `53:49` ("Gap recovery is Ch. 54's subject"),
+  `53:50`, `53:172` (heading now "…sequence-gap detection (recovery → Ch. 54)"), `53:178` (the retransmission/snapshot
+  and reorder-window-timeout bullets collapsed into one hand-off bullet), `53:179`, `53:258` (checklist). Ch. 54
+  `54:72` now references §53.4.3 for the arbitration mechanics instead of restating them. README §53.4.3 refreshed.
+- **Ch. 53 §53.2.4 ↔ §53.4.4 — §53.4.4 sole owner.** `53:54` is now one mechanism-only paragraph (ring overrun as a
+  burst-rate vs drain-rate race; reorder vs loss and the bounded window) pointing at §53.4.4 for the checklist and
+  Ch. 54 for what follows a gap; §53.4.4 unchanged.
+- **Ch. 55 §55.4.1 ↔ Ch. 57 — pointer.** `55:69-74`: the NIC-side mechanism ("what the card exposes") plus
+  "what you do with them is Ch. 57". Heading kept so README/numbering do not move; README §55.2 title left as is
+  (it still describes §55.2's content).
+- **Ch. 55 §55.4.3 ↔ Ch. 62 §62.4.4 — §62.4.4 sole owner.** `55:86-91`: the Onload/ef_vi/libexanic mechanics and the
+  transparent-vs-explicit decision removed; what stays is the stack↔NIC coupling (what the card must expose) and that
+  this chapter's features still apply under bypass. Ch. 52 §52.4.3's Onload bullet (`52:163`) is a one-liner pointing
+  at §62.4.2/§62.4.4; Ch. 62 §62.2's option list left as the owner's own summary.
+- **Ch. 12 §12.4.4 ↔ Ch. 22 §22.4.3 — why in 12, mechanics in 22.** `12:219-224`: rationale paragraph, the
+  linker-ordering bullet (unique to 12) and a new "re-check the front-end counters afterwards" bullet; the
+  PGO/AutoFDO/BOLT recipe, flags and pipeline order remain only in `22:113-120`.
+- **Ch. 23 §23.4.2 ↔ Ch. 26 §26.4.2 — 26 owns the knobs.** `23:129-131`: one paragraph (allocating ≠ faulting;
+  touch every page from the owning thread on its NUMA node) with a pointer to §26.4.2 for `MAP_POPULATE`,
+  `mlock`/`RLIMIT_MEMLOCK`, `madvise`, huge pages. Ch. 26 unchanged (the §26.2 cost restatement the book-wide row
+  mentions is a two-sentence recap and was left).
+- **Ch. 75 §75.4.5 ↔ Ch. 76 §76.4.2–4.3 — one paragraph in 75.** `75:104-106`: what the capture side owes its
+  consumers (seek by time/sequence, replay clock, two labelled altitudes, completeness) with pointers to §76.4.1–3;
+  the naive-backtest caveat now lives only in Ch. 76 (`76:90` cites §76.4.2 instead of Ch. 75.4.5; `76:82`'s
+  "two altitudes (Ch. 75.4.5)" pointer stays valid).
+- **Ch. 50 §50.3 ↔ Ch. 34 — the Ch. 34 ring, instantiated.** `50:51-127`: `ipc.cpp` now `#include`s
+  `spsc_ring.hpp` (Ch. 34 §34.3's `SpscRing<T, CAP>` verbatim) and placement-news it into the `MAP_SHARED` segment
+  instead of carrying a second ring; the harness also pins both processes (`sched_setaffinity`), pre-faults with
+  `MAP_POPULATE` before construction, drops the UB `memset` over atomics, labels the figure as inverse throughput and
+  reports ~7-12 ns to match §34.3 (fixing the part-2 rows at `50:53/58/85/121/126` as a by-product, and the fenced
+  `Ch.32/33/22/25` refs). `50:129-137` (§50.4.1) defers the layout rules to §34.4.2; exercise 1 (`50:165`) adds the
+  one-way-latency variant. The "offsets not pointers" restatements in Ch. 26 §26.4.1/§26.5 (part-1 row `653`) were
+  left — that is a Ch. 26 edit outside this pair.
+- **Ch. 44 before Ch. 45 — decision: reword, no swap.** The cycle was real but shallow (one prerequisite line and
+  one past-tense sentence; Ch. 44 needs only a pinned core, Ch. 42, and Ch. 45 never depended on Ch. 44), so a file
+  swap would renumber two chapters and every cross-reference for a nit. Edits: `44:5` (prerequisites now Ch. 42–43,
+  with an explicit note that Ch. 45/Appendix C follow and are not needed first), `44:7` (Ch. 45 moved to Leads-into),
+  `44:13` (past tense removed), `44:143` (teaser); `45:5` (Ch. 44 added as prerequisite), `45:17` and `45:7`
+  (arc now Ch. 41–44 / 42–44), `45:152` and `46:17`, `46:190` (Ch. 41–45); `43:7` (Leads-into names Ch. 44, as its
+  teaser already did — part-2 row `464`). No renumbering; README and CLAUDE.md untouched.
+- **Ch. 5 in Part I — decision: keep, make self-contained.** A move renumbers 71 chapters. `05:5` (prerequisites
+  blockquote now states the chapter is self-contained), `05:31-134` (§5.3 rebuilt: `optbug.cpp`, a tick-rounding
+  function whose intermediates are `<optimized out>`; the real gdb session showing one variable as a DWARF
+  expression and the other rewritten into `price - price % tick`; an `rr` record/replay/`reverse-step` walkthrough
+  with rr's PMU, single-core and shared-memory limits — part-1 row `143`; a measured table of `-g`, `-gsplit-dwarf`,
+  `objcopy --only-keep-debug`/`strip`/`--add-gnu-debuglink` and `-fno-omit-frame-pointer` costs, with `cmp` of the
+  `.text` dumps showing `-g` is codegen-neutral), `05:140`, `05:146` (§5.4.1/§5.4.2 point at the session),
+  `05:176-177` (exercises 1–2). The listing builds with g++ 13.3 and clang++ 18.1; sizes and `.text` identity were
+  measured, run-time cost of frame pointers is stated as representative. README §5.3 line refreshed.
+- **Checks:** `sweep.py` — 76 chapters / 12 appendices, teaser chain intact, README outline: no new mismatches (the
+  60 pre-existing "§N.7 References not in README outline" rows are unchanged); `stale_crossrefs.py` — 157 STALE rows
+  vs 159 on `main` (a fenced `Ch.33` row in Ch. 50 and a `Ch. 31` row in Ch. 55 §55.4.1 disappeared with the
+  rewritten text; none added).
+
 ---
 
 ## 9. Coverage, verification statistics and what remains
