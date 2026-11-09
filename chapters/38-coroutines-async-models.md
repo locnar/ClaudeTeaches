@@ -52,22 +52,28 @@ The model: **a coroutine suspends/resumes with its cross-suspend state in a fram
 Two things to measure: the **suspend/resume cost** (the per-`co_await` overhead) and — the critical one — **whether the frame was heap-allocated or elided (HALO)**. The allocation question dominates: an elided coroutine is fast, an allocating one has the Ch. 23 tail.
 
 ```cpp
-// coro.cpp — measure coroutine frame allocation (HALO or not) and resume cost.
-// Build: g++ -O2 -std=c++20 -fcoroutines coro.cpp -o coro   (clang: -std=c++20)
-//   Detect allocation: override operator new to count; or run under a malloc-counting tool.
+// coro.cpp — measure coroutine frame allocation (HALO or not) and suspend/resume cost.
+// Build: g++ -O2 -std=c++20 coro.cpp -o coro      |   clang++ -O2 -std=c++20 coro.cpp -o coro
+//   Detect allocation: operator new is replaced below to count calls.
 // Run pinned:  taskset -c 2 ./coro
 #include <coroutine>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <new>
 
 std::atomic<long> g_allocs{0};
-void* operator new(std::size_t n) { g_allocs.fetch_add(1, std::memory_order_relaxed); return std::malloc(n); }
+void* operator new(std::size_t n) {
+    g_allocs.fetch_add(1, std::memory_order_relaxed);
+    if (void* p = std::malloc(n ? n : 1)) return p;
+    throw std::bad_alloc{};
+}
 void  operator delete(void* p) noexcept { std::free(p); }
 void  operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
-// A minimal eager task that returns a value (no real async — measuring frame cost).
+// (1) A minimal eager task that returns a value (no suspend — measuring FRAME cost).
 struct Task {
     struct promise_type {
         std::int64_t value;
@@ -80,36 +86,68 @@ struct Task {
     std::coroutine_handle<promise_type> h;
     std::int64_t get() { auto v = h.promise().value; h.destroy(); return v; }
 };
-
 Task add(std::int64_t a, std::int64_t b) { co_return a + b; }   // does THIS allocate a frame?
+
+// (2) A lazy ticker that suspends on every step — measuring SUSPEND/RESUME cost (one frame, N resumes).
+struct Ticker {
+    struct promise_type {
+        std::int64_t current = 0;
+        Ticker get_return_object() { return Ticker{std::coroutine_handle<promise_type>::from_promise(*this)}; }
+        std::suspend_always initial_suspend() noexcept { return {}; }
+        std::suspend_always final_suspend() noexcept { return {}; }
+        std::suspend_always yield_value(std::int64_t v) noexcept { current = v; return {}; }
+        void return_void() {}
+        void unhandled_exception() {}
+    };
+    std::coroutine_handle<promise_type> h;
+    ~Ticker() { if (h) h.destroy(); }
+};
+Ticker ticks(long n) { for (long i = 0; i < n; ++i) co_yield i; }
 
 int main() {
     constexpr long N = 10'000'000;
+    // --- (1) frame cost: create + run + destroy one coroutine per iteration
     long allocs_before = g_allocs.load();
     auto t0 = std::chrono::steady_clock::now();
     std::int64_t sink = 0;
-    for (long i = 0; i < N; ++i) sink += add(i, 1).get();        // create+run+destroy a coroutine
+    for (long i = 0; i < N; ++i) {
+        std::int64_t a = i;
+        asm volatile("" : "+r"(a));                 // opaque input: the loop cannot be folded to a constant
+        sink += add(a, 1).get();                    // create+run+destroy a coroutine
+        asm volatile("" :: "r"(sink) : "memory");   // the result is used (Appendix L)
+    }
     auto t1 = std::chrono::steady_clock::now();
     long allocs = g_allocs.load() - allocs_before;
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
-    std::printf("sink=%lld  %.2f ns/coro  allocs=%ld (%.3f per call)\n",
+    std::printf("create/run/destroy: sink=%lld  %.2f ns/coro  allocs=%ld (%.3f per call)\n",
                 (long long)sink, ns/N, allocs, (double)allocs/N);
+
+    // --- (2) resume cost: one frame, N suspend/resume round trips through the handle
+    allocs_before = g_allocs.load();
+    Ticker tk = ticks(N);
+    t0 = std::chrono::steady_clock::now();
+    for (long i = 0; i < N; ++i) { tk.h.resume(); sink += tk.h.promise().current; }
+    t1 = std::chrono::steady_clock::now();
+    asm volatile("" :: "r"(sink) : "memory");
+    ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
+    std::printf("suspend/resume:     sink=%lld  %.2f ns/resume  allocs=%ld for the whole run\n",
+                (long long)sink, ns/N, g_allocs.load() - allocs_before);
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2`, pinned (illustrative; *whether HALO fires* is compiler-dependent — only Clang implements it, GCC always allocates — and under Clang version/flag/inlining-dependent):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), Clang 18.1 vs GCC 13.3 / glibc 2.39, `-O2 -std=c++20`, Linux 6.x, pinned (illustrative; *whether HALO fires* is compiler-dependent — only Clang implements it, GCC always allocates — and under Clang version/flag/inlining-dependent). The harness feeds the coroutine an opaque input and sinks its result: without those barriers Clang folds the elided version's entire loop into one constant and prints 0.00 ns.
 
 ```
-   scenario                                  ns/coro     allocs/call    note
-   HALO fires (frame elided to stack)        ~2-5 ns     0.000          zero-overhead — the goal
-   HALO does NOT fire (frame heap-allocated) ~60-120 ns  1.000          a MALLOC per coroutine (Ch. 23)!
-   suspend/resume (real await, elided)       ~5-15 ns    0              the per-co_await overhead
+   scenario                                         ns/coro      allocs/call    note
+   HALO fires (frame elided to stack) — Clang       ~1-3 ns      0.000          zero-overhead — the goal
+   HALO does NOT fire (frame heap-allocated) — GCC  ~12-30 ns    1.000          a malloc+free per coroutine (Ch. 23): warm tcache here, the full tail in production
+   suspend/resume through the handle (Ticker)       ~1-2 ns      0 per resume   the per-co_await overhead: an indirect call + frame state save/restore
 
-   the difference is ENTIRELY whether the compiler elided the frame allocation.
+   the difference between the first two rows is ENTIRELY whether the compiler elided the frame allocation.
 ```
 
-Read it: the *same* coroutine is **~2-5 ns (elided) or ~60-120 ns + a malloc (not elided)** — a 20×+ difference, and the not-elided case drags in the full allocation tail of Ch. 23 (the `allocs/call = 1.000` is the smoking gun). Whether HALO fires depends on inlining and provable lifetime (§38.2) — small, leaf-ish, locally-awaited coroutines elide; coroutines whose handle escapes (stored, passed to an event loop, type-erased) generally *don't*. **The decisive measurement for any hot-path coroutine is `allocs/call`** — instrument `operator new` (as here) and confirm it's **0**. If it's 1, the coroutine allocates per invocation and is unfit for the hot path until you eliminate the allocation (force inlining, custom-allocate the frame via `promise_type::operator new` from a pool — Ch. 24, or don't use a coroutine there). The resume-cost row shows the *intrinsic* suspend/resume overhead (~5-15 ns even when elided) — small, but non-zero, so a coroutine isn't free even at best. The guidance the numbers dictate: **coroutines are zero-overhead-ish *only when the frame is elided*; verify allocation, and route per-invocation-allocating coroutines off the hot path** (where I/O-wait dwarfs the overhead anyway).
+Read it: the *same* coroutine is **~1-3 ns (elided) or ~12-30 ns + a malloc/free (not elided)** — a ~10× difference even with glibc's tcache fast path warm, and the not-elided case drags in the full allocation tail of Ch. 23 the moment the allocator is *not* warm (the `allocs/call = 1.000` is the smoking gun). Whether HALO fires depends on inlining and provable lifetime (§38.2) — small, leaf-ish, locally-awaited coroutines elide; coroutines whose handle escapes (stored, passed to an event loop, type-erased) generally *don't*. **The decisive measurement for any hot-path coroutine is `allocs/call`** — instrument `operator new` (as here) and confirm it's **0**. If it's 1, the coroutine allocates per invocation and is unfit for the hot path until you eliminate the allocation (force inlining, custom-allocate the frame via `promise_type::operator new` from a pool — Ch. 24, or don't use a coroutine there). The resume-cost row shows the *intrinsic* suspend/resume overhead (~1-2 ns per round trip through `h.resume()` — an indirect call plus the frame's state save/restore, GCC and Clang alike) — small, but non-zero, so a coroutine isn't free even at best. The guidance the numbers dictate: **coroutines are zero-overhead-ish *only when the frame is elided*; verify allocation, and route per-invocation-allocating coroutines off the hot path** (where I/O-wait dwarfs the overhead anyway).
 
 ## 38.4 Techniques
 
@@ -169,7 +207,7 @@ Practical points:
 - [ ] **Lifetime/cancellation** is handled — no dangling `coroutine_handle`, no double-destroy, no references-into-temporaries dangling across `co_await` (Ch. 72).
 - [ ] I used **stackless C++20 coroutines** (small frames) for high connection counts (not stackful fibers' KB stacks) where memory scales.
 - [ ] Production uses a **vetted framework** (`asio`/`libcoro`/`folly::coro`/senders-receivers) — not a hand-rolled scheduler.
-- [ ] The intrinsic **suspend/resume overhead** (~5-15 ns even elided) is acceptable for where it's used (I/O-wait dominates) — measured, not assumed free.
+- [ ] The intrinsic **suspend/resume overhead** (~1-2 ns per resume) is acceptable for where it's used (I/O-wait dominates) — measured, not assumed free.
 
 ## 38.7 References
 

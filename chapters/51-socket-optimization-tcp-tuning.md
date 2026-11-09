@@ -44,47 +44,86 @@ The model: **TCP defaults optimize bandwidth/fairness, not latency — `TCP_NODE
 
 ## 51.3 Measure it: `TCP_NODELAY` on/off RTT
 
-The headline measurement — the difference one `setsockopt` makes. Round-trip a small message with `TCP_NODELAY` **off** (default, Nagle on) vs **on**, especially in the Nagle+delayed-ACK interaction (small request, small response, no pipelining).
+The headline measurement — the difference one `setsockopt` makes. Round-trip a small message with `TCP_NODELAY` **off** (default, Nagle on) vs **on**. One protocol detail decides whether you see anything: Nagle only holds a small segment while *unacknowledged* data is outstanding. In a strict ping-pong — one `write` per request, one `read` for the reply — the reply carries the ACK, nothing is unacked when the next request is written, and Nagle never fires. The stall needs **write-write-read**: a request sent as *two* small writes (a header, then a body — the way most framing code naturally does it). The first goes out at once; the second is held by Nagle until the first is ACKed; the receiver, holding a partial request with nothing to reply, *delays* that ACK until its timer fires (`TCP_DELACK_MIN`, 40 ms on Linux). The harness below is a complete loopback client/server and runs all three cases:
 
 ```cpp
-// nodelay.cpp — small-message TCP round-trip: TCP_NODELAY off vs on.
+// nodelay.cpp — small-message TCP request/response over loopback: Nagle on vs TCP_NODELAY.
 // Build: g++ -O2 -std=c++20 nodelay.cpp -o nodelay
-// Run:  ./nodelay server &  ;  ./nodelay client 127.0.0.1 [nodelay]
-#include <cstdio>
-#include <cstdint>
-#include <cstring>
-#include <vector>
+// Run:   ./nodelay            (Nagle on, request written as header+body = TWO small writes)
+//        ./nodelay nodelay    (TCP_NODELAY on the client, same two writes)
+//        ./nodelay onewrite   (Nagle on, request in ONE write — the stall needs write-write-read)
 #include <algorithm>
 #include <chrono>
-#include <sys/socket.h>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
-// ... socket setup elided ...
-// KEY line on BOTH ends:
-//   int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));   // <-- omit to see Nagle
-// Client: for N: t0=now; write(fd,req,len); read(fd,rep,len); t1=now; record. (small len, e.g. 16 bytes)
+
+static void xfer(ssize_t (*op)(int, void*, size_t), int fd, void* p, size_t n) {   // full read/write
+    for (size_t done = 0; done < n;) { ssize_t k = op(fd, (char*)p + done, n - done); if (k <= 0) _exit(1); done += size_t(k); }
+}
+static ssize_t rd(int fd, void* p, size_t n) { return read(fd, p, n); }
+static ssize_t wr(int fd, void* p, size_t n) { return write(fd, p, n); }
 
 int main(int argc, char** argv) {
-    // illustrative; the measured contrast is below
-    std::printf("compare RTT with and without TCP_NODELAY (and TCP_QUICKACK)\n");
+    const bool nodelay  = argc > 1 && !std::strcmp(argv[1], "nodelay");
+    const bool onewrite = argc > 1 && !std::strcmp(argv[1], "onewrite");
+    constexpr int N = 500;                                // 500 x ~40 ms = 20 s in the stalled mode
+    char req[16] = {}, rep[16] = {};
+
+    int ls = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); addr.sin_port = 0;
+    int one = 1; setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (bind(ls, (sockaddr*)&addr, sizeof addr) || listen(ls, 1)) { std::perror("bind/listen"); return 1; }
+    socklen_t alen = sizeof addr; getsockname(ls, (sockaddr*)&addr, &alen);     // the ephemeral port
+
+    if (fork() == 0) {                                   // ---- server: echo 16-byte replies, default options
+        int c = accept(ls, nullptr, nullptr);
+        for (int i = 0; i < N; ++i) { xfer(rd, c, req, 16); xfer(wr, c, rep, 16); }
+        _exit(0);
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (connect(fd, (sockaddr*)&addr, sizeof addr)) { std::perror("connect"); return 1; }
+    if (nodelay) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);   // <-- the one line
+
+    std::vector<std::uint32_t> us(N);
+    for (int i = 0; i < N; ++i) {
+        auto t0 = std::chrono::steady_clock::now();
+        if (onewrite) xfer(wr, fd, req, 16);
+        else { xfer(wr, fd, req, 8); xfer(wr, fd, req + 8, 8); }   // header, then body: write-WRITE-read
+        xfer(rd, fd, rep, 16);
+        auto t1 = std::chrono::steady_clock::now();
+        us[i] = std::uint32_t(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count());
+    }
+    wait(nullptr);
+    std::sort(us.begin(), us.end());
+    auto pct = [&](double p) { return us[std::size_t(p * (N - 1))]; };
+    std::printf("%-9s RTT us: p50=%u  p99=%u  p99.9=%u  max=%u\n",
+                nodelay ? "nodelay" : onewrite ? "onewrite" : "nagle", pct(0.5), pct(0.99), pct(0.999), us.back());
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), small (16-byte) request/response, no pipelining, turbo off (illustrative; the *magnitude* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -std=c++20`, Linux 6.x, loopback (127.0.0.1), 16-byte request/response, blocking `read`s on both ends, turbo off (illustrative; the *magnitude* is the point):
 
 ```
-   configuration                                  RTT (small request/response)
-   TCP_NODELAY OFF (default), delayed-ACK on      ~40,000 µs (~40 ms!)   <- Nagle + delayed-ACK DEADLOCK (§51.5)
-   TCP_NODELAY ON (sender), delayed-ACK on        ~30-60 µs              <- Nagle gone; occasional ACK delay
-   TCP_NODELAY ON + TCP_QUICKACK (both)           ~20-40 µs              <- both tamed; full kernel-stack speed
-   (context) busy-poll + bypass (Ch.47,62)        ~1-5 µs                <- the ultra-hot path
+   configuration                                            RTT p50        p99.9        note
+   Nagle ON (default), request = 2 writes (header+body)     ~40,000 µs     ~45,000 µs   <- EVERY exchange: Nagle holds the body, receiver delays the ACK (§51.5)
+   Nagle ON, request = 1 write                              ~25 µs         ~200 µs      <- no unacked data when the write happens: Nagle never fires
+   TCP_NODELAY (client), request = 2 writes                 ~25 µs         ~80 µs       <- the body goes out at once; stall gone
+   (context) busy-polled kernel stack (Ch. 47)              ~5 µs                       <- no sleep/wake-up on either end
+   (context) busy-poll + bypass (Ch. 47, 62)                ~1-3 µs                     <- the ultra-hot path
 
-   the default costs ~1000x. ONE setsockopt is the difference between 40 ms and 40 µs.
+   the default costs ~1500x on the framing pattern most code uses. ONE setsockopt is the difference between 40 ms and 25 µs.
 ```
 
-Read it: this is the most dramatic single-knob result in the book. With **`TCP_NODELAY` off** (the *default*), a small request/response with no pipelining hits the **Nagle + delayed-ACK deadlock** (§51.5) — the sender holds the next small send waiting for an ACK, the receiver holds the ACK hoping to piggyback it, and they sit in a **~40 ms** standoff until the delayed-ACK timer fires. That's a **~1000× latency bug** lurking in a missing one-line `setsockopt` — and it's *endemic* (it's bitten countless systems, because it only manifests for the small-message/no-pipeline pattern, which is exactly request/response and order entry). Turning **`TCP_NODELAY` on** eliminates Nagle's hold (~30-60 µs); adding **`TCP_QUICKACK`** on the receiver tames the residual delayed-ACK (~20-40 µs) — *full kernel-stack speed* (the Ch. 47 baseline). The lesson is non-negotiable: **`TCP_NODELAY` on every latency socket, `TCP_QUICKACK` to tame delayed ACK, and verify** — the default is a 40 ms trap. (And the context row reminds you: even tuned, the kernel stack is tens of µs; the ultra-hot path is busy-poll + bypass — Ch. 62.)
+Read it: this is the most dramatic single-knob result in the book. With **`TCP_NODELAY` off** (the *default*), a request written as header + body hits the **Nagle + delayed-ACK stall** (§51.5) on *every* exchange — the sender holds the second small segment waiting for an ACK, the receiver holds the ACK hoping to piggyback it on a reply it cannot produce yet, and they sit in a **~40 ms** standoff until the delayed-ACK timer fires. That's a **~1000× latency bug** lurking in a missing one-line `setsockopt` — and it's *endemic*, because it only manifests for the small-message, multi-write-per-request pattern, which is exactly what framing code and order-entry libraries do; the one-write row shows how a quick test can miss it entirely. Turning **`TCP_NODELAY` on** at the sender eliminates Nagle's hold and the stall with it (~25 µs). `TCP_QUICKACK` on the receiver also breaks the standoff (it ACKs the partial request at once) but is not sticky on Linux, so it is the belt to `TCP_NODELAY`'s braces, not a replacement — and in a request/response exchange it does nothing *further* for the RTT, because the server's ACK already rides on its reply. The ~25 µs that remains is two blocking wake-ups through the kernel stack; busy-polling takes it to ~5 µs (Ch. 47) and bypass to ~1-3 µs (Ch. 62). The lesson is non-negotiable: **`TCP_NODELAY` on every latency socket, both ends, and verify with the two-write test** — the default is a 40 ms trap.
 
 ## 51.4 Techniques
 
@@ -111,7 +150,7 @@ The receive-side transport for market-data feeds (ties Ch. 53, 55):
 ## 51.5 Pitfalls & anti-patterns: Nagle/delayed-ACK interaction
 
 - **Forgetting `TCP_NODELAY` (the ~40 ms bug).** The cardinal sin: a latency socket without `TCP_NODELAY` hits the Nagle/delayed-ACK deadlock — **~40 ms** added to small request/response (§51.3). It's *endemic* because it only shows for the small-message/no-pipeline pattern (exactly order entry). **`TCP_NODELAY` on every latency socket, on both ends**, defaulted in your socket wrapper. Verify it's set.
-- **The Nagle + delayed-ACK deadlock (the mechanism).** Sender (Nagle) waits for an ACK to send the next small message; receiver (delayed ACK) waits for data to piggyback the ACK → ~40 ms standoff until the delayed-ACK timer fires. Fix: `TCP_NODELAY` (sender) **and** `TCP_QUICKACK`/tuned delayed-ACK (receiver). Either alone may not fully fix it — do both (§51.4.1).
+- **The Nagle + delayed-ACK deadlock (the mechanism).** Sender (Nagle) holds a small segment while an earlier one is unacknowledged — i.e. the *second* of two writes that make up one request; receiver (delayed ACK) waits for data to piggyback the ACK, but cannot reply to half a request → ~40 ms standoff until the delayed-ACK timer fires. (A one-write-per-request ping-pong never triggers it: the reply ACKs the request before the next write — §51.3.) Fix: `TCP_NODELAY` (sender) **and** `TCP_QUICKACK`/tuned delayed-ACK (receiver). Either alone may not fully fix it — do both (§51.4.1).
 - **Undersized RX buffer → dropped market data (Ch. 53).** A too-small `SO_RCVBUF`/NIC RX ring overflows during a microburst (market open) → **dropped packets** → missed updates / sequence gaps (Ch. 53) → wrong book, recovery latency. Size for the worst burst (§51.4.2); monitor drops (`ethtool -S`, UDP drop counters).
 - **Over-large buffers (bufferbloat).** The opposite error: huge send/receive buffers add *queueing latency* (data sits buffered) — bad for latency even though it prevents drops. Size for "absorb the burst, no more." Latency and drop-avoidance are a trade (§51.4.1).
 - **Slow-start-after-idle throttling the first order (Ch. 46).** A connection idle between trades resets its cwnd (default `tcp_slow_start_after_idle=1`), so the first order after a quiet spell is throttled by slow-start. Disable the sysctl *and* keep connections warm with heartbeats (Ch. 46).
@@ -124,7 +163,7 @@ The receive-side transport for market-data feeds (ties Ch. 53, 55):
 
 **Exercises**
 
-1. **The 40 ms bug.** Build a small TCP request/response client/server *without* `TCP_NODELAY`; measure the RTT and reproduce the ~40 ms Nagle/delayed-ACK deadlock (§51.3). Add `TCP_NODELAY` (both ends) → ~µs. Add `TCP_QUICKACK` → confirm the residual delay is gone. This is the chapter's headline.
+1. **The 40 ms bug.** Run `nodelay.cpp` *without* `TCP_NODELAY` in its two-write mode; measure the RTT and reproduce the ~40 ms Nagle/delayed-ACK deadlock (§51.3), then show the one-write mode does not stall. Add `TCP_NODELAY` (both ends) → ~µs. Add `TCP_QUICKACK` → confirm the residual delay is gone. This is the chapter's headline.
 2. **Buffer sizing vs drops.** Send a UDP burst to a receiver with a small `SO_RCVBUF`; count drops (`/proc/net/udp`, `ss -u`). Increase `SO_RCVBUF` (and `net.core.rmem_max`) until drops stop. Then make it *huge* and measure the added latency (bufferbloat). Find the right size (§51.4.1-2).
 3. **Slow-start-after-idle.** Send on a TCP connection, idle it for seconds, send again; measure the post-idle send latency/throughput with `tcp_slow_start_after_idle=1` vs `0` (and with heartbeats keeping it warm — Ch. 46). Quantify the throttle (§51.4.1).
 4. **A/B multicast arbitration.** Set up two UDP multicast streams of the same sequenced data, drop random packets from each, and write a receiver that joins both and reconstructs the full stream by arbitration (take-first, fill-gaps). Measure recovery (ties Ch. 53).

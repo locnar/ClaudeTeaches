@@ -49,56 +49,62 @@ The unifying model: **the compiler optimizes aggressively only on the dependenci
 
 ## 21.3 Measure it: codegen difference with/without `__restrict__`
 
-The cleanest demonstration is a loop that *should* vectorize, compiled with and without a `restrict` promise — the source is otherwise identical, so any difference is purely the aliasing information. (This is fundamentally a *codegen* measurement, so §21.3 and §21.5 are tightly coupled; here we time it, there we read the asm.)
+The cleanest demonstration is a loop that *should* vectorize, compiled with and without a `restrict` promise — the source is otherwise identical, so any difference is purely the aliasing information. (This is fundamentally a *codegen* measurement, so §21.3 and §21.5 are tightly coupled; here we time it, there we read the asm.) The kernel is chosen with care: for the textbook `out[i] += in[i] * k` both GCC 13 and Clang 18 at `-O3` *version* the loop — emit a runtime overlap check plus a vector body and a scalar fallback (§21.2, §21.5) — so with two separate arrays the plain and `restrict` builds run the same inner loop and time the same. Where versioning does **not** rescue the compiler is a reduction *through a pointer*: `*sum += in[i]` with `sum` possibly inside `in[]` forces a store to memory every iteration (GCC 13 does not version it; Clang 18 does — read the asm).
 
 ```cpp
-// restrict.cpp — same SAXPY-style loop, with and without restrict.
+// restrict.cpp — the same accumulate-through-a-pointer loop, with and without restrict.
 // Build: g++ -O3 -std=c++20 -march=native restrict.cpp -o restrict
 //   (-O3 / -march=native so vectorization is ON THE TABLE; aliasing is the only variable.)
 // Run pinned, turbo off:  taskset -c 2 ./restrict plain   |   ./restrict restrict
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <vector>
 #include <chrono>
 
-// (a) plain: compiler must assume out/in MAY overlap.
-void axpy_plain(float* out, const float* in, float k, int n) {
-    for (int i = 0; i < n; ++i) out[i] += in[i] * k;
+// (a) plain: `*sum` MAY alias `in[i]`, so every iteration must store *sum to memory before the next
+//     load, and the reduction cannot be kept in a (vector) register.
+[[gnu::noinline]] void accumulate_plain(std::int32_t* sum, const std::int32_t* in, int n) {
+    for (int i = 0; i < n; ++i) *sum += in[i];
 }
-// (b) restrict: YOU promise out/in/the arrays don't overlap → free to vectorize.
-void axpy_restrict(float* __restrict out, const float* __restrict in, float k, int n) {
-    for (int i = 0; i < n; ++i) out[i] += in[i] * k;
+// (b) restrict: YOU promise sum/in don't overlap → the compiler hoists *sum into registers and vectorizes.
+[[gnu::noinline]] void accumulate_restrict(std::int32_t* __restrict sum, const std::int32_t* __restrict in, int n) {
+    for (int i = 0; i < n; ++i) *sum += in[i];
 }
 
 int main(int argc, char** argv) {
     bool r = (argc > 1) && std::strcmp(argv[1], "restrict") == 0;
     constexpr int N = 4096;                 // L1-resident: memory is NOT the variable
     constexpr long REPS = 2'000'000;
-    std::vector<float> out(N, 1.0f), in(N, 1.0001f);
+    std::vector<std::int32_t> in(N, 3);
+    std::int32_t sum = 0;
 
     auto t0 = std::chrono::steady_clock::now();
-    for (long rep = 0; rep < REPS; ++rep)
-        if (r) axpy_restrict(out.data(), in.data(), 1.0001f, N);
-        else   axpy_plain   (out.data(), in.data(), 1.0001f, N);
+    for (long rep = 0; rep < REPS; ++rep) {
+        if (r) accumulate_restrict(&sum, in.data(), N);
+        else   accumulate_plain   (&sum, in.data(), N);
+        asm volatile("" : "+m"(sum) :: "memory");      // each rep is a real call (Appendix L)
+    }
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-    std::printf("%-8s out[0]=%.3f  %.3f ns/elem\n", r ? "restrict" : "plain",
-                out[0], ns / ((double)REPS * N));
+    std::printf("%-8s sum=%d  %.3f ns/elem\n", r ? "restrict" : "plain", sum, ns / ((double)REPS * N));
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, AVX-512 available), `-O3 -march=native`, pinned, turbo off (illustrative; the *ratio* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz, AVX-512 available), GCC 13 `-O3 -std=c++20 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *ratio* is the point):
 
 ```
-                              plain (may alias)     restrict (no alias)
-ns / element                     ~0.50 ns              ~0.09 ns        <- ~5x faster
-vectorized? (§21.5)              scalar / guarded      packed SIMD
-instructions retired             more (scalar)         far fewer (8-16/iter folded)
-L1-dcache accesses               ~same data            ~same data      <- memory NOT the cause
+                              plain (may alias)              restrict (no alias)
+ns / element                     ~0.35 ns                       ~0.04 ns        <- ~8x faster
+inner loop (§21.5)               add r32,[mem]; mov [sum],r32   vpaddd ymm, [mem]   (8 lanes, sum in registers)
+                                 1 add + 1 STORE per element    1 add per 8 elements
+instructions retired             ~4 per element                 ~0.5 per element
+L1-dcache accesses               ~same data (+1 store/elem)     ~same data      <- memory NOT the cause
+Clang 18                         versioned: both run the vector body (~0.04 ns) — a guard + two loop bodies, not 8x
 ```
 
-Read it the Ch. 11 / Ch. 4 way: **identical source, identical data, identical cache footprint — and ~5× faster** purely because `__restrict__` told the compiler the arrays don't overlap, so it emitted packed AVX (`vfmadd...ps` over 8-16 floats/iteration) instead of a scalar loop (or a scalar loop *plus* a runtime overlap-check branch). Nothing about the arithmetic changed; the compiler was simply *unblocked*. The fingerprint of an aliasing-limited loop is exactly this: a numeric loop running far below SIMD throughput, where the asm shows scalar ops or a runtime aliasing guard (§21.5) despite `-O3 -march=native`. When you see it, `restrict` (or a refactor that proves non-overlap) is the lever — and you confirm by reading the codegen, the subject of §21.5.
+Read it the Ch. 11 / Ch. 4 way: **identical source, identical data, identical cache footprint — and ~8× faster** purely because `__restrict__` told the compiler `sum` cannot live inside `in[]`, so it kept the running sum in registers and emitted packed `vpaddd ymm` (8 lanes per instruction) instead of an add-and-store-to-memory every element. Nothing about the arithmetic changed; the compiler was simply *unblocked*. The fingerprint of an aliasing-limited loop is exactly this: a numeric loop running far below SIMD throughput, where the asm shows a store (or reload) of a "scalar" every iteration, or a runtime aliasing guard (§21.5), despite `-O3 -march=native`. When you see it, `restrict` (or a refactor that proves non-overlap — e.g. accumulate into a local and store once) is the lever — and you confirm by reading the codegen, the subject of §21.5. (Clang's answer to the same source is loop versioning: both builds run the vector body behind a `sum ∉ [in, in+n)` check, so the cost of the missing `restrict` there is a guard and two bodies' worth of code, not 8× — the two compilers' divergence on one loop is itself the lesson.)
 
 ## 21.4 Techniques
 
@@ -167,7 +173,7 @@ axpy_restrict(float*, float const*, float, int):
         ...                                ; packed, no scalar fallback, no branch
 ```
 
-Eight (or sixteen, AVX-512) elements per iteration, no guard — the ~5× of §21.3 in asm form.
+Eight (or sixteen, AVX-512) elements per iteration, no guard — the same shape §21.3's `accumulate_restrict` takes (`vpaddd ymm`, sum in registers), which is where its ~8× came from.
 
 **`bit_cast`/`memcpy` pun to *nothing*.** Confirm defined punning is also free:
 

@@ -62,7 +62,7 @@ The model to carry: **the TLB is a tiny cache whose "lines" are whole pages; its
 
 ## 15.3 Measure it: `dtlb_load_misses` with and without huge pages
 
-The experiment isolates translation cost from data cost: **randomly** probe a large region (so the data access pattern and total bytes touched are identical) under two page regimes — default 4 KB pages vs 2 MB huge pages — and watch the TLB counters move while the cache behavior stays put. Random access defeats the translation prefetcher and maximizes the TLB's visibility.
+The experiment isolates translation cost from data cost: **randomly** probe a large region (so the data access pattern and total bytes touched are identical) under two page regimes — default 4 KB pages vs 2 MB huge pages — and watch the TLB counters move while the cache behavior stays put. Random access defeats the translation prefetcher and maximizes the TLB's visibility. The probe is made **dependent** (each address waits for the previous value) so the loop measures the *latency* of one translation plus one data access — the number a pointer-chasing hot path pays — rather than the out-of-order core's throughput over a dozen overlapped misses, which hides most of a walk.
 
 ```cpp
 // tlb.cpp — random probes over a large region; compare 4K vs 2M pages.
@@ -97,9 +97,15 @@ int main(int argc, char** argv) {
     std::vector<std::uint32_t> idx(PROBES);
     for (auto& v : idx) v = std::uint32_t(rng() % N);        // precompute random indices
 
+    // `zero` is 0 at run time but opaque to the compiler: adding (acc & zero) to each address makes
+    // probe k+1 DEPEND on probe k, so the loop measures the LATENCY of one translation + one data
+    // access, not the out-of-order core's throughput over ~10 overlapped misses and two page walkers.
+    std::uint64_t zero = 0;
+    asm volatile("" : "+r"(zero));
+
     auto t0 = std::chrono::steady_clock::now();
     std::uint64_t acc = 0;
-    for (std::size_t k = 0; k < PROBES; ++k) acc += a[idx[k]];   // random, dependent-ish probe
+    for (std::size_t k = 0; k < PROBES; ++k) acc += a[idx[k] + (acc & zero)];   // random, DEPENDENT probe
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
     std::printf("%-4s acc=%llu  %.2f ns/probe\n", huge ? "2M" : "4K",
@@ -109,18 +115,18 @@ int main(int argc, char** argv) {
 }
 ```
 
-Profile both with the dTLB counters: `perf stat -e cycles,instructions,dtlb_load_misses.miss_causes_a_walk,dtlb_load_misses.walk_active,dtlb_load_misses.walk_completed,L1-dcache-load-misses ./tlb` (run `./tlb` and `./tlb huge`; the `huge` run needs reserved hugepages — `sysctl vm.nr_hugepages=...` or a hugetlbfs mount; see §15.4.1). Confirm the baseline really is on 4 KB pages: while `./tlb` runs, `grep AnonHugePages /proc/$(pidof tlb)/smaps_rollup` must read `0 kB` — the `madvise(MADV_NOHUGEPAGE)` opt-out in the listing is what guarantees that on a box whose `transparent_hugepage/enabled` is `always`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; the *direction* is the point):
+Profile both with the dTLB counters: `perf stat -e cycles,instructions,dtlb_load_misses.miss_causes_a_walk,dtlb_load_misses.walk_active,dtlb_load_misses.walk_completed,L1-dcache-load-misses ./tlb` (run `./tlb` and `./tlb huge`; the `huge` run needs reserved hugepages — `sysctl vm.nr_hugepages=...` or a hugetlbfs mount; see §15.4.1). Confirm the baseline really is on 4 KB pages: while `./tlb` runs, `grep AnonHugePages /proc/$(pidof tlb)/smaps_rollup` must read `0 kB` — the `madvise(MADV_NOHUGEPAGE)` opt-out in the listing is what guarantees that on a box whose `transparent_hugepage/enabled` is `always`. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x (THP = `madvise`), pinned, turbo off (illustrative; the *direction* is the point):
 
 ```
                                           4K pages           2M huge pages
-ns / probe                                 ~75 ns             ~45 ns        <- ~1.6x faster
-dtlb_load_misses.walk_completed            HIGH               ~10–100x fewer <- the whole story
-dtlb_load_misses.walk_active (cycles)      large fraction     small
+ns / probe (dependent)                     ~115 ns            ~92 ns        <- ~23 ns = the walk, ~1.25x
+dtlb_load_misses.walk_completed            ~1 per probe       ~0            <- the whole story
+dtlb_load_misses.walk_active (cycles)      ~20% of cycles     ~0
 L1-dcache-load-misses                      ~same              ~same         <- DATA cost unchanged
 instructions                               same               same          <- identical work
 ```
 
-Read it the Ch. 2 way: **same instructions, same data-cache misses (the data access pattern is identical) — yet ~1.6× faster, entirely from collapsed `dtlb_load_misses`.** The 1 GiB region needs ~256K distinct 4 KB pages — wildly beyond the dTLB/STLB reach — so nearly every random probe pays a page-table walk; the data itself was in DRAM either way, so this cost is *pure translation*, invisible in `L1-dcache-load-misses`. Switching to 2 MB pages cuts the page count 512× (to ~512 pages, comfortably within STLB reach), and the walks — and the cycles spent in `walk_active` — largely vanish. That is the TLB-bound signature: **high `dtlb_load_misses.walk_*` with unchanged data-cache behavior.** When you see it, huge pages and/or better page-locality (§15.4) are the lever; if those counters are already low, the TLB is not your problem.
+Read it the Ch. 2 way: **same instructions, same data-cache misses (the data access pattern is identical) — yet ~23 ns less per probe, entirely from collapsed `dtlb_load_misses`.** The 1 GiB region needs ~256K distinct 4 KB pages — wildly beyond the dTLB/STLB reach — so nearly every random probe pays a page-table walk; the data itself was in DRAM either way (~90 ns), so this cost is *pure translation*, invisible in `L1-dcache-load-misses`. The walk is "only" ~23 ns here because the 2 MiB of page-table entries for 1 GiB still live in L3 (the upper levels in the paging-structure caches); on a 32 GiB book the PTEs themselves miss to DRAM and a walk costs a second ~90 ns round-trip — the Appendix E range "~10-100+ ns" is this spread. Switching to 2 MB pages cuts the page count 512× (to ~512 pages, comfortably within STLB reach), and the walks — and the cycles spent in `walk_active` — vanish. (Remove the `+ (acc & zero)` and both rows fall to ~20 and ~10 ns: the core overlaps ~10 misses, but only two page walks, at a time — the 4K row loses *more* MLP, which is how translation cost shows up in a throughput-bound loop.) That is the TLB-bound signature: **high `dtlb_load_misses.walk_*` with unchanged data-cache behavior.** When you see it, huge pages and/or better page-locality (§15.4) are the lever; if those counters are already low, the TLB is not your problem.
 
 ---
 

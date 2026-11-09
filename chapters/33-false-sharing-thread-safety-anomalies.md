@@ -56,20 +56,36 @@ False sharing is invisible to the eye and to throughput-only profiling — you d
 ```cpp
 // falsesharing.cpp — per-thread counters, unpadded vs padded; watch HITM.
 // Build: g++ -O2 -std=c++20 -march=native falsesharing.cpp -o fs -pthread
-// Run:  ./fs unpadded 8 | ./fs padded 8   (threads pinned to distinct cores)
+// Run:  ./fs unpadded 8 | ./fs padded 8   (each thread pins itself to core t)
 //   detect:  perf c2c record ./fs unpadded 8 ; perf c2c report
-//   or:      perf stat -e mem_load_l3_hit_retired.xsnp_hitm ./fs unpadded 8
+//   or:      perf stat -e mem_load_l3_hit_retired.xsnp_fwd ./fs unpadded 8     # Ice Lake-SP name;
+//            (Skylake-SP: mem_load_l3_hit_retired.xsnp_hitm; cross-socket: mem_load_l3_miss_retired.remote_hitm)
+#include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cstdint>
 #include <thread>
 #include <vector>
 #include <chrono>
 #include <new>
+#include <pthread.h>
+#include <sched.h>
 
-struct Unpadded { std::uint64_t v; };                       // 8 bytes — adjacent ones share a line
-struct alignas(std::hardware_destructive_interference_size) // own cache line
-       Padded   { std::uint64_t v; };
+#ifdef __cpp_lib_hardware_interference_size            // GCC 12+/libstdc++; Clang 19+ (Appendix H)
+constexpr std::size_t kLine = std::hardware_destructive_interference_size;
+#else
+constexpr std::size_t kLine = 64;
+#endif
+// Each counter is a relaxed atomic so the increment is a real load + store to MEMORY every
+// iteration (a plain uint64_t would be hoisted into a register and the loop folded to one add).
+struct Unpadded { std::atomic<std::uint64_t> v{0}; };    // 8 bytes — adjacent ones share a line
+struct alignas(kLine) Padded { std::atomic<std::uint64_t> v{0}; };   // own cache line
+
+static void pin_to(int core) {                           // Ch. 42
+    cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
+    if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
+}
 
 template <class T>
 double run(int M) {
@@ -78,9 +94,11 @@ double run(int M) {
     auto t0 = std::chrono::steady_clock::now();
     std::vector<std::thread> ts;
     for (int t = 0; t < M; ++t) ts.emplace_back([&, t]{
-        // (pin to core t — Ch. 42).  Each thread writes ONLY its own counter — logically independent.
-        for (long i = 0; i < N; ++i) data[t].v++;           // but unpadded counters share lines!
-    });
+        pin_to(t);
+        std::atomic<std::uint64_t>& v = data[t].v;          // each thread writes ONLY its own counter
+        for (long i = 0; i < N; ++i)                        // single-writer: plain load + plain store
+            v.store(v.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    });                                                     // ... but unpadded counters share lines!
     for (auto& th : ts) th.join();
     auto t1 = std::chrono::steady_clock::now();
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count() / (double)N;
@@ -90,27 +108,25 @@ int main(int argc, char** argv) {
     bool padded = (argc > 1) && std::strcmp(argv[1], "padded") == 0;
     int M = argc > 2 ? std::atoi(argv[2]) : 8;
     double ns = padded ? run<Padded>(M) : run<Unpadded>(M);
-    std::printf("%-8s M=%d  %.3f ns/increment  (hw_destructive=%zu)\n",
-                padded ? "padded" : "unpadded", M, ns,
-                std::hardware_destructive_interference_size);
+    std::printf("%-8s M=%d  %.3f ns/increment  (line=%zu)\n", padded ? "padded" : "unpadded", M, ns, kLine);
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket), threads pinned to distinct cores, turbo off (illustrative):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, each thread pinned to its own core by the listing, turbo off (illustrative). The counter is a relaxed atomic so that every iteration is a real load and store to *memory* — an earlier draft's plain `data[t].v++` was hoisted into a register and the whole loop folded to one `addq $200000000`, in both variants:
 
 ```
-   M=8 cores, each thread increments only its own counter:
-                          ns/increment    HITM (xsnp_hitm)     note
-   unpadded               ~9 ns           HIGH                 lines ping-pong — false sharing
-   padded                 ~0.3 ns         ~0                   each counter on its own line — no coherence
-                                                               (~30x faster, same logical work!)
+   M=8 cores, each thread increments only its own counter (one plain load + one plain store per increment):
+                          ns/increment    HITM (xsnp_fwd)      note
+   unpadded               ~20 ns          HIGH                 lines ping-pong — false sharing
+   padded                 ~1.7 ns         ~0                   each counter on its own line — the ~5-cycle store-forward chain
+                                                               (~12x faster, same logical work!)
 
    perf c2c report (unpadded) pinpoints:
      → the cache line, the offsets (counter[0], counter[1], ...), and the contending PIDs/cores
 ```
 
-Read it: **same code, same logical work — each thread touches *only its own* counter, zero logical sharing — yet unpadded is ~30× slower.** The increments aren't the cost; the *cache line* is — adjacent counters share a 64-byte line, so each thread's write invalidates the others' caches, and the line ping-pongs among all 8 cores (the HITM coherence traffic of Ch. 7). Padding each counter to its own line eliminates the coherence misses entirely (HITM → ~0) and the work scales as it should. This is the §31.3 "sharded" result's hidden dependency made explicit: **sharding only scales if the per-thread data is padded.** The detection method is the key takeaway: false sharing doesn't show as a normal cache miss or in throughput-only profiling — you find it with **`perf c2c`** (which names the exact line, offsets, and contending cores) or the **HITM counters** (`mem_load_l3_hit_retired.xsnp_hitm` and friends). When per-thread/"shared-nothing" work mysteriously doesn't scale, suspect false sharing and run `perf c2c` (Ch. 2).
+Read it: **same code, same logical work — each thread touches *only its own* counter, zero logical sharing — yet unpadded is ~12× slower.** The increments aren't the cost; the *cache line* is — adjacent counters share a 64-byte line, so each thread's write invalidates the others' caches, and the line ping-pongs among all 8 cores (the HITM coherence traffic of Ch. 7). Padding each counter to its own line eliminates the coherence misses entirely (HITM → ~0) and the work scales as it should. This is the §31.3 "sharded" result's hidden dependency made explicit: **sharding only scales if the per-thread data is padded.** The detection method is the key takeaway: false sharing doesn't show as a normal cache miss or in throughput-only profiling — you find it with **`perf c2c`** (which names the exact line, offsets, and contending cores) or the **HITM counters** (`mem_load_l3_hit_retired.xsnp_fwd` on Ice Lake-SP — `xsnp_hitm` is the Skylake-SP name and a deprecated alias — and `mem_load_l3_miss_retired.remote_hitm` across sockets). When per-thread/"shared-nothing" work mysteriously doesn't scale, suspect false sharing and run `perf c2c` (Ch. 2).
 
 ## 33.4 Techniques
 
@@ -150,7 +166,7 @@ The structural cure (ties Ch. 31): give each thread/core its own data, laid out 
 
 **Exercises**
 
-1. **See the ping-pong.** Build `falsesharing.cpp`; run `unpadded` vs `padded` at M=2,4,8 (pin threads). Confirm the ~10-30× slowdown unpadded. Run `perf c2c record`/`report` on the unpadded version — confirm it names the cache line, the offsets, and the contending cores. Run `perf stat -e ...xsnp_hitm` — HITM high vs ~0?
+1. **See the ping-pong.** Build `falsesharing.cpp`; run `unpadded` vs `padded` at M=2,4,8 (pin threads). Confirm the ~10× slowdown unpadded. Run `perf c2c record`/`report` on the unpadded version — confirm it names the cache line, the offsets, and the contending cores. Run `perf stat -e ...xsnp_hitm` — HITM high vs ~0?
 2. **Queue head/tail.** Build a tiny SPSC ring (Ch. 34) with `head` and `tail` on the *same* cache line, then on *separate* lines. Measure throughput producer↔consumer and HITM. Quantify the false-sharing cost in the hottest structure.
 3. **Padding bloat.** Pad an array of 1M small counters to a full cache line each. Measure the memory blow-up and the *single-threaded* cache-miss increase (you destroyed locality — Ch. 7). Find the line between "pad the hot contended ones" and "padded everything wastefully" (§33.5).
 4. **Adjacent-line prefetch.** Pad two hot per-thread variables exactly 64 bytes apart and measure HITM; then 128 bytes apart. Does Intel's adjacent-line prefetcher make 64 insufficient on your CPU (§33.2)?

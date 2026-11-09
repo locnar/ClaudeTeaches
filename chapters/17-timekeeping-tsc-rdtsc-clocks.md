@@ -125,16 +125,26 @@ constant_tsc                # invariant TSC present
 nonstop_tsc
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, base ~2.9 GHz), `tsc` clocksource + vDSO, pinned, turbo off (illustrative):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, base 2.9 GHz, max turbo 3.5 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, `tsc` clocksource + vDSO, pinned, turbo off (illustrative):
 
 ```
-TSC freq ~ 2.9000 GHz   (0.344828 ns / tsc tick)        <- calibrated; ~base freq, NOT turbo
+TSC freq ~ 2.9000 GHz   (0.344828 ns / tsc tick)        <- the kernel's own tsc_khz (see below)
 raw rdtsc        : ~6 ns/call
 fenced rdtscp    : ~12 ns/call                          <- fences cost ~2x, but measure the right thing
 clock_gettime    : ~18 ns/call                          <- vDSO: convenient, monotonic, ~3x raw rdtsc
 ```
 
-The lessons land immediately: the calibrated TSC frequency comes out near the **base** clock (~2.9 GHz), *not* the turbo frequency — confirming TSC ticks ≠ core cycles (§17.2.1), so timing in "TSC ticks" and multiplying by `ns_per_tsc` is correct while assuming "one tick = one core cycle" is wrong. The **fences roughly double** the raw `rdtsc` cost — the price of measuring the *right* instructions (§17.2.1) — which matters when you bracket a region only a few ns long (the measurement perturbs it; Ch. 3). And vDSO `clock_gettime` at ~18 ns is only ~3× a raw `rdtsc` while giving you nanoseconds, monotonicity, and migration-safety for free — which is why it's the sensible default (§17.4.1). If your box instead shows `clock_gettime` at *hundreds* of ns, your clocksource is **not** `tsc`/vDSO — fix that (Ch. 6) before trusting any timing.
+Then the one measurement that *proves* TSC ticks ≠ core cycles — which the run above cannot, because with turbo off the core clock *is* the 2.9 GHz base and the two rates coincide. Re-enable turbo and count both clocks over the same spin:
+
+```
+$ echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo      # turbo ON for this one
+$ perf stat -e cycles,ref-cycles taskset -c 2 ./tsc
+   3,502,118,004      cycles          #  3.50 GHz    <- the core clock (CPU_CLK_UNHALTED.THREAD)
+   2,901,760,227      ref-cycles      #  2.90 GHz    <- the TSC rate  (CPU_CLK_UNHALTED.REF_TSC)
+TSC freq ~ 2.9000 GHz   (0.344828 ns / tsc tick)        <- unchanged: the TSC does not follow turbo
+```
+
+The lessons land immediately: the calibrated TSC frequency stays at 2.9 GHz whether the core runs at 2.9 or 3.5 GHz — `cycles / ref-cycles ≈ 1.2` with turbo on — so timing in "TSC ticks" and multiplying by `ns_per_tsc` is correct while assuming "one tick = one core cycle" is wrong (§17.2.1); only the PMU `cycles` event counts core cycles. (On a `tsc`-clocksource box the calibration against `CLOCK_MONOTONIC` is recovering the kernel's own `tsc_khz` — `dmesg | grep -i 'tsc:'`, CPUID leaf 0x15 — which is exactly the constant your timestamps must agree with; it cannot detect a mis-calibrated TSC. `CLOCK_MONOTONIC_RAW` is the un-slewed variant if NTP/PTP adjustment would bias a long interval.) The **fences roughly double** the raw `rdtsc` cost — the price of measuring the *right* instructions (§17.2.1) — which matters when you bracket a region only a few ns long (the measurement perturbs it; Ch. 3). And vDSO `clock_gettime` at ~18 ns is only ~3× a raw `rdtsc` while giving you nanoseconds, monotonicity, and migration-safety for free — which is why it's the sensible default (§17.4.1). If your box instead shows `clock_gettime` at *hundreds* of ns, your clocksource is **not** `tsc`/vDSO — fix that (Ch. 6) before trusting any timing.
 
 ---
 
@@ -181,7 +191,7 @@ The principle: **the closer to the wire you timestamp, the more honest the laten
 
 **Exercises**
 
-1. **Calibrate and cost the clocks.** Build `tsc.cpp` pinned/turbo-off. Confirm the calibrated TSC frequency ≈ your CPU's **base** (not turbo) clock. Record ns/call for raw `rdtsc`, fenced `rdtscp`, and vDSO `clock_gettime`. By what factor do the fences and the vDSO add cost?
+1. **Calibrate and cost the clocks.** Build `tsc.cpp` pinned/turbo-off, then run it under `perf stat -e cycles,ref-cycles` with turbo **on**. Confirm the calibrated TSC frequency stays at your CPU's base clock while `cycles` runs ~1.2× faster than `ref-cycles` — the TSC does not follow turbo. Record ns/call for raw `rdtsc`, fenced `rdtscp`, and vDSO `clock_gettime`. By what factor do the fences and the vDSO add cost?
 2. **Prove `rdtsc` reorders.** Time a tiny region (a few dependent adds) with *unfenced* vs *fenced* `rdtsc`. Show the unfenced version gives unstable/implausible (even zero/negative) intervals while the fenced version is stable. Explain via out-of-order execution (Ch. 11).
 3. **Break the clocksource.** Temporarily switch the clocksource to `hpet` (`echo hpet > /sys/.../current_clocksource`, root, test box only) and re-run the `clock_gettime` cost. How much slower? Switch back to `tsc`. Why does this silently corrupt latency work (§17.5)?
 4. **Detect migration.** Use `rdtscp`'s aux (core id) to flag when start/end reads occur on different cores. Run *unpinned* under load and count invalid intervals; then pin (Ch. 42) and confirm they vanish.

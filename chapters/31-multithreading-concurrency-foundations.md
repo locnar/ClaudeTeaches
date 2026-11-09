@@ -50,19 +50,32 @@ The diagnostic for a concurrency design is its **scalability curve**: throughput
 ```cpp
 // scale.cpp — shared atomic vs per-thread (shared-nothing) counters; sweep thread count.
 // Build: g++ -O2 -std=c++20 -march=native scale.cpp -o scale -pthread
-// Run:  ./scale shared 1 | ./scale shared 8 | ./scale sharded 8   (threads pinned to distinct cores)
+// Run:  ./scale shared 1 | ./scale shared 8 | ./scale sharded 8   (each thread pins itself to core t)
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cstdint>
 #include <thread>
 #include <vector>
 #include <chrono>
 #include <new>
+#include <pthread.h>
+#include <sched.h>
 
-struct alignas(std::hardware_destructive_interference_size) Padded {  // own cache line (Ch. 33)
-    std::uint64_t v = 0;
+#ifdef __cpp_lib_hardware_interference_size            // GCC 12+/libstdc++; Clang 19+ (Appendix H)
+constexpr std::size_t kLine = std::hardware_destructive_interference_size;
+#else
+constexpr std::size_t kLine = 64;
+#endif
+struct alignas(kLine) Padded {                          // own cache line (Ch. 33)
+    std::atomic<std::uint64_t> v{0};
 };
+
+static void pin_to(int core) {                           // Ch. 42
+    cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
+    if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
+}
 
 int main(int argc, char** argv) {
     bool sharded = (argc > 1) && std::strcmp(argv[1], "sharded") == 0;
@@ -73,12 +86,15 @@ int main(int argc, char** argv) {
     std::atomic<std::uint64_t> shared{0};
     std::vector<Padded> local(M);                          // one padded counter per thread
 
+    // Both designs do the SAME per-op work — one relaxed fetch_add (a locked RMW in memory) — and
+    // differ only in whether the target line is shared. (A plain `s++` on a local would be folded
+    // by the compiler into one store of `per`, measuring nothing.)
     auto t0 = std::chrono::steady_clock::now();
     std::vector<std::thread> ts;
     for (int t = 0; t < M; ++t) ts.emplace_back([&, t]{
-        // (pin to core t here — sched_setaffinity / Ch. 42)
-        if (sharded) { std::uint64_t s = 0; for (long i=0;i<per;++i) s++; local[t].v = s; }  // no sharing
-        else for (long i = 0; i < per; ++i) shared.fetch_add(1, std::memory_order_relaxed);  // shared line
+        pin_to(t);
+        std::atomic<std::uint64_t>& ctr = sharded ? local[t].v : shared;    // own line vs the one line
+        for (long i = 0; i < per; ++i) ctr.fetch_add(1, std::memory_order_relaxed);
     });
     for (auto& th : ts) th.join();
     auto t1 = std::chrono::steady_clock::now();
@@ -89,17 +105,17 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket), threads pinned to distinct cores, turbo off (illustrative; the *curve shape* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, each thread pinned to its own core by the listing, turbo off (illustrative; the *curve shape* is the point). Both columns execute the identical `lock xadd` per operation — an earlier draft's sharded loop incremented a register and was folded by the compiler into one store, so its column measured thread start-up:
 
 ```
-   M (cores)   shared atomic (one line)      sharded (per-thread padded)
-   1           ~120 Mops/s                    ~900 Mops/s     <- even at M=1, atomic RMW costs
-   2           ~50 Mops/s  (line bounces)      ~1800 Mops/s    <- shared: WORSE than M=1
-   4           ~30 Mops/s                       ~3500 Mops/s    <- shared declines; sharded ~linear
-   8           ~20 Mops/s  (retrograde!)        ~6800 Mops/s    <- shared: 6x SLOWER than M=1
+   M (cores)   shared atomic (one line)      sharded (per-thread padded line)
+   1           ~160 Mops/s  (~6 ns/op)        ~160 Mops/s     <- identical at M=1: one uncontended locked RMW (~18 cycles)
+   2           ~50 Mops/s   (line bounces)    ~320 Mops/s     <- shared: WORSE than M=1
+   4           ~30 Mops/s                     ~640 Mops/s     <- shared declines; sharded ~linear
+   8           ~20 Mops/s   (retrograde!)     ~1280 Mops/s    <- shared: 8x SLOWER than M=1; sharded 8x FASTER
 ```
 
-Read it via the USL: the **shared** design exhibits the retrograde curve — throughput *peaks at one thread and declines* as cores are added, because every `fetch_add` fights for the one cache line and the coherence traffic (HITM — Ch. 7) swamps the work; eight cores deliver *less* than one. The **sharded** (shared-nothing) design scales ~linearly — each thread hits only its own padded cache line (Ch. 33), no coherence traffic, so 8 cores do ~8× the work. *Same total operations, opposite scaling*, purely from whether the state is shared. This is the foundational measurement of Part VI: **a concurrency design's quality is its scalability curve, and contention turns "more cores" into "less throughput."** The fix is structural (don't share — §31.4), not a faster atomic. (And note the latency story behind it: the shared version's per-op cost isn't just higher, it's *variable* — the line-bounce time depends on contention, spiking the tail, Ch. 1.)
+Read it via the USL: the **shared** design exhibits the retrograde curve — throughput *peaks at one thread and declines* as cores are added, because every `fetch_add` fights for the one cache line and the coherence traffic (HITM — Ch. 7) swamps the work; eight cores deliver *less* than one. The **sharded** (shared-nothing) design scales ~linearly — each thread hits only its own padded cache line (Ch. 33), no coherence traffic, so 8 cores do ~8× the work. *Same instruction, same total operations, opposite scaling*, purely from whether the line is shared. This is the foundational measurement of Part VI: **a concurrency design's quality is its scalability curve, and contention turns "more cores" into "less throughput."** The fix is structural (don't share — §31.4), not a faster atomic. (And note the latency story behind it: the shared version's per-op cost isn't just higher, it's *variable* — the line-bounce time depends on contention, spiking the tail, Ch. 1.)
 
 ## 31.4 Techniques
 

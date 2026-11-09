@@ -65,55 +65,81 @@ The key counters (§12.3): `idq_uops_not_delivered.*` (the canonical front-end-b
 
 ## 12.3 Measure it: front-end-bound counters; DSB coverage
 
-The experiment: take a hot dispatch loop and run it two ways — once with a **lean** hot path (the rare/cold work split out into a separate non-inlined function), once **bloated** (all the cold error/logging/slow-path code inlined directly into the hot function so it pollutes L1i and the DSB). Same work on the common path; the only difference is instruction footprint.
+The experiment: run the *same* per-message arithmetic two ways — once **lean** (one compact handler whose per-type constants are *data*, a table in L1d), once **bloated** (256 constant-specialised copies of that handler, one per message type, all of them executed — what over-inlining and per-type template instantiation produce). Same work, same data; the only difference is the **executed** instruction footprint: ~1 KB of loop vs ~45 KB of straight-line code that no longer fits Ice Lake's 32 KiB L1i or its ~2.25 K-µop DSB. (One thing this experiment deliberately does *not* do is inline *cold* code into the hot function: bytes that are never fetched or decoded cost nothing, and both GCC and Clang lay a never-taken arm out after the loop anyway — §12.4.2. Only code the front-end has to *deliver* counts.)
 
 ```cpp
-// frontend.cpp — common path is tiny; cold path is large. Two builds:
-//   lean : cold path is a separate, non-inlined, .cold-attributed function
-//   bloat: cold path inlined into the hot loop (BLOAT defined)
+// frontend.cpp — same arithmetic per message, two EXECUTED code footprints. Two builds:
+//   lean : ONE generic handler; the per-type constants are DATA (a 256-entry table, 8 KiB, L1d)
+//   bloat: 256 constant-specialised copies of the handler (one template instantiation per
+//          message type, every one of them executed) — ~40 KiB of straight-line code
 // Build: g++ -O2 -std=c++20 -march=native frontend.cpp -o frontend          # lean
 //        g++ -O2 -std=c++20 -march=native -DBLOAT frontend.cpp -o frontend_bloat
 // Run pinned, turbo off:  taskset -c 2 ./frontend
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <utility>
 #include <vector>
 
 struct Msg { std::uint32_t type; std::int64_t px; std::int32_t qty; };
+struct Params { std::uint64_t k0, k1, k2, k3, k4, k5; };
 
-// The rare path: lots of code (validation, formatting, recovery). In a real system
-// this is gap-recovery / error formatting / slow-path logging — big and almost never run.
-#ifdef BLOAT
-__attribute__((always_inline)) inline
-#else
-[[gnu::cold, gnu::noinline]]
-#endif
-std::int64_t handle_rare(const Msg& m, std::int64_t acc) {
-    // Deliberately bulky, branchy, rarely-taken work (stands in for KBs of cold code).
-    char buf[256];
-    std::int64_t h = acc;
-    for (int k = 0; k < 32; ++k) {                       // unrolled-ish bulk → big footprint
-        buf[k] = char((m.type * 2654435761u) >> (k & 7));
-        h = (h ^ (buf[k] * 1099511628211ull)) + (m.px >> (k & 3)) - (m.qty << (k & 1));
-        h ^= (h >> 17); h *= 0xff51afd7ed558ccdull; h ^= (h >> 29);
-    }
+constexpr Params params_for(std::uint32_t type) {          // per-type constants (splitmix64)
+    std::uint64_t z = 0x9E3779B97F4A7C15ull * (type + 1);
+    auto next = [&] { z += 0x9E3779B97F4A7C15ull; std::uint64_t x = z;
+                      x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+                      x = (x ^ (x >> 27)) * 0x94D049BB133111EBull; return (x ^ (x >> 31)) | 1; };
+    return { next(), next(), next(), next(), next(), next() };
+}
+
+// The per-message work: ~45 instructions of multiply/xor/shift on THIS message only (no chain
+// through acc), so the back-end can overlap messages — the front-end is the only limiter.
+template <class P>
+[[gnu::always_inline]] inline std::uint64_t handle(const Msg& m, const P& p) {
+    std::uint64_t h = std::uint64_t(m.px) * p.k0 + std::uint64_t(std::uint32_t(m.qty)) * p.k1;
+    h ^= h >> 29; h *= p.k2; h ^= h >> 32; h += p.k3;
+    h ^= h >> 27; h *= p.k4; h ^= h >> 31; h += p.k5;
+    h ^= h >> 29; h *= p.k0; h ^= h >> 32; h += p.k1;
+    h ^= h >> 27; h *= p.k2; h ^= h >> 31; h += p.k3;
     return h;
 }
 
+#ifdef BLOAT
+template <std::uint32_t T> struct Spec { static constexpr Params v = params_for(T); };  // immediates
+template <std::size_t... I>
+[[gnu::always_inline]] inline std::uint64_t block(const Msg* m, std::index_sequence<I...>) {
+    return (... + handle(m[I], Spec<I>::v));           // 256 distinct, constant-specialised bodies
+}
+#else
+constexpr auto kTable = [] {                            // the same constants, as DATA
+    std::array<Params, 256> t{};
+    for (std::uint32_t i = 0; i < 256; ++i) t[i] = params_for(i);
+    return t;
+}();
+#endif
+
 int main() {
-    constexpr std::size_t N = 1u << 12;                  // data fits L1d — data is NOT the variable
-    constexpr int REPS = 2'000'000;
+    constexpr std::size_t N = 1024;                      // 24 KiB of messages: L1d — data is NOT the variable
+    constexpr int REPS = 200'000;                        // 200 M messages
     std::vector<Msg> in(N);
     for (std::size_t i = 0; i < N; ++i)
-        in[i] = { std::uint32_t(i), std::int64_t(100000 + i), std::int32_t(1 + (i & 15)) };
+        in[i] = { std::uint32_t(i & 255), std::int64_t(100000 + i), std::int32_t(1 + (i & 15)) };
 
-    std::int64_t acc = 0;
-    for (int r = 0; r < REPS; ++r)
-        for (const Msg& m : in) {
-            acc += m.px * m.qty;                         // the COMMON, hot path: tiny
-            if (m.type == 0xDEADBEEF) [[unlikely]]       // ~never taken
-                acc = handle_rare(m, acc);               // the rare path
-        }
-    std::printf("acc=%lld\n", (long long)acc);
+    std::uint64_t acc = 0;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int r = 0; r < REPS; ++r) {
+        for (std::size_t i = 0; i < N; i += 256)
+#ifdef BLOAT
+            acc += block(&in[i], std::make_index_sequence<256>{});
+#else
+            for (std::size_t j = 0; j < 256; ++j) acc += handle(in[i + j], kTable[j]);
+#endif
+        asm volatile("" : "+r"(acc) :: "memory");        // Appendix L: keep every rep honest
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    std::printf("acc=%llu  %.2f ns/msg\n", (unsigned long long)acc, ns / (double(REPS) * N));
     return 0;
 }
 ```
@@ -128,20 +154,21 @@ frontend_retired.l1i_miss,frontend_retired.itlb_miss,\
 L1-dcache-load-misses,branch-misses  ./frontend
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), `-O2 -march=native`, pinned, turbo off (illustrative; the *direction* is the point):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP: 32 KiB L1i, ~2.25 K-µop DSB, 16 B/cycle legacy fetch), GCC 13 `-O2 -march=native`, Linux 6.x, pinned, turbo off (illustrative; the *direction* is the point):
 
 ```
-                                   lean (cold split)     bloat (cold inlined)
-ns / message                          ~0.9 ns                ~1.8 ns      <- ~2x slower
-IPC                                   high (~3+)             low (~1.5)
-idq_uops_not_delivered.core           low                    HIGH         <- front-end starved
-idq.dsb_uops  : idq.mite_uops         mostly DSB             fell to MITE <- spilled the µop cache
-frontend_retired.l1i_miss             ~0                     elevated     <- hot loop evicted
-L1-dcache-load-misses                 ~0 (same data)         ~0 (same)    <- DATA not the cause
-branch-misses                         ~0 (same)              ~0 (same)    <- branches not the cause
+                                   lean (1 handler, table)   bloat (256 specialised copies)
+ns / message                          ~3.5 ns                   ~7 ns        <- ~2x slower
+instructions / message                ~50 (incl. 6 table loads) ~45 (constants are immediates)
+IPC                                   ~4.5                      ~2.2
+idq_uops_not_delivered.core           low                       HIGH         <- front-end starved
+idq.dsb_uops  : idq.mite_uops         ~100% DSB                 ~0% DSB      <- 45 KB >> the µop cache: legacy decode
+frontend_retired.l1i_miss             ~0                        ~3 / message <- 45 KB cycled through a 32 KiB L1i
+L1-dcache-load-misses                 ~0 (same data)            ~0 (same)    <- DATA not the cause
+branch-misses                         ~0 (same)                 ~0 (same)    <- branches not the cause
 ```
 
-Read it the Ch. 2 way: **same data, same data-cache behavior, same branch behavior — and 2× slower.** The common path executes the *identical* `acc += m.px * m.qty`; the cold `handle_rare` is essentially never called in either build. The only thing that changed is that in the `bloat` build the cold code's *bytes* are interleaved within the hot function's fetch lines and 32-byte DSB windows, fragmenting the loop across more of them (and adding taken jumps around the cold arms) until it spills out of the DSB and onto the slow MITE decode path. That is the Front-End-Bound signature: **low IPC, high `idq_uops_not_delivered`, DSB→MITE spill, clean memory, clean branches.** When you see it, the problem is your *code's* footprint, not your data's.
+Read it the Ch. 2 way: **same data, same data-cache behavior, same branch behavior, *fewer* instructions — and 2× slower.** Every message does the identical multiply/xor/shift work. In the `bloat` build those ~45 instructions arrive as ~180 bytes of straight-line code per message (10-byte `movabs` immediates instead of 4-byte table loads), the 256 bodies total ~45 KB, and the loop cycles through all of them: nothing stays in the DSB, so every µop comes from the legacy decoder at ≤ 16 bytes/cycle — ~11 cycles of fetch for ~9 cycles of back-end work — and the L1i evicts each body before its next use. That is the Front-End-Bound signature: **low IPC, high `idq_uops_not_delivered`, DSB→MITE spill, L1i misses, clean memory, clean branches.** When you see it, the problem is your *code's* footprint, not your data's. (Scale check: a core with a 64 KiB L1i and a 4 K-µop DSB — Golden Cove / Sapphire Rapids — swallows this footprint; on such a box raise the type count until the executed code exceeds *its* L1i before expecting the gap. Compile time grows with the count: 1 024 types is ~40 s with GCC 13.)
 
 ---
 
@@ -247,7 +274,7 @@ Two things to confirm, both the *point* of the chapter:
 
    In the linked executable GNU ld's default script folds the `.text.unlikely` (and `.text.hot`) *input* sections into the single `.text` *output* section — cold input first, hot after — so `readelf -S a.out` shows only `.text`; the separation survives as address distance, which is what `nm` shows.
 
-   That separation is what keeps the kilobytes of `handle_gap` (and every other cold handler) out of the hot path's L1i working set. Without `[[unlikely]]`/`[[gnu::cold]]` (or with the `BLOAT` inline of §12.3), the cold body would be emitted *inline* in `process`, padding the hot bytes and spilling the DSB.
+   That separation is what keeps the kilobytes of `handle_gap` (and every other cold handler) out of the hot path's L1i working set. Without `[[gnu::cold]]` the cold body stays in `.text` beside `process` — after its `ret` if the branch is hinted `[[unlikely]]`, interleaved with the hot bytes if it is not — and in the interleaved case the front-end fetches and decodes the cold bytes it then jumps over, wasting fetch bandwidth and 32-byte DSB windows. (§12.3's bigger lesson still holds: bytes the front-end never has to *deliver* cost nothing; it is the executed footprint that starves the back-end.)
 
 The verification habit: for a hot function, **disassemble it and confirm the common path is a contiguous fall-through with rare arms tail-jumping to `.text.unlikely`** — and check the section table to confirm cold handlers actually moved. If you see large rarely-run bodies inlined into the hot function, that's footprint you're paying for on every iteration.
 

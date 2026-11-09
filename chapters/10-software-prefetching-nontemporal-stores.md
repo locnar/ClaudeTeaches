@@ -80,14 +80,14 @@ The mental model: normal store = "write and keep a hot copy"; streaming store = 
 
 ---
 
-## 10.3 Measure it: prefetch-distance sweep on a linked traversal
+## 10.3 Measure it: prefetch-distance sweep on a dependent random gather
 
-Software prefetch lives or dies by the distance, so the essential experiment is a **distance sweep** over a pointer-chase-like loop the hardware prefetcher can't help — here, summing values gathered through a random index array (a scatter/gather, like resolving order ids to records):
+Software prefetch lives or dies by the distance, so the essential experiment is a **distance sweep** over a loop the hardware prefetcher can't help — here, summing values gathered through a random index array (a scatter/gather, like resolving order ids to records). One design point matters: the gather must be **dependent** — each load's address must wait for the previous load — or there is nothing for a prefetch to win. An *independent* gather (`sum += data[index[i]]`) is already overlapped by the out-of-order core up to the fill-buffer limit (~12 misses in flight on Ice Lake) and lands at ~15-20 ns/element with or without prefetching; the listing threads the result into every address (an opaque `+ (sum & zero)`) so that only the *prefetch* can run ahead:
 
 ```cpp
 // prefetch_sweep.cpp — find the prefetch distance that best hides miss latency.
 // Build: g++ -O2 -std=c++20 -march=native prefetch_sweep.cpp -o prefetch_sweep
-// Run pinned, turbo off (Ch.3,6): taskset -c 2 ./prefetch_sweep
+// Run pinned, turbo off (Ch. 3, 6): taskset -c 2 ./prefetch_sweep
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -103,40 +103,46 @@ int main() {
     std::iota(index.begin(), index.end(), 0u);
     std::shuffle(index.begin(), index.end(), std::mt19937(1));
 
+    // `zero` is 0 at run time, but opaque to the compiler: adding (sum & zero) to each address
+    // makes load i+1 DEPEND on load i (one miss at a time, like a pointer chase) while the
+    // addresses stay known in advance — the only thing a software prefetch can exploit.
+    std::uint64_t zero = 0;
+    asm volatile("" : "+r"(zero));
+
     for (int PD : {0, 2, 4, 8, 16, 32, 64, 128}) {  // 0 == no software prefetch (baseline)
         auto t0 = std::chrono::steady_clock::now();
         std::uint64_t sum = 0;
         for (std::size_t i = 0; i < N; ++i) {
             if (PD && i + PD < N)
                 __builtin_prefetch(&data[index[i + PD]], 0, 0);  // NTA: touch-once gather
-            sum += data[index[i]];
+            sum += data[index[i] + (sum & zero)];                // dependent gather
         }
         auto t1 = std::chrono::steady_clock::now();
-        volatile std::uint64_t sink = sum; (void)sink;
+        asm volatile("" :: "r"(sum));                            // keep the chain live
         double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         std::printf("PD=%4d   %6.2f ns/elem\n", PD, ns / N);
     }
 }
 ```
 
-Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, pinned, turbo off (illustrative; the **shape** — a U-curve with a sweet spot — is the lesson, not the exact ns):
+Representative output — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -march=native`, Linux 6.x, 4 KiB pages, pinned, turbo off (illustrative; the **shape** — a steep knee, then a plateau — is the lesson, not the exact ns):
 
 ```
-PD=   0    62.0 ns/elem     <- baseline: every gather is a latency-exposed DRAM miss
-PD=   2    48.5 ns/elem     <- too close; fetch not finished in time, partial hide
-PD=   4    31.0 ns/elem
-PD=   8    19.5 ns/elem     <- sweet spot: ~3.2x faster than baseline
-PD=  16    20.0 ns/elem
-PD=  32    27.5 ns/elem     <- too far; lines evicted before use / LFB pressure
-PD=  64    41.0 ns/elem
-PD= 128    58.0 ns/elem     <- nearly back to baseline; prefetch wasted
+PD=   0   110.0 ns/elem     <- baseline: every gather is a latency-exposed DRAM miss + page walk
+PD=   2    58.0 ns/elem     <- 2 in flight: fetch not finished in time, partial hide
+PD=   4    30.0 ns/elem
+PD=   8    16.0 ns/elem     <- 8 misses in flight
+PD=  16    11.0 ns/elem     <- knee: ~10x faster than baseline
+PD=  32    10.0 ns/elem     ┐
+PD=  64    10.0 ns/elem     ├─ plateau: ~12 fill buffers (and 2 page walkers) in flight — the core's MLP limit
+PD= 128    10.5 ns/elem     ┘   (128 lines ahead = 8 KiB: nothing is evicted from a 48 KiB L1d)
 ```
 
 Read it the Ch. 1 way:
 
-- **There is a sweet spot, and it's a U-curve.** Distance too small → the fetch isn't done when you arrive (little benefit). Too large → the line is evicted before use, *and* you've burned bandwidth/LFBs (active harm). The minimum (~PD 8–16 here) is where arrival timing matches dereference — a **~3×** win over the un-prefetched gather.
-- **`PD` is empirical and machine-specific.** Nothing on paper would have told you "8." You *found* it by sweeping, and the curve's position shifts with per-iteration work and CPU (§10.2.2). This is why §10.6 warns that a hardcoded `PD` is a portability liability.
-- **Confirm the mechanism with the PMU** (Ch. 2): at the sweet spot, `cycle_activity.stalls_ mem_any` drops sharply while `L1-dcache-load-misses` stay similar (you didn't avoid the misses — you *overlapped* them with work). That distinction is the whole idea.
+- **There is a knee, then a plateau.** Distance too small → the fetch isn't done when you arrive (little benefit); the time per element is roughly latency ÷ PD until PD reaches the number of misses the core can keep in flight (~12 L1 fill buffers on Ice Lake, two page walkers for the TLB misses). Past that the prefetches queue behind each other and the curve goes flat at the **memory-level-parallelism floor** — ~10 ns/element, a **~10×** win over the dependent baseline. (The "too far — evicted before use" failure mode of §10.2.2 is real but needs a per-iteration footprint that makes `PD × 64 B` exceed the cache; at 8 KiB for PD = 128 this loop never triggers it.)
+- **`PD` is empirical and machine-specific.** Nothing on paper would have told you "16." You *found* it by sweeping, and the knee moves with per-iteration work, miss latency and the fill-buffer count (§10.2.2). This is why §10.6 warns that a hardcoded `PD` is a portability liability.
+- **Confirm the mechanism with the PMU** (Ch. 2): at the knee, `cycle_activity.stalls_mem_any` drops sharply while `L1-dcache-load-misses` stay similar (you didn't avoid the misses — you *overlapped* them). That distinction is the whole idea. And re-run with the `+ (sum & zero)` removed: the baseline itself falls to ~18 ns and every PD lands within a few ns of it — the out-of-order window was already doing the prefetcher's job.
 
 ---
 
@@ -207,7 +213,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 ## 10.6 Pitfalls & anti-patterns: when manual prefetch hurts; prefetch the wrong line
 
 - **Prefetching what the hardware already handles.** The hardware prefetcher nails sequential/constant-stride access (Ch. 7 §7.2.4). Adding software prefetch there does *nothing useful* and *costs* instructions, decode bandwidth, and LFB slots — a net loss. Software prefetch is **only** for access the hardware can't predict. A/B it; if no-prefetch ties or wins, delete the prefetch.
-- **Wrong distance.** The U-curve (§10.3): too short → no hide; too long → eviction before use plus wasted bandwidth. A guessed `PD` is usually wrong. Sweep and measure; re-sweep on new hardware.
+- **Wrong distance.** The knee-and-plateau curve (§10.3): too short → no hide; too long → (once the per-iteration footprint is large) eviction before use plus wasted bandwidth. A guessed `PD` is usually wrong. Sweep and measure; re-sweep on new hardware.
 - **Prefetch the wrong line / stale address.** Prefetching `&x` when you'll actually dereference `&y`, prefetching an address that's recomputed before use, or prefetching past the array bounds into another page (harmless to correctness — prefetch never faults — but wasted, and can trigger a spurious page walk). Prefetch the *exact* line you'll touch.
 - **Too many prefetches in flight.** Only ~10–12 LFBs per core; flooding them with prefetches starves real demand loads and *adds* latency. Keep in-flight prefetches modest; more is not better.
 - **Portability/maintenance cost.** A tuned `PD` and locality hint are microarchitecture-specific; they can pessimize the next CPU and rot silently (no compile error when they stop helping). Gate them behind measurement and re-validate per platform (Appendix A for ARM, where the prefetch instruction and tuning differ).

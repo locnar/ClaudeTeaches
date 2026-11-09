@@ -38,19 +38,20 @@ The mental model: **TCP has a dozen throughput/fairness heuristics, and on a ded
 
 ## 52.3 Measure it: the delayed-ACK stall, cold start, and offload latency
 
-- **The Nagle/delayed-ACK stall.** Set up a request-response order flow (send small message, await small reply) over a TCP socket *without* `TCP_NODELAY`, and measure the latency distribution (Ch. 3). Representative (figures pending real runs): most exchanges are fast, but a fraction of messages hit the delayed-ACK timer and show **~40 ms** — a bimodal distribution with a catastrophic tail. Enable `TCP_NODELAY` (and `TCP_QUICKACK`) and the 40 ms mode vanishes:
+- **The Nagle/delayed-ACK stall.** Run Ch. 51's `nodelay.cpp` (a request-response order flow: small request, small reply) over a TCP socket *without* `TCP_NODELAY`, and measure the latency distribution (Ch. 3). The stall needs **write-write-read** — a request emitted as two small writes while the previous one is unacknowledged (Ch. 51 §51.3): with that framing *every* exchange hits the delayed-ACK timer (**~40 ms**); a one-write-per-request client never does. Real order-entry code sits in between — a header/body split here, a batched pair of orders there — which is why the production symptom is **bimodal**: a fine median with a 40 ms mode in the tail. Enable `TCP_NODELAY` and the 40 ms mode vanishes:
 
-| Config | p50 | p99.9 | Notes |
+| Config (loopback, Linux 6.x) | p50 | p99.9 | Notes |
 |---|---|---|---|
-| **Default (Nagle on)** | ~30 µs | ~**40 ms** | Nagle+delayed-ACK deadlock on some messages |
-| **`TCP_NODELAY`** | ~30 µs | ~60 µs | send immediately; stall gone |
-| **`TCP_NODELAY` + `TCP_QUICKACK` + warm** | ~25 µs | ~50 µs | ACK immediately, connection warm (Ch. 46) |
+| **Default (Nagle on), request = 2 writes** | ~**40 ms** | ~45 ms | Nagle holds the body; receiver delays the ACK — every exchange |
+| **Default (Nagle on), request = 1 write** | ~25 µs | ~200 µs | nothing unacked when the write happens: no stall (the misleading quick test) |
+| **`TCP_NODELAY`**, request = 2 writes | ~25 µs | ~80 µs | send immediately; stall gone |
+| **`TCP_NODELAY` + warm connection** | ~25 µs | ~60 µs | `TCP_QUICKACK` on the receiver also breaks the standoff but adds nothing further here (the ACK rides on the reply); keep the connection warm (Ch. 46) |
 
 - **Cold-start / slow-start.** Measure the latency of the *first* order after an idle period vs a warm connection. A cold or idle-reset connection (small cwnd, `tcp_slow_start_after_idle`) meters the first messages; a warmed connection (Ch. 46 — shadow traffic keeping it hot) sends the first real order at full speed. Quantify the first-message penalty and the warm-up that removes it (Ch. 46).
 - **GRO/LRO receive latency.** Measure RX latency (packet-on-wire to `read()` returns, hardware timestamps — Ch. 55, 58) with GRO on vs off. GRO on: the receiver may hold a segment to coalesce, adding latency (and jitter, since it depends on whether a following segment arrives). GRO off: each segment is delivered immediately — lower latency, more CPU. On the latency-critical RX path (feed recovery — Ch. 54, drop-copy), GRO off usually wins; measure the trade.
 - **Congestion-control behavior on a clean link.** On a dedicated colo link (no real congestion), measure whether the congestion controller ever backs off spuriously (e.g. on a single reordering event misread as loss). CUBIC vs BBR behave differently; measure which holds a flatter send rate on *your* link.
 
-The lessons: the default TCP stack has a **millisecond-scale tail** (delayed-ACK) hiding behind a fine median — the exact means-lie trap of Ch. 1; the fix (`TCP_NODELAY` + `TCP_QUICKACK`) is nearly free and mandatory. Cold connections are slow on the first message (Ch. 46) — warm them. RX offloads trade latency for CPU — turn them off on the hot RX path. And measure the *distribution*, because TCP's latency problems are almost all in the tail.
+The lessons: the default TCP stack has a **millisecond-scale tail** (delayed-ACK) hiding behind a fine median whenever a request is ever split across writes — the exact means-lie trap of Ch. 1; the fix (`TCP_NODELAY` on the sender; `TCP_QUICKACK` on the receiver as the non-sticky belt-and-braces) is nearly free and mandatory. Cold connections are slow on the first message (Ch. 46) — warm them. RX offloads trade latency for CPU — turn them off on the hot RX path. And measure the *distribution*, because TCP's latency problems are almost all in the tail.
 
 ## 52.4 Techniques
 

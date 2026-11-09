@@ -92,7 +92,7 @@ The workflow is: **`perf stat` to learn *what kind* of problem you have and whet
 
 ## 2.3 Measure it: a guided `perf stat` / `perf record` session
 
-Let's make this concrete with a deliberately memory-bound microbenchmark — a pattern you will meet for real in Ch. 7 and again in the order-book case study (Ch. 25). It compares summing an array **sequentially** (cache- and prefetcher-friendly) against summing the same values via a **random pointer-chase** (defeats the hardware prefetcher, misses to DRAM). Same arithmetic, same instruction count; the only difference is the memory access pattern — exactly the kind of cost that is invisible in source and obvious in the PMU.
+Let's make this concrete with a deliberately memory-bound microbenchmark — a pattern you will meet for real in Ch. 7 and again in the order-book case study (Ch. 25). It compares summing an array **sequentially** (cache- and prefetcher-friendly) against summing the same values via a **random pointer-chase** (defeats the hardware prefetcher, misses to DRAM). Same arithmetic, same instruction count; the only difference is the memory access pattern — exactly the kind of cost that is invisible in source and obvious in the PMU. One discipline up front: `perf stat` counts the **whole process** by default, and here the setup (a 32 Mi-element `std::shuffle` in `rand` mode, ~2 G instructions and 32 M random misses that `seq` never executes) would swamp the loop we care about. So the listing lets `perf stat --control` start and stop the counters around the measured loop only — the steady-state-vs-setup split this book insists on everywhere.
 
 ```cpp
 // perf_demo.cpp — same work, two memory access patterns. Profile with perf.
@@ -100,6 +100,10 @@ Let's make this concrete with a deliberately memory-bound microbenchmark — a p
 //   (-fno-omit-frame-pointer so perf can unwind stacks for flame graphs; Ch. 22.)
 // Run:   ./perf_demo seq      (sequential, cache-friendly)
 //        ./perf_demo rand     (random pointer-chase, cache-hostile)
+// Count ONLY the measured loop (perf >= 5.10): create two FIFOs and let perf wait for
+// our enable/disable commands instead of counting the ~2 G instructions of setup:
+//        mkfifo perf.ctl perf.ack
+//        perf stat -D -1 --control fifo:perf.ctl,perf.ack -e ... ./perf_demo rand
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -107,6 +111,18 @@ Let's make this concrete with a deliberately memory-bound microbenchmark — a p
 #include <numeric>
 #include <random>
 #include <vector>
+#include <fcntl.h>
+#include <unistd.h>
+
+// Tell `perf stat --control` to start/stop counting. A no-op when the FIFOs are absent
+// (plain `./perf_demo` or `perf stat` without --control: then the WHOLE process is counted).
+static void perf_ctl(const char* cmd) {
+    static const int ctl = ::open("perf.ctl", O_WRONLY | O_NONBLOCK);
+    static const int ack = ctl < 0 ? -1 : ::open("perf.ack", O_RDONLY);
+    if (ctl < 0) return;
+    char buf[8];
+    if (::write(ctl, cmd, std::strlen(cmd)) > 0) (void)!::read(ack, buf, sizeof buf);
+}
 
 int main(int argc, char** argv) {
     const bool random_mode = (argc > 1 && std::strcmp(argv[1], "rand") == 0);
@@ -116,8 +132,8 @@ int main(int argc, char** argv) {
     constexpr std::size_t N = 32u * 1024 * 1024;  // 32M elements * 8B = 256 MiB
     std::vector<std::uint64_t> next(N);
 
-    // Build a traversal order: identity (sequential) or a random permutation
-    // forming one big cycle (each step a dependent, unpredictable load).
+    // Setup (NOT counted): a traversal order — identity (sequential) or a random
+    // permutation forming one big cycle (each step a dependent, unpredictable load).
     std::vector<std::uint64_t> order(N);
     std::iota(order.begin(), order.end(), 0);
     if (random_mode) {
@@ -128,15 +144,17 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < N; ++i)
         next[order[i]] = order[(i + 1) % N];
 
-    // The measured loop: N dependent loads. Identical instruction stream in
-    // both modes; only the addresses (and thus cache behaviour) differ.
+    // The measured loop: N dependent loads per pass. Identical instruction stream
+    // in both modes (mov/add/sub/jne — 4 instructions); only the addresses differ.
     std::uint64_t idx = 0, checksum = 0;
     constexpr int PASSES = 4;
+    perf_ctl("enable\n");
     for (int p = 0; p < PASSES; ++p)
         for (std::size_t i = 0; i < N; ++i) {
             idx = next[idx];        // dependent load: address of the next ⇐ this load
             checksum += idx;
         }
+    perf_ctl("disable\n");
 
     std::printf("mode=%s checksum=%llu\n", random_mode ? "rand" : "seq",
                 static_cast<unsigned long long>(checksum));
@@ -147,36 +165,39 @@ int main(int argc, char** argv) {
 **Step 1 — count, to learn what kind of problem it is.** Run both under `perf stat` with a hand-picked event list (IPC, cache misses, branch misses):
 
 ```
-$ perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses \
-      ./perf_demo seq
-$ perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses \
-      ./perf_demo rand
+$ mkfifo perf.ctl perf.ack        # once; -D -1 = don't count until we say "enable"
+$ perf stat -D -1 --control fifo:perf.ctl,perf.ack \
+      -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses ./perf_demo seq
+$ perf stat -D -1 --control fifo:perf.ctl,perf.ack \
+      -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses ./perf_demo rand
 ```
 
-Representative results on the reference machine — single-socket **Intel Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base), Linux 6.x, GCC 13 `-O2` (illustrative; reproduce on your own box):
+Representative results for the **measured loop only** (4 × 32 Mi = 134 M dependent loads) on the reference machine — single-socket **Intel Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz base, turbo off), Linux 6.x, GCC 13 `-O2` (illustrative; reproduce on your own box):
 
 ```
                          seq (sequential)      rand (pointer-chase)
-cycles                    1,180,000,000         18,900,000,000
-instructions              1,074,000,000          1,074,000,000     <- identical work
-IPC (insn/cycle)                   0.91                   0.057    <- ~16x worse
-L1-dcache-load-misses        9,200,000            135,400,000
-LLC-load-misses                 41,000            131,900,000      <- ~3200x more
-branch-misses                  138,000                141,000      <- basically equal
+cycles                      805,000,000         42,800,000,000     <- ~53x
+instructions                537,000,000            537,000,000     <- identical work: 4 insns x 134M
+IPC (insn/cycle)                   0.67                  0.0125    <- ~53x worse
+L1-dcache-load-misses        16,900,000            134,100,000     <- 1 GiB/64 B vs one per load
+LLC-load-misses                 270,000            122,300,000     <- ~450x more
+branch-misses                     2,100                  2,400     <- basically equal
 ```
 
 Read it through the Ch. 1 + §2.2 lens, and the story writes itself:
 
-- **Same instructions, ~16× the cycles.** The work is identical (instruction counts match to the percent); the *only* variable is the access pattern. So this is a memory problem, full stop.
-- **IPC collapses from 0.91 to 0.057.** The random-mode core is issuing almost nothing per cycle — it is stalled, not computing. Low IPC + high cache misses is the textbook signature of **Back-End Bound → Memory Bound**.
-- **LLC misses explode ~3200×; branch misses don't move.** This tells you *which* branch of the top-down tree to take: memory, not speculation. Don't waste a second on branchless tricks here — Ch. 7's prefetching and layout are the fix.
+- **Same instructions, ~53× the cycles.** The work is identical (the loop is `mov`/`add`/`sub`/`jne`, 4 instructions per load, and the counts match to the percent); the *only* variable is the access pattern. So this is a memory problem, full stop. Even the *sequential* chain is latency-bound: each `idx = next[idx]` waits ~5 cycles for the L1 hit before the next address exists (Ch. 7), plus the DRAM fetch of the first line of every 4 KiB page that the prefetchers won't cross — ~6 cycles per load, IPC 0.67. The random chain waits a full DRAM round-trip *and* a page walk per load (~110 ns ≈ 320 cycles; Appendix E, Ch. 15): IPC 0.0125.
+- **IPC collapses from 0.67 to 0.0125.** The random-mode core is issuing almost nothing per cycle — it is stalled, not computing. Low IPC + high cache misses is the textbook signature of **Back-End Bound → Memory Bound**.
+- **LLC misses explode ~450×; branch misses don't move.** In `seq` the hardware prefetchers fetch the lines before the demand load arrives, so only the page-boundary lines (1 GiB / 4 KiB ≈ 260 k) show as demand misses; in `rand` ~91% of 134 M loads miss the 24 MB L3 (the table is 256 MiB). This tells you *which* branch of the top-down tree to take: memory, not speculation. Don't waste a second on branchless tricks here — Ch. 7's prefetching and layout are the fix.
+
+(Run the same commands without the FIFOs and `-D -1` and you count the whole process: ~2.6 G instructions in both modes, the shuffle's 32 M random misses in the `seq`-vs-`rand` *difference*, and a far less legible table. Always ask what region a counter covered.)
 
 Confirm it with the top-down summary directly (Ice Lake+):
 
 ```
-$ perf stat --topdown -- ./perf_demo rand
+$ perf stat -D -1 --control fifo:perf.ctl,perf.ack --topdown -- ./perf_demo rand
 # ... Retiring  Bad-Spec  Front-End  Back-End
-#        3.1%      0.4%       1.2%      95.3%   <- overwhelmingly Back-End (Memory) Bound
+#        0.3%      0.0%       0.2%      99.5%   <- overwhelmingly Back-End (Memory) Bound
 ```
 
 **Step 2 — sample, to learn where it lives.** In a one-function toy the answer is obvious, but the workflow is what matters. Sample on an L3-miss event that supports precise (PEBS) sampling to minimize skid — `mem_load_retired.l3_miss`, not the generic `LLC-load-misses`, which maps to an offcore-response *counting* event and is not precise even where the kernel accepts `:pp` on it — then view the attribution:
@@ -204,7 +225,7 @@ A handful of derived metrics carry most of the diagnostic weight. Learn to read 
 - **Stall-cycle breakdowns**: `cycle_activity.stalls_mem_any`, `...stalls_l3_miss`, etc., attribute *cycles* (not events) to specific stall reasons — the bridge between "many misses" and "many *cycles lost* to misses," which is what actually costs you latency.
 - **TLB misses**: `dTLB-load-misses`, `iTLB-load-misses` — the signature that huge pages (Ch. 15) may help.
 
-The discipline: **always normalize, always compare against a baseline.** "135M LLC misses" means nothing in isolation; "131 LLC-MPKI vs 0.04 in the sequential baseline" is a diagnosis.
+The discipline: **always normalize, always compare against a baseline.** "122M LLC misses" means nothing in isolation; "≈230 LLC-MPKI vs 0.5 in the sequential baseline" (122.3 M and 0.27 M misses over 537 M instructions) is a diagnosis.
 
 ### 2.4.2 Flame graphs for hot-path attribution
 
@@ -246,7 +267,7 @@ When to reach for it: when `perf stat --topdown` has told you the *category* but
 
 **Exercises**
 
-1. **Reproduce the gap.** Build `perf_demo.cpp` and run `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses` on both `seq` and `rand`. Compute IPC and LLC-MPKI for each. By what factor does each metric change? Which one *doesn't* move, and why does that rule out a whole category of fix?
+1. **Reproduce the gap.** Build `perf_demo.cpp` and run `perf stat -D -1 --control fifo:perf.ctl,perf.ack -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses,branch-misses` on both `seq` and `rand`; then once more without `-D -1 --control`, so the setup is counted too. Compute IPC and LLC-MPKI for each. By what factor does each metric change? Which one *doesn't* move, and why does that rule out a whole category of fix?
 2. **Top-down it.** Run `perf stat --topdown` (or `toplev -l1` from `pmu-tools`) on both modes. Which bucket dominates `rand`? Drill one level deeper (`-l2`) into that bucket. Does it say Memory Bound? Does it agree with your counter reading from exercise 1?
 3. **Localize it.** `perf record -e mem_load_retired.l3_miss:pp -g` on `rand`, then `perf report`. Now rerun *without* the `:pp` (non-precise) — does the attributed line move? That shift is skid.
 4. **Multiplexing in action.** Run `perf stat` requesting ~12 events at once and check the enabled-percentage in brackets. Are any below 100%? Split them into two runs of fewer events and compare the counts. How much did multiplexing distort them?

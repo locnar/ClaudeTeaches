@@ -45,70 +45,80 @@ The model: **the hot path's speed depends on stateful resources (caches, TLB, pr
 The measurement benchmarks *don't* do by default: the **cold** latency. Process a message after an *idle gap* (so the path went cold) vs in a tight loop (warm), and show the gap — and that shadow traffic during the gap closes it.
 
 ```cpp
-// warm.cpp — warm vs cold hot-path latency; show idle gaps cause cold spikes.
+// warm.cpp — warm vs cold hot-path latency; show idle gaps cause cold spikes, and shadow traffic cures them.
 // Build: g++ -O2 -std=c++20 -march=native warm.cpp -o warm
 // Run pinned, isolated core:  taskset -c 2 ./warm
 #include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
-#include <chrono>
-#include <thread>
 #include <x86intrin.h>
 
-constexpr int WS = 1 << 16;                       // hot-path working set (data) ~512KB - exceeds L1/L2
+constexpr int WS = 1 << 18;                       // hot-path working set (data): 2 MiB — exceeds L1d AND L2 (1.25 MiB), lives in L3 when warm
 std::vector<std::uint64_t> book(WS, 1);           // stand-in for the order book / hot data
-std::vector<std::uint64_t> code_touch(WS, 1);
 
 // the REAL hot path: touch the working set as a real message would (loads, branches, a store).
+// The index is a multiplicative hash of (msg, i): 256 DISTINCT lines on ~250 distinct 4 KiB pages per
+// call, and a different set for every msg. (A stride such as i*4096 masked to WS repeats after 16
+// steps and touches 16 lines in ONE L1 set; a hash of msg+i gives consecutive msgs the same lines.)
 std::uint64_t process(std::uint64_t msg) {
     std::uint64_t s = 0;
     for (int i = 0; i < 256; ++i) {               // touch scattered hot data (cache/TLB working set)
-        std::size_t idx = (msg * 2654435761u + i * 4096) & (WS - 1);
+        std::size_t idx = std::size_t(((msg ^ (std::uint64_t(i) * 0x9E3779B97F4A7C15ull)) * 0xBF58476D1CE4E5B9ull) >> 46);  // 0..WS-1
         s += book[idx]; if (s & 1) book[idx] = s;  // load + data-dependent branch + store
     }
     return s;
 }
 
 std::uint32_t timed(std::uint64_t msg) {
-    std::uint64_t t0 = __rdtsc(); volatile std::uint64_t r = process(msg); std::uint64_t t1 = __rdtsc();
-    (void)r; return std::uint32_t(t1 - t0);
+    std::uint64_t t0 = __rdtsc(); std::uint64_t r = process(msg); std::uint64_t t1 = __rdtsc();
+    asm volatile("" :: "r"(r) : "memory"); return std::uint32_t(t1 - t0);
 }
 
 int main() {
-    // (1) WARM: tight loop — everything stays resident
-    std::vector<std::uint32_t> warm; warm.reserve(100000);
-    for (long i = 0; i < 100000; ++i) warm.push_back(timed(i));
-    std::sort(warm.begin(), warm.end());
-
-    // (2) COLD: idle gap before each measured message (evict the working set by sleeping + thrashing)
-    std::vector<std::uint32_t> cold; cold.reserve(2000);
+    auto pct=[&](std::vector<std::uint32_t>&v,double p){std::sort(v.begin(),v.end());return v[std::size_t(p*(v.size()-1))];};
     std::vector<std::uint64_t> evict(1 << 22, 1);   // 32MB to thrash the LLC during the "gap"
+
+    // (1) WARM: tight loop — everything stays resident
+    std::vector<std::uint32_t> warm(100000);
+    for (long i = 0; i < 100000; ++i) warm[i] = timed(i);
+
+    // (2) COLD: idle gap before each measured message (evict the working set by thrashing the caches)
+    std::vector<std::uint32_t> cold(2000);
     for (long i = 0; i < 2000; ++i) {
         for (auto& x : evict) x += i;                // evict the hot working set (simulate idle activity)
-        cold.push_back(timed(i));                    // first message after the gap = COLD
+        cold[i] = timed(i);                          // first message after the gap = COLD
     }
-    std::sort(cold.begin(), cold.end());
 
-    auto pct=[&](std::vector<std::uint32_t>&v,double p){return v[std::size_t(p*(v.size()-1))];};
-    std::printf("WARM (tight loop):  p50=%u  p99=%u cycles\n", pct(warm,0.5), pct(warm,0.99));
-    std::printf("COLD (after gap):   p50=%u  p99=%u cycles   <- the tail benchmarks HIDE\n",
-                pct(cold,0.5), pct(cold,0.99));
+    // (3) SHADOW: the same gap, but every ~1 MiB of "idle" traffic the REAL process() runs over a
+    //     sweep of DUMMY messages (512 x 256 lines ~ the whole working set), so no line or TLB entry
+    //     is ever more than ~1 MiB of eviction old — a shadow feed at roughly the real feed's rate.
+    std::vector<std::uint32_t> shadow(2000);
+    for (long i = 0; i < 2000; ++i) {
+        for (std::size_t k = 0; k < evict.size(); ++k) {
+            evict[k] += i;
+            if ((k & ((1u << 17) - 1)) == 0)
+                for (std::uint64_t d = 0; d < 512; ++d) process(0xDEAD0000 + d);   // real path, fake msgs
+        }
+        shadow[i] = timed(i);
+    }
+
+    std::printf("WARM (tight loop):          p50=%u  p99=%u cycles\n", pct(warm,0.5), pct(warm,0.99));
+    std::printf("COLD (after gap):           p50=%u  p99=%u cycles   <- the tail benchmarks HIDE\n", pct(cold,0.5), pct(cold,0.99));
+    std::printf("COLD gap + shadow traffic:  p50=%u  p99=%u cycles   <- ~warm again\n", pct(shadow,0.5), pct(shadow,0.99));
     return 0;
 }
 ```
 
-Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), isolated core, turbo off (illustrative; convert cycles→ns at ~2.9 GHz):
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz; 1.25 MiB L2, 24 MiB L3), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.x, 4 KiB pages (THP = `madvise`), isolated core, turbo off (illustrative; convert cycles→ns at 2.9 GHz). The working set is 2 MiB on ~500 pages — larger than L2, so "warm" means L3-resident with the TLB and predictors trained; an earlier draft's index formula repeated every 16 steps and touched 16 lines of *one* L1 set, so its "512 KB working set" was really 1 KiB:
 
 ```
-   WARM (tight loop):   p50 ~3,000 cycles   (~1.0 µs)   everything resident — the number you benchmarked
-   COLD (after gap):    p50 ~18,000 cycles  (~6.2 µs)   ~6x SLOWER — cache/TLB/predictor cold (§46.2)
-
-   with SHADOW TRAFFIC during the gap (run process() on dummy msgs):
-   "cold" path:         p50 ~3,200 cycles   (~1.1 µs)   ~warm again — shadow traffic kept it resident
+   WARM (tight loop):          p50 ~3,000 cycles   (~1.0 µs)   256 L3 hits, overlapped; TLB warm — the number you benchmarked
+   COLD (after gap):           p50 ~15,000 cycles  (~5.2 µs)   ~5x SLOWER — DRAM misses + page walks + cold predictors (§46.2)
+   COLD gap + shadow traffic:  p50 ~4,500 cycles   (~1.6 µs)   ~warm again — the shadow feed kept lines and TLB entries resident
 ```
 
-Read it: the **warm** path (tight loop — what your benchmark measures) is ~1 µs; the **cold** path (first message after an idle gap that evicted the working set) is **~6× slower** — and *that* is the latency the real, rare, critical message sees, because production has idle gaps, not tight loops. This gap is **invisible in a normal benchmark** (which keeps everything warm) and **invisible in the average** (most messages in a busy period are warm) — it lives in the *tail* and activates exactly when the market goes quiet-then-active (the worst time). The third row is the cure: running **shadow traffic** (the *real* `process()` on dummy messages) during the idle gap keeps the working set, predictors, and TLB resident, so the "cold" path is ~warm again. The lesson that closes Part VII: **measure the cold path, not just the warm one** — and **keep it warm with shadow traffic + pre-faulting (§46.4)** so the first real message is never the cold one. (To measure cold latency honestly in production: tag the first message after each idle gap and watch *its* latency distribution separately — Ch. 76.)
+Read it: the **warm** path (tight loop — what your benchmark measures) is ~1 µs; the **cold** path (first message after an idle gap that evicted the working set) is **~5× slower** — and *that* is the latency the real, rare, critical message sees, because production has idle gaps, not tight loops. This gap is **invisible in a normal benchmark** (which keeps everything warm) and **invisible in the average** (most messages in a busy period are warm) — it lives in the *tail* and activates exactly when the market goes quiet-then-active (the worst time). The third row is the cure: running **shadow traffic** (the *real* `process()` on dummy messages, here a sweep of the working set every ~1 MiB of other traffic — a shadow feed at roughly the real feed's rate) during the idle gap keeps the working set, predictors, and TLB resident, so the "cold" path is ~warm again. (It closes most, not all, of the gap: the dummy messages touch *other* lines of the same set than the real one will, so the real message still finds its lines in L3, not L1 — exactly the "warm" row.) The lesson that closes Part VII: **measure the cold path, not just the warm one** — and **keep it warm with shadow traffic + pre-faulting (§46.4)** so the first real message is never the cold one. (To measure cold latency honestly in production: tag the first message after each idle gap and watch *its* latency distribution separately — Ch. 76.)
 
 ## 46.4 Techniques
 

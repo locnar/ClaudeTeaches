@@ -101,9 +101,10 @@ Now the hot loop's working set is *only the hot fields*, so several levels fit p
 Let's put a number on it with the running order-book example: scan every level and sum `total_qty` (a stand-in for "recompute aggregate depth," a real per-event operation), comparing the AoS and SoA layouts on identical data.
 
 ```cpp
-// aos_vs_soa.cpp — same sum, two layouts. Profile both with perf stat.
+// aos_vs_soa.cpp — same sum, two layouts. Time the steady-state sweeps, profile with perf stat.
 // Build: g++ -O2 -std=c++20 -march=native aos_vs_soa.cpp -o aos_vs_soa
-// Run pinned, turbo off (Ch.3,6):  taskset -c 2 ./aos_vs_soa aos   |   ... soa
+// Run pinned, turbo off (Ch. 3, 6):  taskset -c 2 ./aos_vs_soa aos   |   ... soa
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -119,44 +120,59 @@ struct Level {                 // a deliberately fat, OO-style level
     char          pad[8];      // make it a round 64 bytes for the demo
 };                             // sizeof(Level) == 64
 
+// One sweep each. noinline + opaque n: the compiler cannot fuse the PASSES sweeps into one
+// (GCC 13 -O3 otherwise vectorizes the OUTER pass loop and does ONE sweep — Appendix L).
+[[gnu::noinline]] std::int64_t sum_aos(const Level* b, std::size_t n) {
+    std::int64_t s = 0;
+    for (std::size_t i = 0; i < n; ++i) s += b[i].total_qty;    // AoS: stride 64 B
+    return s;
+}
+[[gnu::noinline]] std::int64_t sum_soa(const std::int64_t* q, std::size_t n) {
+    std::int64_t s = 0;
+    for (std::size_t i = 0; i < n; ++i) s += q[i];              // SoA: dense 8 B
+    return s;
+}
+
 int main(int argc, char** argv) {
     const bool soa = (argc > 1 && std::strcmp(argv[1], "soa") == 0);
     constexpr std::size_t N = 4u * 1024 * 1024;   // 4M levels; AoS = 256 MiB, way past L3
     constexpr int PASSES = 20;
 
+    // Setup (allocate, first-touch every page) is NOT timed: it is 8x heavier for AoS too.
+    std::vector<Level> book;  std::vector<std::int64_t> total_qty;
+    if (!soa) { book.resize(N);      for (std::size_t i = 0; i < N; ++i) book[i].total_qty = std::int64_t(i); }
+    else      { total_qty.resize(N); for (std::size_t i = 0; i < N; ++i) total_qty[i]      = std::int64_t(i); }
+
     std::int64_t result = 0;
-    if (!soa) {
-        std::vector<Level> book(N);
-        for (std::size_t i = 0; i < N; ++i) book[i].total_qty = (std::int64_t)i;
-        for (int p = 0; p < PASSES; ++p)
-            for (std::size_t i = 0; i < N; ++i) result += book[i].total_qty;  // AoS: stride 64
-    } else {
-        std::vector<std::int64_t> total_qty(N);   // SoA: just the hot field
-        for (std::size_t i = 0; i < N; ++i) total_qty[i] = (std::int64_t)i;
-        for (int p = 0; p < PASSES; ++p)
-            for (std::size_t i = 0; i < N; ++i) result += total_qty[i];        // SoA: dense
+    auto t0 = std::chrono::steady_clock::now();
+    for (int p = 0; p < PASSES; ++p) {
+        result += soa ? sum_soa(total_qty.data(), N) : sum_aos(book.data(), N);
+        asm volatile("" : "+r"(result) :: "memory");       // each pass is a real sweep
     }
-    std::printf("%s result=%lld\n", soa ? "soa" : "aos", (long long)result);
+    auto t1 = std::chrono::steady_clock::now();
+    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    std::printf("%s result=%lld  %.3f s for %d passes  %.2f ns/level\n", soa ? "soa" : "aos",
+                (long long)result, ns / 1e9, PASSES, ns / (double(PASSES) * N));
     return 0;
 }
 ```
 
-Profile each with `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses` (Ch. 2). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, pinned, turbo off (illustrative; reproduce on your box):
+The program times only the 20 steady-state sweeps — allocation and first-touch faulting of the 256 MiB book (8× heavier for AoS, and 60-85% of a whole-process `time` on this listing) stay outside the clock (Appendix L). Profile each with `perf stat -e cycles,instructions,L1-dcache-load-misses,LLC-load-misses` (Ch. 2; whole-process counts — the setup is in them, so read the *ratios*). Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13 `-O2 -march=native`, Linux 6.x, pinned, turbo off (illustrative; reproduce on your box):
 
 ```
                           AoS (stride 64)        SoA (dense 8B)
-wall time (20 passes)        ~1.9 s                ~0.16 s          <- ~12x faster
-instructions             ~same                  ~same              (same sum)
-L1-dcache-load-misses     very high              ~1/8 of AoS
-LLC-load-misses           very high              much lower (prefetched)
+sweep time (20 passes)       ~0.40 s               ~0.05 s          <- ~8x faster (5.0 vs 0.6 ns/level)
+instructions / level      ~4 (scalar)           ~1 (vpaddq ymm: 4 levels per add)   <- NOT the same: SoA vectorizes
+L1-dcache-load-misses     1 per level            1 per 8 levels
+LLC-load-misses           ~all lines (prefetched) ~all lines (prefetched)  <- both streams are prefetched
 bytes touched / pass      256 MiB (all of it)    32 MiB (qty only)  <- 8x less traffic
 ```
 
 Read it through Ch. 7:
 
-- **Same work, ~12× the speed.** Instruction counts match; the only difference is layout. AoS strides by `sizeof(Level)=64`, so it touches *one* useful 8-byte field per 64-byte line — fetching the whole 256 MiB book to use 32 MiB of it. SoA walks a dense 32 MiB array, every byte useful.
-- **The miss rate is the story.** AoS misses ~8× more in L1 (one miss per element vs one per 8) and can't lean on the prefetcher as effectively because each line yields only one datum. SoA's dense sequential walk is the prefetcher's ideal (Ch. 7 §7.2.4), so it runs near memory-bandwidth speed.
-- **The win is bandwidth and footprint, not cleverness.** SoA moved 8× fewer bytes and let the prefetcher hide the latency. No algorithmic change — just "make the bytes the loop needs contiguous."
+- **Same sum, ~8× the speed — and it is the byte count, not the instruction count.** Both loops stream sequentially at the core's ~13 GB/s DRAM bandwidth (Ch. 7 §7.2.4): 20 × 256 MiB takes ~0.4 s, 20 × 32 MiB takes ~0.05 s. AoS strides by `sizeof(Level)=64`, so it touches *one* useful 8-byte field per 64-byte line — fetching the whole 256 MiB book to use 32 MiB of it. SoA walks a dense 32 MiB array, every byte useful. (The SoA loop also vectorizes — `vpaddq ymm`, one instruction per four levels — while the stride-64 gather stays scalar; that cuts its instruction count ~4×, but the loop is bandwidth-bound either way, so the ~8× tracks the bytes.)
+- **The miss count is the story, not the miss *rate*.** AoS misses L1 once per level, SoA once per 8 levels — the same ratio as the bytes. Both walks are fully prefetched (a stride-64 sequential walk is exactly what the L2 streamer tracks), so neither is latency-bound; AoS simply pushes 8× as many lines through the same bandwidth.
+- **The win is bandwidth and footprint, not cleverness.** SoA moved 8× fewer bytes. No algorithmic change — just "make the bytes the loop needs contiguous." (Whole-process `time` would have shown 6-25× run to run, because the 256 MiB first-touch setup swings with the kernel — time the steady state.)
 
 This is the order-book case study (Ch. 25) in miniature, and it generalizes: **any per-event bulk scan over a fat struct is paying this 8×–ish tax until you split the hot field out.**
 
