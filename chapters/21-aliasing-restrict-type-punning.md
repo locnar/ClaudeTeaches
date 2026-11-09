@@ -116,7 +116,7 @@ Read it the Ch. 11 / Ch. 4 way: **identical source, identical data, identical ca
 - **It's a promise *you* must keep.** If the pointers *do* overlap at runtime and you marked them `restrict`, the behavior is undefined — silent miscompilation (the compiler reorders/vectorizes assuming disjointness). Use it only where you *know* the arrays are distinct (separate allocations, an in-place transform where in == out is genuinely safe element-wise, etc.). It's a correctness assertion, not a hint.
 - **Alternatives when you can't promise globally.** If overlap is possible in general but not on the hot path, provide a `restrict` fast path and a safe fallback, or copy to a scratch buffer. The compiler's own runtime-overlap-check versioning does this automatically but at the cost of code bloat and a branch; an explicit `restrict` path removes both.
 - **`char`/`std::byte` buffers are alias-pessimistic by design.** Because `char*`/`std::byte*` may alias any object (the strict-aliasing exception), code that works through byte buffers (parsers, serializers — Ch. 53) blocks optimization broadly. Where you process such a buffer numerically, load into typed locals / typed `restrict` pointers (via `memcpy`/`bit_cast` — §21.4.2) so the hot loop operates on values the compiler can reason about.
-- **`assume`/`__builtin_assume_aligned` are cousins.** Telling the compiler about *alignment* (Ch. 9) similarly unblocks aligned SIMD loads; `[[assume]]` (C++23) / `__builtin_assume` feed it other invariants. Same principle: hand the optimizer provable facts it can't deduce.
+- **`assume`/`__builtin_assume_aligned` are cousins.** Telling the compiler about *alignment* (Ch. 9) similarly unblocks aligned SIMD loads; `[[assume(expr)]]` (C++23; GCC 13+, Clang 19+) — or the vendor forms `__builtin_assume` (Clang only; GCC rejects it), `__attribute__((assume(expr)))` (GCC 13) and the portable `if (!c) __builtin_unreachable();` — feed it other invariants. Same principle: hand the optimizer provable facts it can't deduce.
 
 ### 21.4.2 `std::bit_cast` and `std::launder` for safe punning
 
@@ -129,7 +129,7 @@ Type punning — reinterpreting one type's bytes as another — is unavoidable i
   float f          = std::bit_cast<float>(raw_u32);                 // (replaces the union/cast hacks)
   ```
 
-- **`memcpy` — the pre-C++20 / variable-size workhorse.** `std::memcpy(&to, &from, n)` is *always* well-defined for copying object representations, and the compiler reliably folds a small fixed-size `memcpy` into a register move (no actual call — §21.5). It's the portable way to pun and to read a value out of a byte buffer without aliasing UB:
+- **`memcpy` — the pre-C++20 / variable-size workhorse.** `std::memcpy(&to, &from, n)` is *always* well-defined for copying object representations, and the compiler reliably folds a small fixed-size `memcpy` into a register move (no actual call — §21.5). It's the portable way to pun and to read a value out of a byte buffer without aliasing UB. For the *overlay* use-case — treating a receive buffer as a `Msg` without copying (Ch. 53) — the standard's sanctioned tool is C++23's `std::start_lifetime_as<Msg>(p)` (P2590), which as of 2025 ships only in libstdc++ 16 and not yet in libc++ (gate on `__cpp_lib_start_lifetime_as`); until then rely on C++20's implicit-lifetime rule (P0593: a `memcpy`/`memmove` into storage starts the lifetime of a trivially-copyable implicit-lifetime object), i.e. copy the header fields out with `memcpy`, which the compiler folds into plain loads:
 
   ```cpp
   std::uint64_t px; std::memcpy(&px, wire_ptr, sizeof px);   // pull 8 bytes out, defined, zero-cost
@@ -143,37 +143,46 @@ The discipline that closes the loop with §21.4.1: pun *into typed local values*
 
 ## 21.5 Verify the codegen: vectorization gated by aliasing
 
-This chapter is *about* codegen, so verification is the payoff, not an afterthought. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O3 -march=x86-64-v3`).
+This chapter is *about* codegen, so verification is the payoff, not an afterthought. Snippets are **verified** GCC 13 output for the §21.3 kernels (the chapter's stated build; Appendix L.3; `-O3 -march=x86-64-v3 -masm=intel`), with the `to_bits` pun also checked on Clang 18.1.
 
-**Without `restrict` — scalar, or vectorized-behind-a-guard.** The plain `axpy_plain` either stays scalar or emits a runtime overlap check that branches between a vector and a scalar version:
+**Without `restrict` — scalar, with a store every iteration.** GCC cannot prove `*sum` is not one of the `in[i]`, so the running total must be *written back to memory* before the next load can be trusted (`-fopt-info-vec-missed`: "not vectorized: complicated access pattern"):
 
 ```asm
-axpy_plain(float*, float const*, float, int):
-        ; ... compares out/in ranges for overlap, branches:
-        lea     rax, [rdi + 4*r?]          ; out end
-        cmp     ...                        ; does [in, in+n) overlap [out, out+n)?
-        jb      .Lscalar                   ; if might-overlap → SCALAR fallback loop
-.Lvector:
-        vfmadd... ymm...                   ; vector version (only taken when proven disjoint)
-.Lscalar:
-        vfmadd231ss xmm0, ...              ; SCALAR: one float per iteration  (the slow path)
+accumulate_plain(int*, int const*, int):
+        test    edx, edx
+        jle     .L6
+        movsx   rdx, edx
+        mov     eax, DWORD PTR [rdi]        ; load *sum once ...
+        lea     rdx, [rsi+rdx*4]
+.L3:    add     eax, DWORD PTR [rsi]        ; sum += in[i]
+        add     rsi, 4
+        mov     DWORD PTR [rdi], eax        ; ... but STORE it back every iteration: in[i+1] might BE *sum
+        cmp     rdx, rsi
+        jne     .L3
+.L6:    ret
 ```
 
-The runtime guard and the scalar fallback are the codegen fingerprint of an aliasing-limited loop — extra code, a branch, and the risk of the slow path.
+One element per iteration, a store on the critical path, no SIMD — the codegen fingerprint of an aliasing-limited loop. (Clang 18 takes the other escape route the chapter described: it *versions* the loop — a runtime range check on `sum` vs `[in, in+n)` that branches between a `vpaddd ymm` body and this scalar form — so on Clang the plain build pays the guard and two loop bodies rather than losing the vectorization outright. Both are costs `restrict` removes.)
 
-**With `__restrict__` — clean packed SIMD, no guard.** The promise removes the overlap question entirely; the compiler emits a straight vectorized loop:
+**With `__restrict__` — clean packed SIMD, no store, no guard.** The promise removes the overlap question entirely; the compiler hoists `*sum` into a register and emits a straight vectorized reduction:
 
 ```asm
-axpy_restrict(float*, float const*, float, int):
-.Lloop:                                    ; no overlap check — restrict promised disjoint
-        vmovups ymm1, [rsi + rax]          ; load 8 floats of in[]
-        vfmadd213ps ymm1, ymm0, [rdi+rax]  ; in*k + out, 8 lanes at once (FMA)
-        vmovups [rdi + rax], ymm1          ; store 8 floats of out[]
+accumulate_restrict(int*, int const*, int):
+        ...                                ; trip-count check and setup
+        vmovd   xmm1, DWORD PTR [rdi]       ; *sum into a register — for the WHOLE loop
+        vpxor   xmm0, xmm0, xmm0
+.L11:   vpaddd  ymm0, ymm0, YMMWORD PTR [rax]   ; 8 lanes of in[] per iteration, sum stays in ymm0
         add     rax, 32
-        ...                                ; packed, no scalar fallback, no branch
+        cmp     rax, rdx
+        jne     .L11
+        vextracti128 xmm0, ymm0, 0x1        ; horizontal reduce the 8 lanes ...
+        vpaddd  xmm0, xmm2, xmm0
+        ...
+        vpaddd  xmm1, xmm1, xmm0            ; ... add to the original *sum
+        ...                                 ; (scalar epilogue for n % 8), ONE final store to [rdi]
 ```
 
-Eight (or sixteen, AVX-512) elements per iteration, no guard — the same shape §21.3's `accumulate_restrict` takes (`vpaddd ymm`, sum in registers), which is where its ~8× came from.
+Eight (or sixteen, AVX-512) elements per iteration, the sum in a register, one store at the end — which is where §21.3's ~8× came from.
 
 **`bit_cast`/`memcpy` pun to *nothing*.** Confirm defined punning is also free:
 
@@ -207,7 +216,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 
 1. **Measure the swing.** Build `restrict.cpp` at `-O3 -march=native`; run `plain` vs `restrict` pinned/turbo-off. Confirm the ~several-× speedup. Then disassemble both (Ch. 4): does `plain` show a runtime overlap guard + scalar fallback, and `restrict` clean packed SIMD (§21.5)?
 2. **Make the alias real.** Call `axpy_restrict` with *overlapping* pointers (`out = in + 1`) and compare results to the `plain` version. Observe the wrong answer (UB) — and explain why the compiler is entitled to produce it. (Run under UBSan where possible.)
-3. **`bit_cast` vs `reinterpret_cast` codegen.** Implement float↔uint32 punning three ways: `reinterpret_cast` deref, union, and `std::bit_cast`/`memcpy`. Diff the asm (Ch. 4) — do they produce the same move? Now compile with `-fstrict-aliasing -Wstrict-aliasing -O2` and see which warn / which UBSan flags.
+3. **`bit_cast` vs `reinterpret_cast` codegen.** Implement float↔uint32 punning three ways: `reinterpret_cast` deref, union, and `std::bit_cast`/`memcpy`. Diff the asm (Ch. 4) — do they produce the same move? Now compile with `-O2 -Wstrict-aliasing=2` and see which warn (only the trivial casts — the warning is shallow). UBSan has *no* strict-aliasing check; the tool that finds type-based aliasing violations is TypeSanitizer (`clang++ -fsanitize=type`, LLVM 20+), and a violated `restrict` is detectable by no sanitizer at all — test with overlapping inputs against the plain version instead.
 4. **Byte buffer de-pessimization.** Write a loop that sums big-endian `int32`s read directly from a `char*` buffer vs one that `memcpy`s each into a typed local first. Compare vectorization and ns/element (§21.4.1, ties Ch. 53).
 5. **Lost-vectorization regression.** Take a vectorized `restrict` kernel, then refactor it to receive its data through a `std::byte*` view (no `restrict`). Confirm in the asm it fell back to scalar, and that a perf gate (Ch. 76) would catch the regression.
 
@@ -219,7 +228,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 - [ ] Numbers read from **`char`/`std::byte` buffers** are pulled into **typed locals** (`memcpy`/`bit_cast`) before the hot loop, so byte-pointer aliasing doesn't pessimize it (ties Ch. 53).
 - [ ] `std::launder` is used **only** for storage reuse (placement-new), not to bless type casts.
 - [ ] Where I rely on alignment for SIMD, I told the compiler (**`__builtin_assume_aligned`** / over-aligned types — Ch. 9), not just `restrict`.
-- [ ] I tested `restrict` kernels for the **no-overlap precondition** (and under UBSan), since a violated promise is silent miscompilation.
+- [ ] I tested `restrict` kernels for the **no-overlap precondition** with deliberately overlapping inputs against the plain version (no sanitizer catches a violated `restrict`; UBSan does not check aliasing — TypeSanitizer, LLVM 20+, checks type-based aliasing only), since a violated promise is silent miscompilation.
 - [ ] A change that reintroduces possible aliasing (byte-buffer routing, dropped `restrict`) is caught as a **vectorization regression** (Ch. 76) — and I treat strict-aliasing UB as a **security** concern on untrusted input (Ch. 72).
 
 ## 21.8 References

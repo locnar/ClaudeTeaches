@@ -1,5 +1,16 @@
 # Full finding list (part1-ch01-26) — automated review of the book (25 of 25 chunks reviewed, 25 verified)
 
+**Status (2026-11-09): processed** (work-queue item P2-2 part 1, branch `work/item-13-part1`) — 154 rows fixed, 142 already fixed by earlier items, 9 left (listed below). Scope: every `confirmed`/`verifier-added` row of 00-preface.md and Ch. 1–26 (the 11 `high` rows were re-verified as fixed by P0-1..P2-1). Rows left:
+
+- Ch. 13:13 (Appendix E's branch-mispredict figure vs Ch. 13's 15–20 cycles) — Ch. 13's side is consistent book-wide; the change belongs in Appendix E (appendices agent / book-wide pass).
+- Ch. 14:50 (`Ch. 13.2.1` → `§13.2.1` convention) and Ch. 24:15 (`Ch. 23.3` → `§23.3`, plus the `Ch. 23.4.2` siblings in Ch. 24/26) — converting these to the `§N.M` form is flagged as STALE by `tools/review/stale_crossrefs.py` (its `selfref` rule treats any `§(old N)` inside the chapter that old N renumbered to as a stale self-reference); kept in the chapter-qualified form until the tool is adjusted.
+- Ch. 14:66 (function-pointer row in the §14.3 ladder) — the `std::move_only_function`/`std::function_ref` note was added; the extra benchmark row needs a measured run (Phase 4).
+- Ch. 19:119 (expression-template measurement for §19.3) — needs a new benchmark; the virtual/`std::function` rows are now cited as Ch. 14 §14.3's yardstick.
+- Ch. 22:17 (no "Verify the codegen" section) — would need a new §22.5 with SAXPY asm at three flag tiers; left for Phase 4.
+- Ch. 23:123 and Ch. 26:122 (pre-faulting / shared-memory text duplicated with Ch. 26 §26.4.2 and Ch. 50) — duplication/placement is item P2-1's remit; not re-cut here.
+- Ch. 24:23 (bump-allocator / pool codegen snippet) — would need a new "Verify the codegen" subsection; left for Phase 4.
+- Ch. 25:17 (measured LOB comparison for §25.4.4) — needs a new benchmark; left for Phase 4.
+
 Each row is one reviewer finding (technical-accuracy lens or editorial lens) with the adversarial verifier's ruling. **Verdict**: `confirmed` (verifier re-read the passage and agrees), `refuted` (kept for transparency — the verifier explains why the text is fine), `duplicate` (same issue as another row), `uncertain`, `verifier-added` (found by the verifier itself), or `book-wide check` (from the eight cross-cutting agents, which were not separately verified). **Sev** is the verifier's severity when it ruled, else the reviewer's. Line numbers are approximate.
 
 

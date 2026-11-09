@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 11 (the out-of-order back-end — a mispredict throws away the speculative work that engine had in flight), Ch. 12 (the front-end the predictor *steers* — a mispredict is a front-end resteer plus a back-end flush), Ch. 2 (top-down — this is the **Bad Speculation** quadrant), Ch. 3–4 (benchmarking and reading asm — used in §13.3, §13.5).
 >
-> **Leads into:** Ch. 14 (indirect branches — virtual calls and function pointers, the harder *target* prediction problem this chapter's *direction* prediction sets up), Ch. 28 (bit tricks — branchless min/max/abs/sign and masking, the toolkit §13.4.3 draws on), Ch. 29 (SIMD — vectorized code is branchless by construction). The `[[likely]]`/ `[[unlikely]]` *layout* hints of Ch. 12 are the complement to the *prediction* this chapter is about.
+> **Leads into:** Ch. 14 (indirect branches — virtual calls and function pointers, the harder *target* prediction problem this chapter's *direction* prediction sets up), Ch. 28 (bit tricks — branchless min/max/abs/sign and masking, the toolkit §13.4.3 draws on), Ch. 29 (SIMD — vectorized code is branchless by construction). The `[[likely]]`/`[[unlikely]]` *layout* hints of Ch. 12 are the complement to the *prediction* this chapter is about.
 
 ---
 
@@ -28,7 +28,7 @@ The branch predictor's job, every cycle the front-end fetches, is to answer two 
 
 - **What it learns well vs badly.** The predictor excels at:
   - *Biased* branches — an error check taken 0.01% of the time is predicted not-taken every time, near-perfectly (this is why a well-marked rare path, Ch. 12, is nearly free).
-  - *Loop* branches — the back-edge taken (N−1) times then not, learned by dedicated loop predictors.
+  - *Loop* branches — the back-edge taken (N−1) times then not. Short trip counts are learned through global history; Intel cores since Sandy Bridge have no dedicated loop predictor, so a long loop mispredicts once at exit — one flush amortized over N iterations.
   - *Correlated* branches — direction determined by recent control flow.
 
   It fails on **high-entropy, data-dependent** branches: a condition that is genuinely ~50/50 and *uncorrelated* with history — e.g. `if (price[i] > threshold)` on random-ish market data, or `if (side == BUY)` on a balanced order flow. No history pattern predicts a coin flip; the predictor sits near its 50% floor and you eat a mispredict roughly every other time.
@@ -120,6 +120,8 @@ instructions                        ~same                  ~same          <- ide
 
 Read it the Ch. 2 way: **identical instructions, identical memory traffic — and ~5× slower, entirely from `branch-misses`.** The sorted array's branch flips direction *once*; the predictor learns it and the loop runs near peak IPC. The shuffled array's branch is a coin flip; the predictor floors at ~50% misprediction on it and every other element eats a ~15-20-cycle flush — ~8-10 cycles per element on average, ~3 ns on top of the ~0.7 ns loop body, which is where the ~3.5 ns comes from. (`perf`'s `branch-misses / branches` reads ~25%, not 50%, because `branches` also counts the always-predicted loop back-edge — one per element.) That is the **Bad Speculation** fingerprint: high `branch-misses`, low IPC, clean memory. When you see it, you have an unpredictable branch on the hot path — and §13.4 is how you remove it. (Note the flags: at plain `-O2 -march=native` GCC 13 *vectorizes* this loop — `vpcmpgtd`/`vpand`/`vpaddq`, no branch at all — and at `-O1`/`-O2` without AVX it if-converts to a `cmov`; either erases the gap. The listing turns both off and pins the arm with an opaque side effect; §13.5 shows the branch-vs-`cmov` codegen. Always confirm a real branch was emitted before trusting a mispredict measurement.)
 
+**Locating the branch in real code.** The toy has one candidate; a feed handler has hundreds. Sample on the mispredict event with precise attribution — `perf record -e br_misp_retired.all_branches:pp -- ./app` (Ice Lake also has `br_misp_retired.cond:pp` for conditional branches only) — then `perf annotate` (Ch. 2) puts the samples on the exact `jcc`. For the branch's *history*, LBR sampling (`perf record -b`, `perf report --branch-history`) records the last 32 taken branches before each sample, so you see the path that led to the mispredict, not just the instruction. Once found, Clang's `__builtin_unpredictable(cond)` tells the compiler the branch is a coin flip (favouring `cmov`), the opposite of `[[likely]]`; GCC's equivalent is `__builtin_expect_with_probability(cond, 1, 0.5)`.
+
 ---
 
 ## 13.4 Techniques
@@ -158,7 +160,10 @@ int weight(char c) {
     else if (c == 'M') return 2; else return 0;          // mispredicts on mixed input
 }
 
-// Table-driven: one load, no data-dependent branch.
+// Table-driven: one load, no data-dependent branch.  (#include <array>)
+consteval std::array<std::int8_t, 256> make_weight_table() {
+    std::array<std::int8_t, 256> t{};  t['A'] = 3;  t['C'] = 7;  t['M'] = 2;  return t;
+}
 static constexpr std::array<std::int8_t, 256> kWeight = make_weight_table();
 int weight(unsigned char c) { return kWeight[c]; }       // index the table; branch gone
 ```
@@ -192,23 +197,23 @@ Whether the compiler emits a *branch* or a *`cmov`* for `(a > b) ? a : b` is the
 
 ```asm
 maxi(int, int):
-        cmp     edi, esi
         mov     eax, esi
-        cmovge  eax, edi        ; eax = (edi >= esi) ? edi : esi  — branchless select
+        cmp     edi, esi
+        cmovg   eax, edi        ; eax = (edi > esi) ? edi : esi  — branchless select
         ret
 ```
 
-There is no `jmp`/`jcc` over the alternative — `cmovge` selects in a single µop. This is the form you *want* for an unpredictable select: constant ~1-cycle cost, immune to misprediction.
+There is no `jmp`/`jcc` over the alternative — `cmovg` selects in a single µop. This is the form you *want* for an unpredictable select: constant ~1-cycle cost, immune to misprediction.
 
-**The §13.3 loop, branchless.** At `-O2`/`-O3` the compiler often converts the conditional *accumulate* itself into a branchless masked add — which is exactly why the sorted/shuffled gap can *vanish* (§13.3's caveat):
+**The §13.3 loop, branchless.** At `-O2`/`-O3` the compiler often converts the conditional *accumulate* itself into a branchless masked add — which is exactly why the sorted/shuffled gap can *vanish* (§13.3's caveat). At the flags above Clang 18 actually *vectorizes* the loop (`vpcmpgtd`/`vpand`/`vpaddq` — the same "no branch" lesson in SIMD form); add `-fno-vectorize -fno-slp-vectorize` to see the scalar form, one step of the unrolled body shown here:
 
 ```asm
 .loop:                                  ; sum += (a[i] >= 128) ? a[i] : 0
-        mov     ecx, dword ptr [rdi + 4*rax]
+        movsxd  rcx, dword ptr [rdi + 4*rax]   ; a[i], sign-extended to 64 bits
         xor     edx, edx
         cmp     ecx, 128
-        cmovl   ecx, edx                ; if a[i] < 128, replace with 0  — no branch
-        add     ... , ecx               ; always add (0 or a[i]) → no mispredict possible
+        cmovl   rcx, rdx                ; if a[i] < 128, replace with 0  — no branch
+        add     rax, rcx                ; always add (0 or a[i]) → no mispredict possible
         ...
 ```
 
@@ -245,7 +250,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 
 **Exercises**
 
-1. **Measure the mispredict cost.** Build `branch.cpp`, run `sorted` vs `shuffled` pinned/ turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Confirm: same instructions and memory, but ~25% of all branches mispredicted (~50% of the data branch — the loop back-edge halves the ratio) and ~5× slowdown on shuffled. What's the IPC of each? Which top-down bucket (Ch. 2) is shuffled?
+1. **Measure the mispredict cost.** Build `branch.cpp`, run `sorted` vs `shuffled` pinned/turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-load-misses`. Confirm: same instructions and memory, but ~25% of all branches mispredicted (~50% of the data branch — the loop back-edge halves the ratio) and ~5× slowdown on shuffled. What's the IPC of each? Which top-down bucket (Ch. 2) is shuffled?
 2. **Did the compiler go branchless?** Disassemble the §13.3 loop at `-O1`, `-O2`, `-O3` (Ch. 4). At which level does the `jcc` become a `cmov`/masked add? When it does, re-run §13.3 — does the sorted/shuffled gap disappear? Explain why.
 3. **`cmov` vs branch on predictable data.** Take a *highly predictable* branch (e.g. 99% one-way) and force a branchless version (explicit `cmov`/mask). Measure both. Is branchless *slower*? Tie the result to the control-vs-data-dependency trade-off (§13.4.1, §13.6).
 4. **Build a dispatch table.** Replace an `if/else` (or `switch`) message-type classifier with a `constexpr` lookup table indexed by the type byte. Measure on a mixed (unpredictable) message stream. Compare against the branch chain *and* against sorting the stream by type first (§13.4.3).
@@ -275,7 +280,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 ## 13.9 Additional Reading
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical Bad-Speculation analysis and branchless transformation case studies with `perf`.
-- H. Warren, *Hacker's Delight* — the bit-twiddling foundation for branchless min/max/abs/sign/ select and masking idioms (developed in Ch. 28).
+- H. Warren, *Hacker's Delight* — the bit-twiddling foundation for branchless min/max/abs/sign/select and masking idioms (developed in Ch. 28).
 - Ch. 14 (*Indirect Calls & Virtual Dispatch*) — *target* prediction (BTB) for indirect branches, the harder cousin of this chapter's *direction* prediction; Ch. 28 (*Bit Manipulation*) — the branchless toolkit; Ch. 29 (*SIMD*) — predication/masking taken to the vector level; Ch. 46 (*Keeping the Hot Path Warm*) — warming the predictor for cold-but-critical branches.
 - **Appendix E** — the branch-mispredict penalty in cycles/ns that frames "Bad Speculation."
 

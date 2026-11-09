@@ -310,7 +310,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 22.4.2 LTO
   - 22.4.3 PGO and BOLT
 - 22.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
-- 22.6 Exercises & checklist → *(see Appendix D for the flag reference)*
+- 22.6 Exercises & checklist
 
 ## Part IV — Memory Management
 

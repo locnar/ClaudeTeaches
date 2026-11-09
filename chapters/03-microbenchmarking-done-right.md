@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution and care about p99/p99.9, not the mean. Ch. 2 (*Measure First*) — you can read PMU counters and know whether a workload is memory- or compute-bound. For the hands-on parts: a Linux box, a C++20 compiler, [Google Benchmark](https://github.com/google/benchmark) and [HdrHistogram_c](https://github.com/HdrHistogram/HdrHistogram_c) (or the C++ port).
 >
-> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–IX and the latency-regression gates of Ch. 76.
+> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 76. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
 
 ---
 
@@ -79,7 +79,7 @@ The rule: **decide whether you are measuring service time (back-to-back) or resp
 
 ## 3.3 Measure it: Google Benchmark harness setup
 
-[Google Benchmark](https://github.com/google/benchmark) is the de-facto C++ microbenchmark library. It handles iteration count selection (running until the timing is stable), reports mean/median/stddev, and — critically — provides the primitives to defeat the optimizer (§3.4.1). Here is a complete, real harness comparing two ways to look up a value, the running example continued from Ch. 2's memory theme:
+[Google Benchmark](https://github.com/google/benchmark) is the de-facto C++ microbenchmark library. It picks the iteration count automatically (running until `--benchmark_min_time`, 0.5 s by default, is reached), reports mean/median/stddev across repetitions when you ask for them with `--benchmark_repetitions` (§3.4.4), and — critically — provides the primitives to defeat the optimizer (§3.4.1). Here is a complete, real harness comparing two ways to look up a value, the running example continued from Ch. 2's memory theme:
 
 ```cpp
 // bench_lookup.cpp — compare std::unordered_map vs a sorted flat vector + binary search.
@@ -103,15 +103,26 @@ static std::vector<std::uint32_t> make_keys() {
     return keys;
 }
 
+// The probe sequence is generated up front: an mt19937 draw plus a
+// uniform_int_distribution inside the timed loop would be measured too.
+static std::vector<std::uint32_t> make_probes() {
+    auto keys = make_keys();
+    std::vector<std::uint32_t> probes(N);
+    std::mt19937 rng(99);
+    std::uniform_int_distribution<int> pick(0, N - 1);
+    for (auto& p : probes) p = keys[pick(rng)];
+    return probes;
+}
+
 static void BM_UnorderedMap(benchmark::State& state) {
     auto keys = make_keys();
     std::unordered_map<std::uint32_t, std::uint32_t> m;
     for (std::uint32_t i = 0; i < N; ++i) m[keys[i]] = i;
 
-    std::mt19937 rng(99);
-    std::uniform_int_distribution<int> pick(0, N - 1);
+    auto probes = make_probes();                // RNG work kept *outside* the timed loop
+    std::size_t i = 0;
     for (auto _ : state) {
-        auto k = keys[pick(rng)];               // unpredictable key each iter
+        auto k = probes[i++ & (N - 1)];         // unpredictable key each iter; N is a power of two
         auto it = m.find(k);
         benchmark::DoNotOptimize(it->second);   // <- or the lookup is dead code (§3.4.1)
     }
@@ -124,10 +135,10 @@ static void BM_FlatBinarySearch(benchmark::State& state) {
     auto sorted = keys;
     std::sort(sorted.begin(), sorted.end());
 
-    std::mt19937 rng(99);
-    std::uniform_int_distribution<int> pick(0, N - 1);
+    auto probes = make_probes();
+    std::size_t i = 0;
     for (auto _ : state) {
-        auto k = keys[pick(rng)];
+        auto k = probes[i++ & (N - 1)];
         bool found = std::binary_search(sorted.begin(), sorted.end(), k);
         benchmark::DoNotOptimize(found);
     }
@@ -151,7 +162,7 @@ BM_FlatBinarySearch_median      31.0 ns  31.0 ns
 BM_FlatBinarySearch_stddev       0.6 ns
 ```
 
-Don't stop at "the hash map won." Ask Ch. 2's question — *why?* — because the answer decides whether the result generalizes. Binary search does ~12 dependent comparisons (`log2(4096)`) whose directions are unpredictable on random keys, so roughly half of them mispredict (~15–20 cycles each, Ch. 13); the hash map does one hash and (usually) one probe. Confirm with `perf stat` on each benchmark in isolation (`--benchmark_filter=`): you'll see the binary search paying in branch-misses, *not* cache misses — the 16 KiB sorted array (4096 × 4 B) sits entirely in the 48 KiB L1d. And note the caveat that makes this a *teaching* result, not a verdict: at `N = 4096` with random keys this is a branch-prediction story, not the cache-friendly regime where flat structures shine over node-based ones — change `N`, change the key distribution (sequential? clustered like price levels?), and the winner can flip. **That sensitivity is the lesson**: the benchmark is only an answer for the conditions you gave it. The order-book case study (Ch. 25) revisits exactly this comparison under realistic access patterns and reaches a more nuanced conclusion.
+Don't stop at "the hash map won." Ask Ch. 2's question — *why?* — because the answer decides whether the result generalizes. Binary search does ~12 dependent comparisons (`log2(4096)`) whose directions are unpredictable on random keys, so roughly half of them mispredict (~15–20 cycles each, Ch. 13); the hash map does one hash and (usually) one probe. Confirm with `perf stat` on each benchmark in isolation (`--benchmark_filter=`): you'll see the binary search paying in branch-misses, *not* cache misses — the 16 KiB sorted array (4096 × 4 B) sits entirely in the 48 KiB L1d. And note the caveat that makes this a *teaching* result, not a verdict: at `N = 4096` with random keys this is a branch-prediction story, not the cache-friendly regime where flat structures shine over node-based ones — change `N`, change the key distribution (sequential? clustered like price levels?), and the winner can flip. **That sensitivity is the lesson**: the benchmark is only an answer for the conditions you gave it. One more honesty note: consecutive iterations here are *independent*, so the out-of-order core overlaps one lookup with the next and the figures are **throughput per op**, not the latency a dependent hot path sees. To measure latency, feed each result into the next probe index (a dependent chain, as the HdrHistogram harness in §3.4.3 and Appendix L.1 do) — the numbers will be higher, and they are the ones a tick-to-trade budget cares about. The order-book case study (Ch. 25) revisits exactly this comparison under realistic access patterns and reaches a more nuanced conclusion.
 
 ---
 
@@ -204,7 +215,8 @@ Google Benchmark reports mean/median/stddev — useful for service-time *through
 
 ```cpp
 // latency_hist.cpp — per-op service-time distribution with HdrHistogram.
-// Build: g++ -O2 -std=c++20 latency_hist.cpp -lhdr_histogram -o latency_hist
+// Build (operation_under_test is defined in your own my_op.cpp):
+//   g++ -O2 -std=c++20 latency_hist.cpp my_op.cpp -lhdr_histogram -o latency_hist
 #include <hdr/hdr_histogram.h>
 #include <chrono>
 #include <cstdint>
@@ -255,7 +267,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - **Enough samples for the percentile you quote.** You cannot honestly state p99.9 from 1,000 samples — that's *one* event in the tail (Ch. 1). For p99.9 you want ≫ 10⁵ samples; for p99.99, ≫ 10⁶. State your sample count alongside the percentile.
 - **Compare, don't just measure.** The question is almost always "is B faster than A?", which is a *difference of distributions*, not of means. Tools like Google Benchmark's `compare.py` apply a U-test (Mann–Whitney) to tell you whether the difference is statistically significant or noise. A 2% "improvement" inside 5% run-to-run noise is nothing.
 - **Watch for multimodality.** A bimodal histogram (two humps) usually means two regimes — e.g. cache-hit vs cache-miss, or turbo vs non-turbo — and a single percentile summary hides it. Look at the histogram shape (Ch. 1's picture), not just the quantiles.
-- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–IX don't silently rot; it's built out in Ch. 76.
+- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 76.
 
 ---
 
@@ -310,6 +322,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - B. Gregg, *Systems Performance*, 2nd ed. — chapters on benchmarking pitfalls and the "active benchmarking" method (always profile *while* benchmarking).
 - nanobench (Martin Leitner-Ankerl) — a lightweight single-header alternative to Google Benchmark with built-in PMU integration and median/MdAPE reporting.
 - Appendix E (*Latency Numbers Every Trading Developer Should Know*) — the reference costs your benchmark results should be sanity-checked against.
+- Appendix L (*Reproducible Benchmark & Measurement Harness*) — the copy-paste Google Benchmark + HdrHistogram harness and environment script built from this chapter.
 - Ch. 17 (*Timekeeping: TSC, rdtsc & Clock Sources*) — measuring nanoseconds reliably, clock overhead, and why `steady_clock` may not be precise enough.
 
 ---

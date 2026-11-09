@@ -2,7 +2,7 @@
 
 # Chapter 19 — Template Metaprogramming & Zero-Cost Abstractions
 
-> **Prerequisites:** Ch. 18 (compile-time mechanics — `if constexpr`, the template cost model, compile-time evaluation this chapter builds *designs* on), Ch. 14 (indirect dispatch — CRTP here is the by-construction devirtualization that chapter motivated), Ch. 11 (the inlining and back-end ILP that "zero-cost" actually cashes out as), Ch. 4 (reading asm — §19.5 is the whole proof).
+> **Prerequisites:** Ch. 18 (compile-time mechanics — `if constexpr`, the template cost model, compile-time evaluation this chapter builds *designs* on), Ch. 14 (indirect dispatch — CRTP here is the by-construction devirtualization that chapter motivated), Ch. 12 §12.4.1 and Ch. 22 §22.2 (inlining — what "zero-cost" actually cashes out as) and Ch. 11 (the back-end ILP that inlining exposes), Ch. 4 (reading asm — §19.5 is the whole proof).
 >
 > **Leads into:** Ch. 20 (the cost of abstractions that *aren't* free — exceptions, RTTI — and `std::expected` as the hot-path alternative; `std::function`'s cost was Ch. 14 §14.2.3), Ch. 25 (cache-friendly containers and intrusive/policy designs), Ch. 29 (SIMD via expression templates / static specialization), Ch. 24 (policy-based allocators). The bloat/error-message costs tie back to Ch. 12 and Ch. 18.
 
@@ -50,7 +50,7 @@ class OrderBook : StoragePolicy, LockingPolicy { /* ... */ };   // mix behaviors
 
 Each policy's methods inline; swapping a policy is a compile-time type change, not a runtime branch. (Empty policies cost *nothing* via the empty-base optimization / `[[no_unique_address]]` — Ch. 9.) This is the configurable-yet-zero-cost design: the order book's level storage, locking, and allocation are all choices made at compile time, each compiling to the hand-specialized code.
 
-The cost model carries over unchanged from Ch. 18: these are all **template instantiations** — each combination is a distinct body (good: specialized and inlined; bad: code-size/build-time cost — §19.6). And "zero-cost" cashes out *through the optimizer*: static dispatch enables inlining (Ch. 11), which enables constant propagation and scheduling across the old call boundary. The abstraction is free **because** it inlines — which is exactly why §19.5 verifies inlining actually happened.
+The cost model carries over unchanged from Ch. 18: these are all **template instantiations** — each combination is a distinct body (good: specialized and inlined; bad: code-size/build-time cost — §19.6). And "zero-cost" cashes out *through the optimizer*: static dispatch enables inlining (Ch. 12 §12.4.1, Ch. 22 §22.2), which enables constant propagation and the ILP of Ch. 11 and scheduling across the old call boundary. The abstraction is free **because** it inlines — which is exactly why §19.5 verifies inlining actually happened.
 
 ---
 
@@ -69,6 +69,13 @@ The claim under test is literally "zero overhead," so the measurement compares a
 #include <memory>
 #include <vector>
 #include <chrono>
+
+// The virtual object comes from a noinline factory: constructed in the same function as the
+// call site, GCC's speculative devirtualization (-fdevirtualize-speculatively, on at -O2)
+// would see the dynamic type, guard it and inline VwapV::update — Ch. 14 §14.4.1's trick,
+// which is exactly what the 'virt' column must NOT get.
+struct IStrat;
+[[gnu::noinline]] std::unique_ptr<IStrat> make_virt();
 
 struct Tick { std::int64_t px; std::int32_t qty; };
 
@@ -103,7 +110,7 @@ int main(int argc, char** argv) {
 
     if (!std::strcmp(mode,"hand")) bench([](std::int64_t s, const Tick& t){ return hand_update(s,t); });
     else if (!std::strcmp(mode,"crtp")) { Vwap v; bench([&](std::int64_t s, const Tick& t){ return v.update(s,t); }); }
-    else if (!std::strcmp(mode,"virt")) { std::unique_ptr<IStrat> v=std::make_unique<VwapV>();
+    else if (!std::strcmp(mode,"virt")) { std::unique_ptr<IStrat> v = make_virt();   // opaque factory
         bench([&](std::int64_t s, const Tick& t){ return v->update(s,t); }); }
     else { std::function<std::int64_t(std::int64_t,const Tick&)> f =
         [](std::int64_t s, const Tick& t){ return s + t.px*t.qty; };
@@ -116,13 +123,13 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
 
 ```
                     hand-written    CRTP        virtual      std::function
-ns / call             ~0.30 ns      ~0.30 ns    ~0.9 ns      ~1.4 ns
+ns / call             ~0.35 ns      ~0.35 ns    ~0.9 ns      ~1.4 ns      <- 0.35 ns = 1 cycle at 2.9 GHz
 matches hand?            —          YES (≡)      no           no
 inlined?               yes          yes          no           no
 asm (§19.5)          identical    identical    call [rax]   double indirection
 ```
 
-Read it the Ch. 14 / Ch. 18 way: **CRTP is *byte-for-byte* the hand-written code** — same ns/call, same asm (§19.5) — because the static dispatch inlined and the optimizer then treated it exactly as the direct version. That is "zero-cost" *demonstrated*, not asserted: the abstraction (a reusable `Strat<>` base, a clean `update()` interface) cost the hot path nothing. The `virtual` and `std::function` versions — flexible at runtime — are 3–5× slower here purely from un-inlinable dispatch (Ch. 14), even though the callee is trivial. The discipline this sets up: when you claim an abstraction is zero-cost, **prove it matches the hand-written codegen** (§19.5); if it doesn't, the abstraction is leaking a runtime cost and you either fix it or account for it.
+Read it the Ch. 14 / Ch. 18 way (the two runtime-polymorphic columns are Ch. 14 §14.3's ladder, re-run here only as the yardstick): **CRTP is the hand-written code** — same ns/call, the same instructions once inlined (§19.5) — because the static dispatch inlined and the optimizer then treated it exactly as the direct version. That is "zero-cost" *demonstrated*, not asserted: the abstraction (a reusable `Strat<>` base, a clean `update()` interface) cost the hot path nothing. The `virtual` and `std::function` versions — flexible at runtime — are 3–5× slower here purely from un-inlinable dispatch (Ch. 14), even though the callee is trivial. The discipline this sets up: when you claim an abstraction is zero-cost, **prove it matches the hand-written codegen** (§19.5); if it doesn't, the abstraction is leaking a runtime cost and you either fix it or account for it.
 
 ---
 
@@ -177,7 +184,10 @@ The synthesis of §19.4: encode the *varying design decision* in a type (CRTP fo
 **Hand-written vs CRTP — identical.** Both the direct `hand_update` and the CRTP `Vwap::update` compile to the same body — the dispatch and the wrapper vanished:
 
 ```asm
-; hand_update(long, Tick const&)   AND   Strat<Vwap>::update via Vwap   →  IDENTICAL:
+; hand_update(long, Tick const&)       — and Strat<Vwap>::update is the SAME three instructions,
+;                                        shifted one register because the member takes a hidden
+;                                        `this` (s in rsi, t in rdx); inlined into the bench loop
+;                                        the two bodies are byte-for-byte identical.
         movsxd  rax, dword ptr [rsi + 8]    ; t.qty (sign-extended)
         imul    rax, qword ptr [rsi]        ; * t.px
         add     rax, rdi                    ; + s
@@ -233,11 +243,11 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 
 **Exercises**
 
-1. **Prove zero-cost.** Build `zerocost.cpp`; run `hand` vs `crtp` vs `virt` vs `func` pinned/ turbo-off. Confirm CRTP matches hand-written ns/call. Then disassemble (Ch. 4) and confirm the CRTP and hand-written bodies are **identical**, and `virt` shows `call [rax]` (§19.5).
-2. **Break the inline.** Make the CRTP `go()` large (or mark it `[[gnu::noinline]]`). Does CRTP still match hand-written? Explain why "zero-cost" depends on inlining (Ch. 11), and what the asm now shows.
+1. **Prove zero-cost.** Build `zerocost.cpp`; run `hand` vs `crtp` vs `virt` vs `func` pinned/turbo-off. Confirm CRTP matches hand-written ns/call. Then disassemble (Ch. 4) and confirm the CRTP and hand-written bodies are **identical**, and `virt` shows `call [rax]` (§19.5).
+2. **Break the inline.** Make the CRTP `go()` large (or mark it `[[gnu::noinline]]`). Does CRTP still match hand-written? Explain why "zero-cost" depends on inlining (Ch. 12 §12.4.1, Ch. 22 §22.2) and the ILP it exposes (Ch. 11), and what the asm now shows.
 3. **Policy-based order book (sketch).** Write a tiny `Book<StoragePolicy>` with two policies (flat array vs `std::map`). Confirm (a) `sizeof` is unaffected by an *empty* policy (Ch. 9), (b) each policy inlines, and (c) the binary grows per instantiated combination (`size`).
 4. **Bloat measurement.** Instantiate a non-trivial templated function for 1, 4, 16 types; measure binary size (`size`/`bloaty`) and build time (`-ftime-trace`). Where does bloat become a concern (Ch. 12), and how does factoring out type-independent code help (§19.6)?
-5. **Expression templates vs naïve.** Using Eigen (or a tiny hand-rolled version), compute `d = a + b + c` over large vectors naïvely vs with expression templates. Compare passes/ allocations and ns/element; confirm fusion in the asm (§19.5). When does it *not* pay?
+5. **Expression templates vs naïve.** Using Eigen (or a tiny hand-rolled version), compute `d = a + b + c` over large vectors naïvely vs with expression templates. Compare passes/allocations and ns/element; confirm fusion in the asm (§19.5). When does it *not* pay?
 
 **Checklist — zero-cost abstractions**
 

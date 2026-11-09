@@ -45,7 +45,7 @@ Knowing the ABI register order (`rdi` = arg1, `rsi` = arg2, …, `rax` = return)
 **Instruction shape.** This book uses **Intel syntax** (`-masm=intel`), which reads `op dest, src` (destination first) — generally cleaner than AT&T's `op src, dest` with its `%`/`$` sigils. The handful of mnemonics that cover most hot loops:
 
 - **Data movement:** `mov` (copy), `lea` (compute an address *or* do `a*scale+b+c` arithmetic without touching flags — you'll see `lea` used for plain math), `movsxd`/ `movzx` (sign-/zero-extend a narrower value into a wider register).
-- **Arithmetic/logic:** `add sub imul` (note: `imul` for multiply — real `div` is rare and *expensive*, ~20–40 cycles; seeing it is a red flag), `and or xor shl shr sar`. `xor eax, eax` is the idiomatic "set to zero."
+- **Arithmetic/logic:** `add sub imul` (note: `imul` for multiply — real `div` is rare and *expensive* — `div r64` is ~15–18 cycles latency and only one every ~10 cycles on Ice Lake-SP, 35–90 cycles on Skylake-SP, versus 3 cycles fully pipelined for `imul` (uops.info); seeing it is a red flag), `and or xor shl shr sar`. `xor eax, eax` is the idiomatic "set to zero."
 - **Compare & branch:** `cmp`/`test` set flags; `jne jl jge ja jbe …` branch on them. `j*` are the conditional branches whose mispredicts Ch. 13 is about.
 - **Branchless conditionals:** `cmov*` (conditional move) — selects a value based on flags *without branching*. The hero of Ch. 13; learn to recognize it.
 - **Calls:** `call`/`ret`; an indirect `call rax`/`jmp rax` is a virtual/function-pointer call (Ch. 14) — a different beast for the branch predictor.
@@ -59,7 +59,7 @@ The leap from "I know the mnemonics" to "I can read optimized code" is accepting
 - **Inlining** — the callee's body is spliced into the caller; the `call` disappears. This is the enabling optimization: once inlined, the code can be further simplified in context (constant-folded, dead-code-eliminated). A *missing* inline (a stray `call` in your hot loop) is one of the most common avoidable costs (Ch. 14, 22).
 - **Dead-code elimination** — anything whose result is never observed is deleted. This is the Ch. 3 benchmark hazard, seen from the asm side.
 - **Constant folding / propagation** — `square(7)` becomes `49` at compile time; computations on known constants vanish.
-- **Strength reduction** — expensive ops become cheap ones: `x * 8` → `shl ... 3`, `x / 4` → `sar`, multiply-by-constant → `lea`/shift/add sequences.
+- **Strength reduction** — expensive ops become cheap ones: `x * 8` → `shl ... 3`, `x / 4` → `shr` for unsigned (for *signed* `int` it is `sar` plus a `lea`/`test`/`cmovns` fix-up, because C++ division truncates toward zero while the shift rounds toward −∞ — one reason to prefer unsigned indices and quantities in hot loops), multiply-by-constant → `lea`/shift/add sequences.
 - **Loop transforms** — **unrolling** (one source iteration becomes 4 or 8 in the asm, to expose ILP and amortize loop overhead — Ch. 11), **vectorization** (the loop body becomes SIMD over `ymm`/`zmm` — Ch. 29), **hoisting** (loop-invariant work moved out), and bounds-check elision.
 - **Branch → conditional move** — a small `if` becomes a branchless `cmov` when the compiler judges the branch unpredictable or the bodies cheap (Ch. 13).
 - **Register allocation & spilling** — values live in registers when they can; when there aren't enough, the compiler **spills** to the stack (`mov [rsp+N], reg` / `mov reg, [rsp+N]`). Spills in a hot loop are a smell worth investigating (too many live values, failed inlining, missing `restrict` — Ch. 21).
@@ -97,7 +97,7 @@ A warm-up to calibrate your eye. This trivial function:
 int square(int x) { return x * x; }
 ```
 
-compiles (Clang, `--target=x86_64-linux-gnu -O2 -masm=intel`) to exactly three instructions — verified output:
+compiles (Clang, `--target=x86_64-linux-gnu -O2 -masm=intel`) to exactly three instructions — verified output (all "verified output" listings in this chapter are Clang 18.1 reproduced on Compiler Explorer; GCC 13/14 produce the same shape for `square`, `abs_branchless` and the division examples, and a pointer-increment form of the `sum` loop):
 
 ```asm
 square(int):
@@ -124,7 +124,7 @@ long sum(const int* a, unsigned long n) {
 }
 ```
 
-With vectorization disabled (`-O2 -fno-vectorize -fno-unroll-loops`, to see the bare loop), Clang emits this — verified output (Clang 18), lightly annotated, with the compiler's `.LBB0_n` labels renamed:
+With vectorization disabled (`-O2 -fno-vectorize -fno-unroll-loops` on Clang; `-fno-tree-vectorize` is GCC's spelling — to see the bare loop), Clang emits this — verified output (Clang 18), lightly annotated, with the compiler's `.LBB0_n` labels renamed:
 
 ```asm
 sum(int const*, unsigned long):
@@ -155,7 +155,7 @@ The discipline when reading any hot loop:
 
 The three checks you'll run most:
 
-**Inlining.** Search the caller's asm for a `call` to the callee. *Present* → not inlined (a function-call overhead and an optimization barrier on your hot path). *Absent* → inlined. For diagnosing *why* an inline didn't happen, GCC/Clang's `-Winline` and the optimization remarks (`-Rpass=inline`, `-Rpass-missed=inline` on Clang; `-fopt-info-inline` on GCC) report the compiler's reasoning. Fixes — `inline`/`[[gnu::always_inline]]`, LTO, tuning `-finline-limit` — are Ch. 22.
+**Inlining.** Search the caller's asm for a `call` to the callee. *Present* → not inlined (a function-call overhead and an optimization barrier on your hot path). *Absent* → inlined. For diagnosing *why* an inline didn't happen, GCC's `-Winline` (Clang accepts the flag but ignores it) and the optimization remarks (`-Rpass=inline`, `-Rpass-missed=inline` on Clang; `-fopt-info-inline-missed` on GCC) report the compiler's reasoning. Fixes — `inline`/`[[gnu::always_inline]]`, LTO, tuning `-finline-limit` — are Ch. 22.
 
 **Vectorization.** Look for SIMD registers (`xmm`/`ymm`/`zmm`) and packed ops (`vpaddq`, `vaddps`, …) in the loop body. The same `sum`, compiled with `-O2 -march=x86-64-v3` (AVX2), vectorizes — verified excerpt of the inner block:
 
@@ -199,7 +199,7 @@ Two high-value diffs:
 
   Seeing `cmovs` instead of a `jl`/`jmp` pair *confirms* the branchless intent survived optimization — the thing Ch. 13 will have you verify constantly. (A `max(a,b)` similarly becomes `cmp`/`cmovg`, no branch.)
 
-- **Flag A vs B / compiler A vs B, same source.** `-O2` vs `-O3`, `-march=x86-64` vs `-march=native`, GCC vs Clang — diff the hot function to see what each does (did `-O3` unroll more? did `-march=native` unlock AVX-512? did one compiler vectorize and the other not?). This is how you make *evidence-based* flag decisions instead of cargo-culting `-O3` (Ch. 22), and how you catch a compiler upgrade silently changing your hot loop — the asm-level complement to Ch. 3's regression gates.
+- **Flag A vs B / compiler A vs B, same source.** `-O2` vs `-O3`, `-march=x86-64` vs `-march=native`, GCC vs Clang — diff the hot function to see what each does (did `-O3` unroll more? did `-march=native` unlock AVX-512? did one compiler vectorize and the other not?). This is how you make *evidence-based* flag decisions instead of cargo-culting `-O3` (Ch. 22, *Build Toolchain for Speed*), and how you catch a compiler upgrade silently changing your hot loop — the asm-level complement to Ch. 3's regression gates.
 
 The habit: when a change *should* be free or *should* be faster, prove it in the asm before (or alongside) the benchmark. The asm explains the benchmark, and the benchmark confirms the asm matters at runtime — you want both.
 
@@ -210,7 +210,7 @@ The habit: when a change *should* be free or *should* be faster, prove it in the
 - **Reading `-O0`/debug asm.** The cardinal error. Unoptimized code reloads every variable from the stack on every use, inlines nothing, and elides nothing — it is verbose, spill-ridden, and *completely unrepresentative* of the binary you ship. Conclusions drawn from it ("look how many memory accesses!") are fiction. Always read `-O2`/`-O3` with the flags you actually build with (Ch. 22). This mirrors Ch. 3's "profile the build you ship."
 - **The deleted snippet.** Inspecting a function whose result is unused, finding "no code," and concluding it's free — when really the optimizer deleted it. Make the result escape (return it, `DoNotOptimize`, `volatile`) before reading or you're reading a ghost.
 - **Forgetting inlining changes everything.** A function's standalone asm (with a `call` ABI, callee-saved register shuffling, a stack frame) can look heavier than reality, because at the call site it gets *inlined* and simplified into the surrounding code. Judge hot code **in context** (at the call site, with LTO if you ship LTO), not in isolation — isolation is fine for *learning to read*, not for *final verdicts*.
-- **Counting instructions as if they were cycles.** Fewer instructions is a heuristic, not a law. A loop with more instructions but no dependency chain, no cache misses, and no mispredicts can beat a "shorter" one (a `div` is one instruction and ~30 cycles; a vectorized body is many instructions doing 8× the work). Instruction count is a clue; the PMU (Ch. 2) and a benchmark (Ch. 3) are the verdict. **Asm reading explains; it does not, by itself, measure.**
+- **Counting instructions as if they were cycles.** Fewer instructions is a heuristic, not a law. A loop with more instructions but no dependency chain, no cache misses, and no mispredicts can beat a "shorter" one (a `div` is one instruction and ~15–90 cycles depending on the microarchitecture; a vectorized body is many instructions doing 8× the work). Instruction count is a clue; the PMU (Ch. 2) and a benchmark (Ch. 3) are the verdict. **Asm reading explains; it does not, by itself, measure.**
 - **Mistaking syntax for substance (AT&T vs Intel).** If you switch tools, operand order flips (AT&T is `src, dest`; Intel is `dest, src`). Pick one syntax (this book uses Intel) and set it explicitly (`-masm=intel`, or the Godbolt toggle) so you don't misread a `mov`.
 - **Over-reading.** You do not need to hand-verify every function — that's slower code *and* slower you. Reserve asm reading for the hot path the PMU pointed at, the abstraction you need to prove is zero-cost, and the surprising benchmark. Trust the optimizer elsewhere.
 
@@ -221,10 +221,10 @@ The habit: when a change *should* be free or *should* be faster, prove it in the
 **Exercises**
 
 1. **Calibrate your eye.** On Godbolt, compile `int square(int)` at `-O0` and at `-O2`. Diff them. Count the instructions and the stack accesses in each. Why is the `-O0` version so much longer, and why is reading it a waste of time?
-2. **Read a loop.** Paste the `sum` function. View it at `-O2 -fno-vectorize` and at `-O2 -march=x86-64-v3`. Identify the loop body in each. How many `int`s are processed per iteration in each version? Find the multiple accumulators in the vectorized one and explain (Ch. 11) why they exist.
+2. **Read a loop.** Paste the `sum` function. View it at `-O2 -fno-vectorize` (Clang; `-O2 -fno-tree-vectorize` on GCC) and at `-O2 -march=x86-64-v3` (Clang; on GCC use `-O3 -march=x86-64-v3`, since GCC's `-O2` cost model does not vectorize this loop). Identify the loop body in each. How many `int`s are processed per iteration in each version? Find the multiple accumulators in the vectorized one and explain (Ch. 11) why they exist.
 3. **Confirm a branchless transform.** Compile `x < 0 ? -x : x` and `a > b ? a : b` at `-O2`. Find the `cmov`. Now write the same logic with an explicit `if`/`else` and bitmask tricks — does the compiler converge to the same asm? (Preview of Ch. 13.)
 4. **Catch a failed inline.** Write a small function and call it in a loop; confirm it's inlined (no `call`). Now mark it `[[gnu::noinline]]` and re-read — find the `call`, the argument setup in `rdi`/`rsi`, and the `ret`. Add `-Rpass-missed=inline` and read the compiler's reason on a case where it *won't* inline.
-5. **Spot the expensive instruction.** Write `int f(int x){ return x / 7; }` and `int g(int x){ return x / 8; }`. Diff the asm. Which became a cheap shift, which a `mul`/`shr` magic-number division, and is there a real `idiv` anywhere? (Preview of Ch. 28.)
+5. **Spot the expensive instruction.** Write `int f(int x){ return x / 7; }` and `int g(int x){ return x / 8; }`. Diff the asm. Which became a shift (and what are the extra `lea`/`test`/`cmovns` instructions around it doing for negative `x`?), which a `mul`/`shr` magic-number division, and is there a real `idiv` anywhere? (Preview of Ch. 28.)
 
 **Checklist — verifying codegen**
 
