@@ -14,7 +14,7 @@ Chapters 7–9 were about *avoiding* cache misses by arranging data so the acces
 
 **Software prefetching** is the tool for exactly this gap. The idea is to exploit the fact that you, the programmer, often know the address you'll need *several iterations before you need it* — even when the hardware can't predict it. A hash lookup knows the bucket address the moment it has the key; a batch of order-book updates knows which levels it will touch before it touches them. By issuing a **prefetch hint** for that future address *now*, you start the DRAM fetch early and overlap its latency with the useful work of the current iteration — so by the time you actually dereference it, the line is already in cache. The 80 ns miss doesn't disappear; it gets *hidden behind work you were doing anyway* (this is why Ch. 11's instruction-level parallelism is the enabling mechanism).
 
-The companion technique solves the opposite problem on the **write** path. When you produce a large block of data that you will *not* read back soon — a capture buffer, a log ring, a big memset/memcpy — writing it normally pulls every destination line into cache (and, for a partial write, *reads* it first), **evicting the hot working set you carefully fit into L1/L2 in Ch. 8–9.** **Non-temporal (streaming) stores** write straight to memory, bypassing the cache, so write-only bulk data doesn't pollute the cache your hot path depends on.
+The companion technique solves the opposite problem on the **write** path. When you produce a large block of data that you will *not* read back soon — a capture buffer, a log ring, a big memset/memcpy — writing it normally reads (RFO) and allocates every destination line in cache — even when you overwrite the whole line — **evicting the hot working set you carefully fit into L1/L2 in Ch. 8–9.** **Non-temporal (streaming) stores** write straight to memory, bypassing the cache, so write-only bulk data doesn't pollute the cache your hot path depends on.
 
 Both are **sharp, double-edged tools.** A well-placed prefetch can turn a pointer-chasing loop from memory-latency-bound to compute-bound — a multiple-x win. A *badly*-placed one wastes bandwidth, evicts useful lines, and runs *slower* than no prefetch at all (§10.6). The hardware prefetcher is already very good; software prefetch only wins where the hardware provably can't help, and only when measured. This chapter is about earning that win: when to reach for it, how far ahead to prefetch (§10.2.2 — the make-or-break parameter), and how to verify the hint actually emitted (§10.5).
 
@@ -59,10 +59,13 @@ The arithmetic is intuitive: you want to issue the prefetch roughly **`memory_la
 ```cpp
 constexpr int PD = 8;  // prefetch distance — TUNE THIS PER LOOP, empirically (§10.3)
 for (std::size_t i = 0; i < n; ++i) {
-    __builtin_prefetch(&data[index[i + PD]], 0, 0);  // fetch the line I'll need PD iters later
+    if (i + PD < n)                                   // the prefetch never faults, but the
+        __builtin_prefetch(&data[index[i + PD]], 0, 0);  // demand load index[i+PD] does: guard it
     process(data[index[i]]);                          // ... while I work on this one
 }
 ```
+
+(The guard matters: `prefetch` of a bad address is silently dropped, but `index[i + PD]` is an ordinary load that reads past the end of `index` for the last `PD` iterations — UB and a possible crash. Alternatively pad `index` by `PD` entries and drop the branch.)
 
 Crucially, **`PD` is not a constant you can derive on paper** — it depends on the loop's per-iteration work, the actual miss latency, the LFB pressure, and the hardware. You find it by **sweeping** (§10.3) and picking the value that minimizes the tail on *your* workload and *your* CPU. A `PD` that's perfect on one machine can be wrong on the next microarchitecture — which is a maintenance cost worth weighing (§10.6).
 
@@ -72,7 +75,7 @@ The write-path tool. A normal store to a not-yet-cached line triggers a **read-f
 
 **Non-temporal / streaming stores** (`movnti` for scalars, `vmovntps`/`vmovntdq` for SIMD — verified in §10.5) write directly toward memory through a **write-combining** buffer, **bypassing the cache hierarchy** (no RFO, no cache pollution). The trade-offs you must respect:
 
-- They are **weakly ordered** on x86 (unlike normal stores' total store order) — you **must fence** (`_mm_sfence()`) before another thread, a DMA engine, or a dependent reader can rely on the data being visible (Ch. 30). Forgetting the fence is a correctness bug.
+- They are **weakly ordered** on x86 (unlike normal stores' total store order) — you **must fence** (`_mm_sfence()`) before another thread, a DMA engine, or a dependent reader can rely on the data being visible. Note the trap for a Ch. 30 reader: x86-TSO's ordering guarantee — and therefore a C++ release fence or release store, which compile to nothing / a plain `mov` — does **not** cover `movnt*` stores; only `sfence`, `mfence` or a `lock`-prefixed RMW (a `seq_cst` store or `fetch_add`) orders them. Publishing a streamed buffer through a release-store flag is exactly the bug. (Ch. 66 §66.4.1 meets the same rule for write-combining MMIO.) Forgetting the fence is a correctness bug.
 - They pay off only for **large, write-only, cache-line-granular** regions written sequentially (to fill write-combining buffers fully). For small or read-back-soon data they're a pessimization (you'd want the data *in* cache).
 - They're most effective writing **full cache lines**; partial-line non-temporal stores are inefficient.
 
@@ -219,7 +222,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 - **Prefetch the wrong line / stale address.** Prefetching `&x` when you'll actually dereference `&y`, prefetching an address that's recomputed before use, or prefetching past the array bounds into another page (harmless to correctness — prefetch never faults — but wasted, and can trigger a spurious page walk). Prefetch the *exact* line you'll touch.
 - **Too many prefetches in flight.** Only ~10–12 LFBs per core; flooding them with prefetches starves real demand loads and *adds* latency. Keep in-flight prefetches modest; more is not better.
 - **Portability/maintenance cost.** A tuned `PD` and locality hint are microarchitecture-specific; they can pessimize the next CPU and rot silently (no compile error when they stop helping). Gate them behind measurement and re-validate per platform (Appendix A for ARM, where the prefetch instruction and tuning differ).
-- **Streaming-store without a fence.** Non-temporal stores are weakly ordered; a reader/DMA that observes them before `_mm_sfence()` sees torn/stale data — a real correctness bug, not just slow (§10.2.3, Ch. 30).
+- **Streaming-store without a fence.** Non-temporal stores are weakly ordered; a reader/DMA that observes them before `_mm_sfence()` sees torn/stale data — a real correctness bug, not just slow (§10.2.3). A `std::atomic` release store or `atomic_thread_fence(memory_order_release)` is *not* a substitute: on x86 they emit no fence and do not order non-temporal stores.
 - **Streaming stores for the wrong data.** Using `movnt` for data you (or the consumer) *will* read back soon forces it out of cache and then misses on the re-read — slower than a normal store. Streaming is for genuinely write-and-forget bulk output only.
 - **Optimizing the mean, not the tail.** Prefetch's job is to cut the *miss* tail (Ch. 1); a mean can hide whether you helped the p99.9 or just shuffled cycles. Measure the distribution and the `stalls_mem_any` counter, not just average throughput.
 
@@ -241,7 +244,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 - [ ] I **swept the prefetch distance** and chose the empirical minimum on **this** hardware and a **production-sized** working set — not a guessed constant.
 - [ ] I prefetch the **exact line** I'll dereference, with a **locality hint** matching reuse (NTA for touch-once, T0 for hammered), and keep in-flight prefetches under the LFB limit.
 - [ ] I verified the **emitted instruction** (`prefetcht0`/`nta`/`prefetchw`, `movnti`/`vmovnt*`) in the asm — the hint became what I intended (§10.5).
-- [ ] Streaming stores are used **only** for large, write-only, full-line, sequential output, and I emit **`_mm_sfence()`** before any reader/DMA observes them (§10.2.3, Ch. 30).
+- [ ] Streaming stores are used **only** for large, write-only, full-line, sequential output, and I emit **`_mm_sfence()`** (not merely a C++ release store) before any reader/DMA observes them (§10.2.3).
 - [ ] I measured the **right effect**: prefetch → `stalls_mem_any`↓ (overlap), streaming → hot-set miss rate↓ (no pollution), and judged the **tail**, not the mean.
 - [ ] I documented the **portability cost** of any tuned distance/hint and gated it behind measurement for re-validation per platform (Appendix A).
 
@@ -250,17 +253,17 @@ The check here is that your streaming store **didn't get lowered back to a norma
 ## 10.8 References
 
 - Intel, *64 and IA-32 Architectures Optimization Reference Manual* — software prefetch guidance, `prefetcht0/1/2/nta`, `prefetchw`, non-temporal stores, write-combining, and the fencing requirements (the authoritative source for this chapter); AMD's optimization guide for AMD parts.
-- U. Drepper, *"What Every Programmer Should Know About Memory,"* §7 — software prefetching, prefetch distance, and non-temporal access, with measurements.
+- U. Drepper, *"What Every Programmer Should Know About Memory,"* Sections 6.1 (bypassing the cache — non-temporal access) and 6.3.2 (software prefetching, prefetch distance), with measurements.
 - Intel *Intrinsics Guide* and GCC/Clang docs for `__builtin_prefetch`, `__builtin_nontemporal_store` (Clang only), `_mm_prefetch`, `_mm_stream_*`, and `_mm_sfence`.
 - A. Fog, *The Microarchitecture of Intel, AMD and VIA CPUs* — line-fill-buffer counts, MLP limits, and prefetch behavior per microarchitecture (the LFB-pressure caveat of §10.2.1).
 - Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* — memory-level parallelism and latency-hiding, the theory behind why prefetch works (Ch. 11).
 
 ## 10.9 Additional Reading
 
-- M. Kobeissi / various CppCon talks on data-structure prefetching (e.g. prefetching in hash tables and B-trees) — practical §10.4.1 patterns.
+- M. Kulukundis, *"Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step"* (CppCon 2017) — group prefetching in Swiss tables; S. Chen, P. Gibbons, T. Mowry, *"Improving Index Performance through Prefetching"* (SIGMOD 2001) — prefetching B-trees: the practical §10.4.1 patterns.
 - The `glibc` `memcpy`/`memset` source and its non-temporal-store size thresholds — a production example of §10.4.2.
-- Ch. 11 (*CPU Pipelines & Execution*) — instruction-level and memory-level parallelism, the mechanism prefetch exploits; Ch. 25 (*…Building the Limit Order Book*) — prefetching real book structures; Ch. 29 (*SIMD*) — streaming-store intrinsics in context.
-- **Appendix A** — ARM prefetch (`PRFM`) and non-temporal instructions, and why the tuned distance differs from x86.
+- Ch. 11 (*CPU Pipelines & Execution*) — instruction-level and memory-level parallelism, the mechanism prefetch exploits; Ch. 25 (*…Building the Limit Order Book*) — prefetching real book structures; Ch. 29 (*SIMD*) — the vector registers and `<immintrin.h>` intrinsics the streaming stores here operate on; Ch. 66 §66.4.1 — the same weak-ordering-plus-`sfence` discipline for write-combining MMIO.
+- **Appendix A** — the ARM port: a tuned distance and hint must be re-measured there (the ISA spellings are `PRFM` and the non-temporal `LDNP`/`STNP` pair, with a weaker memory model that changes the fencing story).
 
 ---
 

@@ -461,6 +461,7 @@ What remains outside this review's reach:
 - **The 212 book-wide-check findings** (stale cross-references, chain, numbers, glossary, appendices C/D/H/I) were produced by single agents and not re-verified; the headline ones were re-checked by hand and the rest should be read with the ~3 % refutation rate of the verified set in mind.
 - **Refuted findings are kept in the tables** with the verifier's reason, so the author can overrule either side.
 - The review did not attempt to fix anything; §3 gives the recipe for the one mechanical fix (the fenced-block renumber), and the gap analysis in §10 is a planning input, not a commitment.
+- **P2-2 part 1 (Ch. 0–26), 2026-11-09:** 154 fixed / 142 already fixed / 9 left — see the findings file header.
 
 ---
 
@@ -661,4 +662,5 @@ If the author wants the smallest set of additions that closes the gaps they name
 - `review/2026-10-30-stale-crossrefs.md` — the mechanically detected stale cross-references (fenced: near-certain; prose: heuristic).
 - `review/2026-10-30-gap-verification.md` — the skeptical coverage pass over the 92 merged items: verdict, grep evidence, where the closest existing coverage is, refined placement and priority reasoning.
 - `review/2026-10-30-gap-proposals-raw.txt` — the 163 raw gap proposals from the fourteen lenses (title, placement, scope bullets, claimed existing coverage, grep evidence), keyed by the source tags used in §10.
+- **P2-2 part 4 (appendices, front matter, book-wide), 2026-11-09:** 87 fixed / 109 already fixed / 2 left — see the findings file header.
 - **P2-2 part 3 (Ch. 53–76), 2026-11-09:** 212 fixed / 104 already fixed / 1 left — see the findings file header.

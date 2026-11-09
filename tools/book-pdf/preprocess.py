@@ -34,6 +34,8 @@ CHAP = re.compile(r"^#\s+Chapter\s+\d+\s*[—–-]\s*(.+?)\s*$")
 APP = re.compile(r"^#\s+Appendix\s+[A-Z]\s*[—–-]\s*(.+?)\s*$")
 # A leading section label: 5.1 / 48.4.1 / A.1 / A.2.1
 SEC = re.compile(r"^(#{2,3})\s+(?:\d+(?:\.\d+)*|[A-Z]\.\d+(?:\.\d+)*)\s+(.+?)\s*$")
+# Any other ##/### heading (no manual number) -- emitted unnumbered.
+UNNUMBERED = re.compile(r"^(#{2,3})\s+(?!\{)(.+?)\s*$")
 HEAD = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 HR = re.compile(r"^-{3,}\s*$")
 
@@ -115,6 +117,12 @@ def emit_chapter(path, state, out):
                 if m:
                     out.append(f"{m.group(1)} {m.group(2)}")
                     continue
+                m = UNNUMBERED.match(line)
+                if m:
+                    # A ##/### heading with no manual number: keep it out of the
+                    # auto-numbering so it cannot shift the headings after it.
+                    out.append(f"{m.group(1)} {m.group(2)} {{.unnumbered}}")
+                    continue
             out.append(line)
 
 
@@ -146,6 +154,12 @@ def emit_appendix(path, state, out):
                 m = SEC.match(line)
                 if m:
                     out.append(f"{m.group(1)} {m.group(2)}")
+                    continue
+                m = UNNUMBERED.match(line)
+                if m:
+                    # A ##/### heading with no manual number: keep it out of the
+                    # auto-numbering so it cannot shift the headings after it.
+                    out.append(f"{m.group(1)} {m.group(2)} {{.unnumbered}}")
                     continue
             out.append(line)
 

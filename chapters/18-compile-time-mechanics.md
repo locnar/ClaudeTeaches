@@ -38,7 +38,7 @@ consteval std::uint32_t field_offset(Field f) { /* ... */ }   // ERROR if f isn'
 std::uint32_t o = field_offset(Field::Price);                 // guaranteed compile-time
 ```
 
-Supporting cast worth knowing: **`constinit`** guarantees a variable is *initialized* at compile time (no static-init-order/runtime-init cost) without making it `const`; **`if constexpr`** selects branches at compile time (dead branches are *discarded*, not compiled — the basis of static dispatch, Ch. 19); and **C++20 expanded `constexpr`** to allow loops, most of the standard algorithms, `std::vector`/`std::string` with *transient* allocation (allocated and freed within the same constant evaluation), and much of `<algorithm>`/`<numeric>` — so building a table with a normal loop-and-push is now legal at compile time.
+Supporting cast worth knowing: **`constinit`** guarantees a variable is *initialized* at compile time (no static-init-order/runtime-init cost) without making it `const`; **`if constexpr`** selects branches at compile time (inside a template the discarded branch is not even *instantiated*, and it emits no code either way — the basis of static dispatch, Ch. 19; outside a template both branches are still checked for well-formedness); and the language kept widening what `constexpr` may do: **C++14** relaxed it to allow loops, local variables and mutation (N3652), **C++17** made `std::array` indexing writable in constant evaluation, and **C++20** expanded it further to most of `<algorithm>`/`<numeric>`, `std::vector`/`std::string` with *transient* allocation (allocated and freed within the same constant evaluation), virtual calls and `try` — so building a table with a normal loop-and-push is legal at compile time, and has been since C++14 for a plain array.
 
 **The template cost model.** Templates are the *other* compile-time mechanism — they generate code by instantiation. The model to carry:
 
@@ -54,8 +54,7 @@ The unifying model: **`constexpr`/`consteval` move *values and computation* to c
 
 *Toolchain and machine: Appendix L.3.*
 
-The measurement has *two* axes, because compile-time programming trades one resource for another: **runtime** (should drop to nothing for genuinely compile-time work) and **build time
-+ code size** (the price). Demonstrate both on a lookup table — a CRC/parity-style table — built three ways: (a) computed at **runtime** on startup, (b) built at **compile time** via `constexpr`, (c) hand-written literal array (the baseline the `constexpr` version should match).
+The measurement has *two* axes, because compile-time programming trades one resource for another: **runtime** (should drop to nothing for genuinely compile-time work) and **build time + code size** (the price). Demonstrate both on a lookup table — a CRC/parity-style table — built two ways: (a) computed at **runtime** on startup, (b) built at **compile time** via `constexpr` (whose codegen should be indistinguishable from a hand-written literal array).
 
 ```cpp
 // ct_table.cpp — a 256-entry table, runtime-built vs constexpr-built.
@@ -70,7 +69,7 @@ The measurement has *two* axes, because compile-time programming trades one reso
 // A normal function, constexpr: runs at compile time in a constexpr context, runtime otherwise.
 constexpr std::array<std::uint8_t, 256> build_parity() {
     std::array<std::uint8_t, 256> t{};
-    for (int i = 0; i < 256; ++i) {              // C++20: loops allowed in constexpr
+    for (int i = 0; i < 256; ++i) {              // loops in constexpr: C++14; writable array[]: C++17
         int p = 0, v = i;
         while (v) { p ^= 1; v &= v - 1; }        // popcount parity (Ch. 28)
         t[i] = std::uint8_t(p);
@@ -101,11 +100,12 @@ int main(int argc, char**) {
 }
 ```
 
-Two measurements, not one:
+Two measurements, not one. Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP, 2.9 GHz), GCC 13 `-O2 -std=c++20 -march=native`, Linux 6.18, pinned (`taskset -c 2`), turbo off (illustrative):
 
 ```
 RUNTIME (the hot-path lookup itself):
-   kParity (constexpr) lookup        ~0.4 ns/lookup   <- just an L1 load from .rodata; setup was FREE
+   kParity (constexpr) lookup        ~2.5 ns/lookup   <- one L1 load from .rodata (the loop is deliberately
+                                                       latency-bound: lea+movzx+5-cycle load+add ≈ 8 cyc); setup was FREE
    runtime_parity()  build (startup)  ~hundreds of ns  <- paid once, but on the (cold) startup path
 
 BUILD-TIME / SIZE (the price of (b)):
@@ -118,7 +118,23 @@ The lessons:
 
 - **The compile-time table costs the hot path *nothing*** — `kParity` is already bytes in `.rodata`; the lookup is a single L1 load (Ch. 7), and the *construction* work (the popcount loop, ×256) executed in the compiler, not the program. The `runtime_parity()` version does the identical work but pays it at startup (acceptable if it's truly one-time setup, Ch. 1's hot/cold split — but it *is* paid, and it's code in the binary).
 - **The price shows up on the *other* axis** — `kParity`'s bytes are in the binary's `.rodata` (data/size), and the `constexpr` evaluation cost a little build time. For a 256-byte table that's nothing; for a megabyte table or a deeply recursive metaprogram it can dominate build time and bloat the binary (§18.5).
-- **Verify it actually vanished (Ch. 4).** Disassemble `main`: the lookup should be a `movzx` from a fixed `.rodata` address with **no construction code** for `kParity`. If you instead see a runtime loop building the table, your `constexpr` didn't force compile-time evaluation (§18.2) — the most common silent failure.
+- **Verify it actually vanished (Ch. 4).** Disassemble `main`: the lookup should be a `movzx` from a fixed `.rodata` address with **no construction code** for `kParity`. GCC 13 `-O2` (verified) gives exactly that:
+
+  ```asm
+          lea     rcx, _ZL7kParity[rip]          ; table address: a constant, no call, no loop
+  .L12:   lea     rdx, [rax+rbx]                 ; (acc + i)
+          movzx   edx, dl                        ;   & 0xFF
+          movzx   edx, BYTE PTR [rcx+rdx]        ; kParity[...]: ONE load
+          inc     rax
+          add     rbx, rdx                       ; acc +=
+          cmp     rax, 50000000
+          jne     .L12
+          ...
+          .section .rodata
+          .size   _ZL7kParity, 256               ; the table is 256 bytes of data in the binary
+  ```
+
+  while `runtime_parity()` is a real `call` into a function containing the build loop. If you instead see a runtime loop building the table, your `constexpr` didn't force compile-time evaluation (§18.2) — the most common silent failure.
 
 The takeaway for the rest of Part III: compile-time work moves cost from the runtime axis to the build/size axis. That's almost always a great trade for the hot path — but it *is* a trade, and §18.5 is where it goes wrong.
 
@@ -132,7 +148,7 @@ The general move: identify work whose inputs are **known at compile time** and c
 
 - **Mark pure, input-known functions `constexpr` (or `consteval` to force it).** Anything computing from literals, configuration constants, or template parameters — sizes, masks, offsets, scaling factors, derived limits. Use `consteval` when running at runtime would be a bug, so the compiler *guarantees* it folded away (§18.2).
 - **`constinit` for zero-cost initialization of globals.** A global that must be ready before `main` (a config snapshot, a singleton-ish table) marked `constinit` is initialized at compile time — no runtime static-init cost, no static-init-order fiasco, and it can live in `.rodata` if also `const`.
-- **`if constexpr` to specialize and discard dead code.** Select implementation branches at compile time so only the taken branch is compiled — specializing a parser per protocol, a container per size, a path per platform, with *no* runtime branch and no dead code emitted (Ch. 12–13). This is the workhorse for compile-time dispatch (Ch. 19).
+- **`if constexpr` to specialize and discard dead code.** Select implementation branches at compile time so only the taken branch is instantiated and emitted — specializing a parser per protocol, a container per size, a path per platform, with *no* runtime branch and no dead code emitted (Ch. 12–13). This is the workhorse for compile-time dispatch (Ch. 19).
 - **Template/`constexpr` parameters instead of runtime arguments.** A loop count, a buffer size, a field offset passed as a template non-type parameter (or `constexpr`) lets the compiler unroll, size stack buffers, and fold address arithmetic — versus a runtime argument it must handle generically.
 - **Compile-time validation.** `static_assert` and `consteval` checks catch errors at build time (a missized struct vs a cache line, Ch. 9; an out-of-range constant) — zero runtime cost, and the bug never ships (ties Ch. 72's security-as-correctness).
 
@@ -185,7 +201,7 @@ Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.ro
 
 **Exercises**
 
-1. **Prove it vanished.** Build `ct_table.cpp`; disassemble `main` (Ch. 4) and confirm the `kParity` lookup is a load from a fixed `.rodata` address with **no** table-construction code, while `runtime_parity()` emits a build loop. Now *break* it: change `static constexpr kParity` to a plain `auto kParity = build_parity();` — does construction reappear at runtime?
+1. **Prove it vanished.** Build `ct_table.cpp`; disassemble `main` (Ch. 4) and confirm the `kParity` lookup is a load from a fixed `.rodata` address with **no** table-construction code, while `runtime_parity()` emits a build loop. Now *break* it two ways and predict each outcome first: (i) change `static constexpr kParity` to a plain `static auto kParity = build_parity();` — construction does **not** reappear (a constant-expression initializer of a static is constant-initialized by [basic.start.static] regardless of `constexpr`; only `.rodata` becomes `.data`); (ii) remove `constexpr` from `build_parity` itself, or feed it a runtime argument such as `argc & 1` — now a dynamic initializer (`_GLOBAL__sub_I_...`) or an in-`main` loop appears.
 2. **Both axes.** Measure (a) hot-path ns/lookup, (b) build time (`/usr/bin/time g++ ...`), and (c) binary size (`size`) for the runtime-built vs `constexpr`-built table. Then scale the table to 64 KiB and re-measure all three. Where does the compile-time win turn into a data-cache loss (§18.5)?
 3. **`constexpr` vs `consteval`.** Take a `field_offset(Field)` function; make it `constexpr`, call it with a runtime `Field` — does it compile, and where does it run? Make it `consteval` — what error do you get? When is forcing `consteval` the right call (§18.2, §18.4.1)?
 4. **`if constexpr` specialization.** Write a `parse<Proto>()` with `if constexpr` branches per protocol; confirm (Ch. 4) the untaken branch emits **no** code. Compare against a runtime `switch (proto)` version's codegen.
@@ -206,7 +222,7 @@ Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.ro
 
 ## 18.7 References
 
-- ISO C++ standard / cppreference — `constexpr`, `consteval`, `constinit`, `if constexpr`, and the C++20 expansions to constant evaluation (transient allocation, `constexpr` algorithms/ containers) that §18.2/§18.4 rely on.
+- ISO C++ standard / cppreference — `constexpr`, `consteval`, `constinit`, `if constexpr`, and the C++20 expansions to constant evaluation (transient allocation, `constexpr` algorithms/containers) that §18.2/§18.4 rely on.
 - B. Stroustrup, *The C++ Programming Language* and the C++ Core Guidelines — guidance on constant expressions, when to prefer compile-time evaluation, and the template cost model.
 - J. Boccara, *Fluent C++* and various CppCon talks on `constexpr`/`consteval` programming and compile-time table generation — practical patterns behind §18.4.
 - L. Dionne, *"Compile-time programming and reflection in C++20 and beyond"* (and the Boost.Hana documentation) — the modern metaprogramming model and its build-time costs (§18.5).

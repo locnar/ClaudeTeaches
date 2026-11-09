@@ -54,7 +54,7 @@ Good (16B):  [b b b b b b b b][a][c][pad x6]
 - **`alignof(T)`** queries a type's alignment; **`alignas(N)`** *raises* it (you can't lower alignment below natural with `alignas`). **Natural alignment** is the type's default (matches its size for scalars); **over-alignment** is asking for more than natural, for two hot-path reasons:
   - **SIMD:** AVX wants 32-byte-aligned, AVX-512 64-byte-aligned loads/stores for the aligned (`vmovdqa`) path and to avoid cache-line-split penalties (Ch. 29). `alignas(32)` / `alignas(64)` on a buffer or struct guarantees it.
   - **Cache-line isolation (false sharing):** `alignas(64)` (or `alignas(std::hardware_destructive_interference_size)`) forces a value onto its own cache line so a *different* thread writing a neighboring value doesn't trigger MESI ping-pong (Ch. 7 §7.2.3, Ch. 33). Here padding is the *point*.
-- **`std::hardware_destructive_interference_size`** (C++17, `<new>`) — the recommended minimum offset to avoid false sharing (64 on x86); its twin `hardware_constructive_interference_size` is the line size to *pack within*. (Compilers warn about ABI-stability of these constants; many shops hardcode 64 with a `static_assert` — Ch. 33.)
+- **`std::hardware_destructive_interference_size`** (C++17, `<new>`) — the recommended minimum offset to avoid false sharing (64 on x86); its twin `hardware_constructive_interference_size` is the line size to *pack within*. (GCC warns, `-Winterference-size`, that the value is ABI-unstable; many shops pin a literal 64 — but see Ch. 33 on why 128 may be the right padding on Intel, with its adjacent-line prefetcher, and on ARM.)
 - **`alignas` adds padding too.** Over-aligning a struct member or the struct itself inserts padding to honor the request — deliberate, not silent. Know the size cost you're buying.
 
 ### 9.2.3 `[[no_unique_address]]` and empty-base optimization
@@ -103,8 +103,8 @@ You should never *guess* a struct's layout. Three tools make it visible:
 **`static_assert(sizeof(T) == ...)`** — the cheapest guard. Pin the size (and `alignof`, and `offsetof` for overlay types) so a future field reorder or addition that bloats the struct fails the build, not production:
 
 ```cpp
-static_assert(sizeof(LevelHot) == 16, "LevelHot grew — check padding/footprint");
-static_assert(alignof(LevelHot) == 8);
+static_assert(sizeof(LevelHot) == 24, "LevelHot grew — check padding/footprint");  // 16 once the
+static_assert(alignof(LevelHot) == 8);                                              // fields shrink (below)
 ```
 
 **`-Wpadded`** (GCC/Clang) — warns *every time* the compiler inserts padding, naming the struct and the gap. Noisy by design (you don't want it on globally), but invaluable when aimed at a specific hot header: compile that TU with `-Wpadded` and it tells you exactly where the dead bytes are.
@@ -122,7 +122,7 @@ struct LevelHot {
 };
 ```
 
-`pahole` tells you the truth: this `LevelHot` is 24 bytes (3 per cache line) with 4 bytes of tail padding — drop or reorder to hit 20→ aligned-16 isn't possible here without removing a field, but you *see* the cost and decide. `pahole --reorganize` even suggests a minimal-padding ordering. The workflow: **`-Wpadded` to spot it, `pahole` to quantify it, `static_assert` to lock it.**
+`pahole` tells you the truth: this `LevelHot` is 24 bytes (2.67 per cache line — every third element straddles a line) with 4 bytes of tail padding. Reordering cannot help: 20 bytes of data rounds up to 24 under 8-byte alignment, so reaching 16 means *shrinking* a field (`int32_t` quantity and count, if the domain allows it) — but you *see* the cost and decide. `pahole --reorganize` even suggests a minimal-padding ordering. The workflow: **`-Wpadded` to spot it, `pahole` to quantify it, `static_assert` to lock it.**
 
 ---
 
@@ -147,7 +147,7 @@ And the **deliberate over-align** case (§9.2.2): a per-thread counter or queue 
 
 `#pragma pack(1)` / `__attribute__((packed))` removes **all** padding, laying members back-to-back regardless of alignment. Tempting for shrinking a struct or matching a wire layout — but it makes members **misaligned**, and that has real costs:
 
-- On **x86-64**, a misaligned *scalar* load/store is one instruction and usually cheap — the hardware handles it — *until* the access **crosses a cache-line (or page) boundary**, where it costs a second line fetch (and a page-table walk at a page edge). So packed scalar access degrades from "free" to "occasionally 2×" depending on where the object lands.
+- On **x86-64**, a misaligned *scalar* load/store is one instruction and usually cheap — the hardware handles it — *until* the access **crosses a cache-line (or page) boundary**, where it costs a second line fetch (and a second TLB lookup — a page walk only if that misses — at a page edge). So packed scalar access degrades from "free" to "occasionally 2×" depending on where the object lands.
 - **Vectorization is the real casualty** (see §9.5): the compiler often **refuses to auto-vectorize** a loop over packed structs because it can't assume element alignment — turning a wide SIMD reduction back into a scalar loop. On a hot aggregation, that's a far bigger loss than the padding you saved.
 - **Atomics on a packed (misaligned) member are undefined / a "split lock"** — catastrophic (§9.6).
 - On **AArch64** (Appendix A) ordinary misaligned scalar loads/stores to normal memory are handled in hardware (with a split-access penalty, as on x86), but load/store-exclusive, `LDAR`/`STLR` and the atomic instructions *fault* (`SIGBUS`) on a misaligned address — a packed struct containing an atomic is fatal there, not merely slow. Older ARM cores and other RISC targets may trap or emulate.
@@ -178,13 +178,13 @@ load_packed(Packed const*):
 
 Identical instruction count — on x86 a misaligned *scalar* access is just a different offset. This is why "packing scalars is slow" is a myth *for isolated scalar access*; the penalty only appears on cache-line/page-crossing accesses, which the single-`mov` view hides.
 
-The real cost shows in a **loop**. Summing a field across an array — aligned struct vs packed struct (verified, `-O2 -march=x86-64-v3`, AVX2):
+The real cost shows in a **loop**. Summing a field across an array — aligned struct vs packed struct (verified, GCC 13 `-O3 -march=x86-64-v3`, AVX2 — GCC's `-O2` very-cheap cost model vectorizes neither for an unknown trip count; Clang 18 vectorizes both, `sumP` via scalar loads plus shuffles):
 
 ```cpp
 struct A { long v; long w; };                                    // 16B, aligned
 struct __attribute__((packed)) P { char c; long v; long w; };    // 17B, packed/misaligned
-long sumA(const A* a, unsigned long n){ long s=0; for(...) s += a[i].v; return s; }
-long sumP(const P* p, unsigned long n){ long s=0; for(...) s += p[i].v; return s; }
+long sumA(const A* a, unsigned long n){ long s=0; for(unsigned long i=0;i<n;++i) s += a[i].v; return s; }
+long sumP(const P* p, unsigned long n){ long s=0; for(unsigned long i=0;i<n;++i) s += p[i].v; return s; }
 ```
 
 `sumA` **vectorizes** — the inner loop is wide AVX2 (verified excerpt):
@@ -205,7 +205,7 @@ long sumP(const P* p, unsigned long n){ long s=0; for(...) s += p[i].v; return s
         jne     .loop
 ```
 
-There it is: the same reduction, **SIMD vs scalar**, decided purely by whether the element type was packed. On a hot aggregation that's a 4–8× throughput cliff — vastly more than the few padding bytes `pack` saved. **This is the §9.4.3 lesson, proven in asm: keep internal hot structs aligned (reorder/split for size); reserve `pack` for wire formats you don't vectorize over.** Always verify with `-Rpass=loop-vectorize` / `-fopt-info-vec` (Ch. 4) when you intend a loop to be SIMD.
+There it is: the same reduction, **SIMD vs scalar**, decided purely by whether the element type was packed. On a hot aggregation that's up to a 4–8× throughput cliff while the array is L1/L2-resident (a DRAM-bound sweep narrows toward the bandwidth limit — measure both regimes, exercise 3) — vastly more than the few padding bytes `pack` saved. **This is the §9.4.3 lesson, proven in asm: keep internal hot structs aligned (reorder/split for size); reserve `pack` for wire formats you don't vectorize over.** Always verify with `-Rpass=loop-vectorize` / `-fopt-info-vec` (Ch. 4) when you intend a loop to be SIMD.
 
 ---
 
@@ -228,7 +228,7 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 
 1. **See the padding.** Define `struct Bad { char a; long b; char c; };`. Predict its `sizeof`, then check with `static_assert` and `pahole`. Reorder to minimize padding, confirm the new size, and explain the difference byte-by-byte (§9.2.1).
 2. **Footprint → miss rate.** Make a hot struct 24 bytes, fill a large array, sum one field, and `perf stat` the L1 misses (Ch. 2). Reorder/shrink it to 16 bytes and re-measure. How did per-line element count and miss rate change? Tie to Ch. 7–8.
-3. **Reproduce the vectorization cliff.** Build `sumA`/`sumP` from §9.5 at `-O2 -march=native`. Confirm via `-fopt-info-vec` (or reading the asm, Ch. 4) that the aligned one vectorizes and the packed one doesn't. Benchmark both (Ch. 3) — what's the throughput ratio?
+3. **Reproduce the vectorization cliff.** Build `sumA`/`sumP` from §9.5 at `-O3 -march=native` (GCC; `-O2` suffices on Clang). Confirm via `-fopt-info-vec` (or reading the asm, Ch. 4) that the aligned one vectorizes and the packed one doesn't. Benchmark both (Ch. 3) — what's the throughput ratio?
 4. **Scalar packed is (almost) free.** Show that a *single* packed-scalar load is one `mov` (§9.5), then construct a case where a packed access **crosses a cache line** and measure the penalty (place the field at offset 60 of a 64-byte-straddling object). When does packing actually cost on x86?
 5. **Zero-cost policy.** Make a struct templated on an empty comparator stored as a plain member; check `sizeof`. Switch to `[[no_unique_address]]` (or EBO); check `sizeof` again. How many bytes did the abstraction cost before and after (§9.2.3)?
 
@@ -249,13 +249,13 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 
 - *System V AMD64 ABI* and the **Itanium C++ ABI** — the authoritative rules for member layout, alignment, padding, tail padding, and EBO/`[[no_unique_address]]`.
 - cppreference: *Object layout*, `alignas`/`alignof`, `[[no_unique_address]]`, `std::hardware_destructive_interference_size`, and bit-field rules.
-- `pahole`/`dwarves` documentation (Arnaldo Carvalho de Melo) — DWARF-based struct layout inspection and `--reorganize`/`--reorder` (the §9.3 tool).
+- `pahole`/`dwarves` documentation (Arnaldo Carvalho de Melo) — DWARF-based struct layout inspection and `--reorganize` (with `--show_reorg_steps` and `--packable`; the §9.3 tool).
 - Intel, *64 and IA-32 Architectures Optimization Reference Manual* — alignment and cache-line-split penalties, vector-load alignment, and split-lock cost; AMD's optimization guide for AMD parts.
 - The Linux kernel "split lock detection" documentation — the real-world cost and handling of misaligned `LOCK` operations (§9.6).
 
 ## 9.9 Additional Reading
 
-- E. Bendersky, *"The lost art of structure packing"* and similar write-ups — a practical tour of padding and reordering with `pahole`.
+- E. S. Raymond, *"The Lost Art of Structure Packing"* (catb.org/esr/structure-packing) and similar write-ups — a practical tour of padding and reordering with `pahole`.
 - CppCon talks on `[[no_unique_address]]` and EBO in the standard library (`std::vector`/`std::tuple` layout) — §9.2.3 in real library code.
 - Ch. 33 (*False Sharing*) — the over-alignment side of this chapter, with `hardware_destructive_interference_size` and `perf c2c`; Ch. 53 (*Zero-Copy Wire Handling*) — packed overlay structs done safely; Ch. 28 (*Bit Manipulation*) — bit-field and mask/shift codegen.
 - **Appendix A** — ARM/Graviton alignment and 128-byte cache-line differences and their effect on the sizing decisions here.

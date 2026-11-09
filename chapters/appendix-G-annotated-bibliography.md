@@ -112,4 +112,4 @@ If you build a low-latency C++ shelf from this list, start here: **Drepper** (me
 
 ---
 
-*Next: Appendix H — C++23/26 Feature Availability Matrix, a support table for the modern-library and language features this book reaches for (`std::expected`, `std::flat_map`/`flat_set`, `std::print`, `std::mdspan`, `std::span`, `std::bit_cast`, senders/receivers) — which GCC/libstdc++ and Clang/libc++ version each landed in, the feature-test macro to gate on, and the C++17/20 fallback.*
+*Next: Appendix H — Modern C++ (C++20/23/26) Feature Availability Matrix, a support table for the modern-library and language features this book reaches for (`std::expected`, `std::flat_map`/`flat_set`, `std::print`, `std::mdspan`, `std::span`, `std::bit_cast`, senders/receivers) — which GCC/libstdc++ and Clang/libc++ version each landed in, the feature-test macro to gate on, and the C++17/20 fallback.*

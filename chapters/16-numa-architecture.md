@@ -44,6 +44,8 @@ The essential facts:
 - **It's not just DRAM — it's the whole node's resources.** L3, memory bandwidth, and even I/O (a NIC is attached to one socket's PCIe — Ch. 55, 66) are node-local. A thread far from its NIC's node pays for *that* too. NUMA-awareness extends to *where your NIC and devices are*.
 - **`numactl --hardware` shows you the map.** Node count, cores per node, memory per node, and a **distance matrix** (relative access cost: 10 = local, 21 = one remote hop, etc.). This is the topology you design around (discover it — Ch. 6).
 
+- **One socket may be more than one node.** Ice Lake-SP firmware offers **Sub-NUMA Clustering** (SNC2), which splits each socket into two NUMA nodes along its mesh — four nodes on the 2× 6326 box — each with half the socket's L3 slices and memory channels: lower local latency and less L3 contention for a thread that stays in its half, at the cost of halving the local memory and L3 per node and turning the other half of your *own* socket into a (small) remote hop. AMD's `NPS1/2/4` modes and per-CCX L3 domains are the equivalent. `numactl -H` tells you which mode the box booted in, and every `--cpunodebind`/`--membind` recipe below must follow the map it prints, not the diagram above (Ch. 6, Appendix C). Verify placement after warm-up with `numastat -p <pid>` or `/proc/<pid>/numa_maps`; `migratepages`/`move_pages(2)` fix a misplaced region without a restart.
+
 The mental model: **memory has a "home" node, and access cost depends on the distance between the core touching it and that home.** Your job is to make the distance zero on the hot path.
 
 ### 16.2.2 First-touch allocation policy
@@ -114,7 +116,7 @@ Profile with `perf stat`, and use the **uncore/offcore** counters that distingui
 
 ```
                                           local (CPU0→mem0)   remote (CPU1→mem0)
-ns / access (dependent chase)                ~85 ns              ~150 ns      <- ~1.8x: the cliff
+ns / access (dependent chase)                ~85 ns              ~150 ns      <- ~1.8x: the cliff (4 KB pages: both include ~20 ns of page walk, Ch. 15)
 mem_load..._retired.local_dram               ~all                ~0
 mem_load..._retired.remote_dram              ~0                   ~all         <- the whole story
 L3 / LLC miss rate                           ~same               ~same        <- same access pattern
@@ -167,8 +169,8 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 - **`numactl --interleave` for latency-bound data.** Interleave is for *bandwidth*-bound shared structures; using it for per-thread latency-sensitive data guarantees ~50% of accesses are remote by design. Match policy to the access pattern (latency → bind local; bandwidth-shared → consider interleave).
 - **Cross-node false sharing.** A padded-counter omission (Ch. 33) is bad within a socket and *catastrophic* across sockets — every write is a remote HITM over UPI. Per-node/per-thread counters, padded, aggregated off the hot path.
 - **Threads far from their NIC/device.** Pinning compute correctly but ignoring that the NIC (Ch. 55) or NVMe (Ch. 75) hangs off the *other* socket's PCIe adds an interconnect hop to every packet/block. Place I/O threads on the device's node.
-- **Huge pages placed remotely (Ch. 15).** First-touch chooses a *whole* 2 MB (or 1 GB!) page's node; pre-faulting a huge-page region from the wrong thread strands a large, coarse chunk remote. Pre-fault huge pages from the using thread on the right node.
-- **Trusting the OS auto-balancer on a latency box.** Kernel automatic NUMA balancing (page migration, `numa_balancing`) chases locality heuristically but introduces *migration stalls* and jitter (Ch. 1) — usually disabled on a tuned box (Appendix C) in favor of explicit placement + pinning.
+- **Huge pages placed remotely (Ch. 15).** First-touch chooses a *whole* 2 MB (or 1 GB!) page's node; pre-faulting a huge-page region from the wrong thread strands a large, coarse chunk remote. And for *explicit* huge pages first-touch only decides the node if that node's pool has free pages: the pool is per node (`/sys/devices/system/node/nodeN/hugepages/hugepages-2048kB/nr_hugepages`; a global `vm.nr_hugepages` is spread round-robin across nodes), and a fault whose local pool is empty silently takes a page from the other node (or fails under a strict `mbind`). Reserve per node (write the per-node sysfs files, or reserve under `numactl --membind`), pre-fault from the using thread on the right node, and check per-node `free_hugepages` / `numastat -m` after warm-up.
+- **Trusting the OS auto-balancer on a latency box.** Kernel automatic NUMA balancing (page migration, `numa_balancing`) chases locality heuristically but introduces *migration stalls* and jitter (Ch. 1) — usually disabled on a tuned box (`sysctl -w kernel.numa_balancing=0`, or `numa_balancing=disable` on the kernel command line) in favor of explicit placement + pinning.
 - **Measuring without NUMA counters.** Remote access is invisible in cache-miss rates (§16.3); if you don't watch `local_dram`/`remote_dram`/offcore-response, you'll miss it entirely. Measure NUMA explicitly, or you won't know the cliff is there.
 - **Optimizing NUMA on a single-socket box.** One node = no remote accesses; the techniques here are moot (and `--membind` is a no-op). Confirm topology (`numactl --hardware`) before spending effort.
 
@@ -193,7 +195,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 - [ ] No **cross-node false sharing** — shared writable lines are padded and per-node/per-thread, aggregated off the hot path (Ch. 33).
 - [ ] I/O threads run on the **node hosting their NIC/NVMe** (`/sys/.../numa_node` — Ch. 55, 66, 75); no accidental cross-node device hops.
 - [ ] **Huge pages** (Ch. 15) are first-touched on the right node; `interleave` is used **only** for bandwidth-bound shared data, never latency-bound per-thread data.
-- [ ] Automatic NUMA balancing is **disabled** (or measured to add no jitter) on the latency box (Appendix C); placement is explicit.
+- [ ] Automatic NUMA balancing is **disabled** (`kernel.numa_balancing=0`, or measured to add no jitter) on the latency box; placement is explicit.
 
 ---
 
@@ -210,7 +212,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — NUMA case studies and reading local/remote DRAM counters with `perf`.
 - The `numactl`/`numastat` and `lstopo` (hwloc) documentation — discovering and visualizing node topology, core/device-to-node mapping (Ch. 6).
 - Ch. 24 (*Custom Allocators*) — NUMA-aware per-node arenas; Ch. 33 (*False Sharing*) — the cross-node coherence cost in depth; Ch. 42 (*Thread & Interrupt Pinning*) — the affinity machinery this chapter depends on; Ch. 68 (*MPI*) — topology-aware placement at cluster scale.
-- **Appendix C** (System Tuning Checklist) — NUMA/`numa_balancing`/IRQ-affinity settings consolidated; **Appendix E** — the local vs remote DRAM latency numbers that frame "the cliff."
+- **Appendix C** (System Tuning Checklist) — NUMA/snoop-mode firmware settings and `numactl` pinning consolidated (`numa_balancing` is stated in §16.5); **Appendix E** — the local vs remote DRAM latency numbers that frame "the cliff."
 
 ---
 

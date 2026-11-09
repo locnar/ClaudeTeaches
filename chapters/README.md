@@ -1,6 +1,6 @@
 # Low-Latency C++ on Linux — Table of Contents & Topic Index
 
-A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*), with the searchable sub-topics listed under **Mental model** and **Techniques**.
+A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
 > **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 76 chapters are grouped into twelve Parts; twelve appendices (A–L) follow.
 
@@ -310,7 +310,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 22.4.2 LTO
   - 22.4.3 PGO and BOLT
 - 22.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
-- 22.6 Exercises & checklist → *(see Appendix D for the flag reference)*
+- 22.6 Exercises & checklist
 
 ## Part IV — Memory Management
 
@@ -1002,7 +1002,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - D.5 Inlining/layout (`-finline-limit`, `-freorder-blocks-and-partition`, `-falign-*`)
 - D.6 LTO/PGO/BOLT
 - D.7 Diagnostics (`-Wpadded`, `-Wfloat-equal`, `-fopt-info`) and sanitizers
-- D.8 A representative hot-path build line
+- D.8 Hardening and speculative-execution mitigation flags (CET, stack protector, `_FORTIFY_SOURCE`, PIE, retpolines)
+- D.9 A representative hot-path build line
 
 ### [Appendix E — Latency Numbers Every Trading Developer Should Know](appendix-E-latency-numbers.md)
 - E.1 The table
@@ -1027,12 +1028,12 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - G.6 How this maps to the Parts
 - G.7 A short shelf
 
-### [Appendix H — C++23/26 Feature Availability Matrix](appendix-H-cpp-feature-matrix.md)
+### [Appendix H — Modern C++ (C++20/23/26) Feature Availability Matrix](appendix-H-cpp-feature-matrix.md)
 - H.1 How to read the matrix (columns, library-vs-language, feature-test gating)
 - H.2 Core library features (`std::expected`, `std::span`, `std::mdspan`, `std::flat_map`/`flat_set`, `std::print`)
 - H.3 Language features (`consteval`/`constinit`, concepts, coroutines, `[[likely]]`, `[[assume]]`)
 - H.4 Concurrency & execution (`std::atomic_ref`, `std::jthread`, `std::execution` senders/receivers)
-- H.5 Numerics & bit manipulation (`std::bit_cast`, `<bit>`, `std::byteswap`, saturating arithmetic)
+- H.5 Numerics & bit manipulation (`std::bit_cast`, `<bit>`, `std::byteswap`, saturating arithmetic, `from_chars`/`to_chars`)
 - H.6 Feature-test macros & graceful degradation
 
 ### [Appendix I — Tooling Command Cookbook](appendix-I-tooling-cookbook.md)
@@ -1057,7 +1058,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ### [Appendix K — Exchange Connectivity & the Physical Layer](appendix-K-exchange-connectivity.md)
 - K.1 Colocation: cages, cross-connects, power & cooling
-- K.2 The wire: fiber vs. copper, latency-equalized cabling
+- K.2 The wire: fiber vs. copper, and latency-equalized cabling
 - K.3 Wireless: microwave and millimeter-wave
 - K.4 Exchange access: ports, gateways, entitlements & throttles
 - K.5 Time distribution at the venue (grandmaster, PPS, PTP boundary clocks)

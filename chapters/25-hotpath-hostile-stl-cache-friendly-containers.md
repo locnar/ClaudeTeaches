@@ -12,7 +12,7 @@
 
 The C++ standard library is superb general-purpose engineering and, for several of its most-used containers, **actively hostile to the hot path** — not because the implementations are bad, but because their *data structures* are wrong for a latency-bound, cache-sensitive workload. `std::map`, `std::unordered_map`, `std::list`, `std::set` are **node-based**: each element lives in a separately-allocated node somewhere on the heap, linked by pointers. Every lookup, every traversal, is a **pointer chase** — follow a pointer to a node that's almost certainly a cache miss (Ch. 7, ~80 ns to DRAM) and probably a TLB miss too (Ch. 15), then follow the next. A `std::map` lookup is O(log n) *cache misses*; a `std::unordered_map` lookup is a hash plus a walk down a chain of heap-scattered nodes. The asymptotic complexity looks fine; the *constant* is a string of DRAM round-trips, and on the hot path the constant is everything.
 
-The damage compounds with the allocation story of Ch. 23–24: every `insert` into a node container is a `malloc` (a tail event, Ch. 23.3), every `erase` a `free`, and the nodes fragment across the heap so even sequential logical access is physically random. Add the other idiomatic-but-costly types — `std::shared_ptr` (atomic refcount increments/decrements on every copy, a cache-line ping-pong under contention — Ch. 33; plus a separate control-block allocation), `std::function` (double indirection, possible heap capture — Ch. 14) — and a "modern C++" hot path can be a parade of cache misses, atomic contention, and hidden allocations, none visible as a literal performance bug in the source.
+The damage compounds with the allocation story of Ch. 23–24: every `insert` into a node container is a `malloc` (a tail event, §23.3), every `erase` a `free`, and the nodes fragment across the heap so even sequential logical access is physically random. Add the other idiomatic-but-costly types — `std::shared_ptr` (atomic refcount increments/decrements on every copy, a cache-line ping-pong under contention — Ch. 33; plus a separate control-block allocation), `std::function` (double indirection, possible heap capture — Ch. 14) — and a "modern C++" hot path can be a parade of cache misses, atomic contention, and hidden allocations, none visible as a literal performance bug in the source.
 
 The cure is **data-oriented container choice** (Ch. 8): prefer **flat, contiguous** structures whose elements sit next to each other in memory, so access is sequential and prefetchable (Ch. 10) and traversal stays in cache. `std::vector` over `std::list`; **open-addressing / flat hash maps** over `std::unordered_map`; `std::flat_map`/`std::flat_set` (C++23) over `std::map`/`std::set`; **intrusive** containers (the link lives *in* the object, no node allocation) and **small-buffer** types over heap-owning ones; concrete callables over `std::function`. This chapter measures the gap (§25.3), lays out the alternatives (§25.4), and applies them to the canonical HFT data structure — the **limit order book** (§25.4.4) — where the right container choices are the difference between a microsecond and a hundred nanoseconds per update. The rule throughout: choose the container for the **access pattern**, and measure the *distribution* (Ch. 1), because the node-container penalty lives in the cache-miss tail.
 
@@ -48,6 +48,7 @@ Look up symbols (or order IDs) in a map — the bread-and-butter feed-handler op
 // flatmap.cpp — chained std::unordered_map vs a flat open-addressing map.
 // Build: g++ -O2 -std=c++20 -march=native flatmap.cpp -o flatmap
 // Run pinned:  taskset -c 2 ./flatmap chained   |   ./flatmap flat
+#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -60,14 +61,17 @@ Look up symbols (or order IDs) in a map — the bread-and-butter feed-handler op
 struct FlatMap {
     struct Slot { std::uint64_t key; std::uint64_t val; bool used; };
     std::vector<Slot> t;
-    explicit FlatMap(std::size_t cap) : t(cap) {}
+    int shift;                                   // 64 - log2(cap): take the HIGH bits of the hash
+    explicit FlatMap(std::size_t cap) : t(cap), shift(64 - std::countr_zero(cap)) {}  // cap: power of 2
+    // Fibonacci hashing: the multiply mixes UPWARD, so mask-the-low-bits would discard the mixing
+    // (keys stepping by 4, 16, 64... would collide class-wide); shifting keeps the mixed high bits.
     void put(std::uint64_t k, std::uint64_t v) {
-        std::size_t i = (k * 0x9E3779B97F4A7C15ull) & (t.size() - 1);
+        std::size_t i = (k * 0x9E3779B97F4A7C15ull) >> shift;
         while (t[i].used && t[i].key != k) i = (i + 1) & (t.size() - 1);  // probe contiguously
         t[i] = {k, v, true};
     }
     std::uint64_t get(std::uint64_t k) const {
-        std::size_t i = (k * 0x9E3779B97F4A7C15ull) & (t.size() - 1);
+        std::size_t i = (k * 0x9E3779B97F4A7C15ull) >> shift;
         while (t[i].used) { if (t[i].key == k) return t[i].val; i = (i + 1) & (t.size() - 1); }
         return 0;
     }
@@ -101,13 +105,13 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
 
 ```
                           chained (unordered_map)    flat (open-addressing)
-ns / lookup                    ~75 ns                    ~22 ns        <- ~3-4x faster
+ns / lookup                    ~25 ns                    ~8 ns         <- ~3x faster (L3-resident: N = 2^16)
 L1-dcache-load-misses          high (node chase)         low (contiguous probe)
-dtlb_load_misses               elevated (scattered)      low
+dTLB-load-misses               elevated (scattered)      low
 allocations (build)            ~N mallocs (one/node)     1 (the vector)
 ```
 
-Read it the Ch. 7 way: **the flat map is ~3-4× faster on the identical workload**, and the counters say why — `std::unordered_map`'s lookup chases a heap-scattered node (a cache miss, often a TLB miss), while the flat map probes *contiguous* slots that prefetch (Ch. 10) and stay cache-resident. The build phase also did ~N `malloc`s for the chained map vs *one* allocation for the flat map's vector (Ch. 23). The win grows with key count (more misses to chase) and shrinks if everything fits L1. This is the canonical container measurement: **node-based vs flat is a cache-miss-count difference**, and §25.4 is how you get the flat side. (Production: reach for `absl::flat_hash_map`, `ankerl::unordered_dense`, or `boost::unordered_flat_map` — robin-hood/swiss-table maps that beat this toy and `std::unordered_map` substantially.)
+Read it the Ch. 7 way: **the flat map is ~3× faster on the identical workload**, and the counters say why — at N = 2¹⁶ both tables fit the 24 MiB L3, so `std::unordered_map`'s lookup is two to three *dependent* L3 hits (bucket array → node → key, each a scattered line) while the flat map's probe is one L3 hit on a contiguous slot that prefetches (Ch. 10). Size past L3 (N = 2²², exercise 1) and every one of those dependent hops becomes a DRAM round-trip plus, likely, a TLB miss: the gap widens toward ~3–4× and the absolute numbers move to ~100 ns vs ~30 ns. The build phase also did ~N `malloc`s for the chained map vs *one* allocation for the flat map's vector (Ch. 23). The win grows with key count (more misses to chase) and shrinks if everything fits L1. This is the canonical container measurement: **node-based vs flat is a cache-miss-count difference**, and §25.4 is how you get the flat side. (Production: reach for `absl::flat_hash_map`, `ankerl::unordered_dense`, or `boost::unordered_flat_map` — robin-hood/swiss-table maps that beat this toy and `std::unordered_map` substantially.)
 
 ## 25.4 Techniques
 
@@ -116,13 +120,13 @@ Read it the Ch. 7 way: **the flat map is ~3-4× faster on the identical workload
 Replace chained hashing with **open addressing**: store entries *in* a contiguous array; on collision, probe to another slot in the *same* array rather than chasing a heap node.
 
 - **Why it's faster (§25.3).** All probing happens within a contiguous table — sequential, prefetchable (Ch. 10), cache- and TLB-resident — and there are *no per-element allocations* (one array, sized up front). A lookup is a hash plus a short contiguous probe, not a chain of DRAM trips.
-- **Probing schemes.** Linear probing (simple, cache-friendly, sensitive to clustering); **robin-hood** hashing (bounds probe-length variance by displacing richer entries — excellent worst-case, the basis of `ankerl::unordered_dense`); **SwissTable** / hash2 (Abseil's `flat_hash_map`: a contiguous control-byte array scanned with SIMD — Ch. 29 — for very fast probing). All keep data contiguous.
+- **Probing schemes.** Linear probing (simple, cache-friendly, sensitive to clustering); **robin-hood** hashing (bounds probe-length variance by displacing richer entries — excellent worst-case, the basis of `ankerl::unordered_dense`); **SwissTable**-style SIMD-group probing (Abseil's `flat_hash_map`, Boost.Unordered's `unordered_flat_map`, folly's F14: a contiguous metadata-byte array scanned 16 slots at a time with SSE2/NEON — Ch. 29 — for very fast probing). All keep data contiguous.
 - **Load factor and sizing.** Open addressing degrades as it fills (longer probes); keep load factor moderate (~0.5-0.875 depending on scheme) and **`reserve` to the working set** up front (Ch. 23) so the hot path never rehashes (a rehash = a big reallocation + reinsert, a latency spike — keep it on the cold path).
 - **Trade-offs.** No reference/pointer stability (entries move on rehash/displacement — don't hold pointers into the table; use indices or an intrusive design if you need stable identity). Erase needs tombstones or backward-shift. For HFT lookups (symbol→info, orderID→order) the speed wins overwhelmingly; use a production library, not a hand-roll, for the corner cases.
 
 ### 25.4.2 `std::flat_map`/`std::flat_set` (C++23)
 
-For *ordered* associative needs, `std::flat_map`/`std::flat_set` (C++23) are the cache-friendly replacements for `std::map`/`std::set`: they're **sorted contiguous containers** (a sorted `vector` under the hood) rather than node trees.
+For *ordered* associative needs, `std::flat_map`/`std::flat_set` (C++23 — shipped in libstdc++ 15 / GCC 15 and libc++ 20 (`flat_map`) / 21 (`flat_set`), so on the book's GCC 13 / Clang 18 baseline you use the fallback below; gate on `__cpp_lib_flat_map`/`__cpp_lib_flat_set >= 202207L`, see Appendix H) are the cache-friendly replacements for `std::map`/`std::set`: they're **sorted contiguous container adaptors** rather than node trees — `std::flat_map` keeps keys and mapped values in two *parallel* sorted sequences (`KeyContainer`/`MappedContainer`, `std::vector` by default: the SoA layout of Ch. 8, so a binary search touches only the dense key array), `std::flat_set` one sorted sequence. (Boost.Container's `flat_map`, by contrast, is a single sorted vector of pairs.)
 
 - **Why faster for lookups/iteration.** Lookup is a **binary search over a contiguous array** — O(log n) but with *cache-friendly* access (Ch. 7) and no pointer chasing, and ordered iteration is a *linear scan* of contiguous memory (maximally prefetchable) instead of a tree walk over scattered nodes. Far better locality than `std::map` for read/scan-heavy use.
 - **The trade-off: insert/erase cost.** Inserting into the middle shifts elements (O(n) move), so `flat_map` shines when the container is **lookup/iteration-heavy and mutation-light**, or built once and queried many times (reference data, a static symbol table, a config map). For insert-heavy ordered data, the shift cost can outweigh the locality win — measure.
@@ -134,7 +138,7 @@ For *ordered* associative needs, `std::flat_map`/`std::flat_set` (C++23) are the
 Two more ways to eliminate node allocation and indirection:
 
 - **Intrusive containers.** The link/hook lives **inside the object**, not in a separate node: the object has a `next`/`prev` (or tree hook) member, and the container threads objects directly. Consequences: **no per-element allocation** (the object *is* the node — pair with a pool, Ch. 24), **stable addresses**, an object can be in multiple intrusive lists at once, and removal is O(1) given the object (no lookup). Boost.Intrusive provides `list`/`slist`/`set`/`unordered_set` hooks; HFT code often hand-rolls intrusive lists for order chains. The order book's price-level FIFO is the canonical use (§25.4.4): orders are pool-allocated and intrusively linked, so adding/cancelling an order is pointer surgery with zero allocation. The trade-off: the object carries the hooks (size, coupling) and you own lifetime (Ch. 24, 72).
-- **Small-buffer optimization (SBO) / small-vector types.** Store small payloads **inline** (no heap) and only spill to the heap when they grow: `std::string`'s SBO, and `boost::small_vector`/`absl::InlinedVector`/`llvm::SmallVector` for "usually ≤ N elements" sequences. On the hot path, a small-vector sized to the common case is allocation-free for the common case and contiguous always. Know the SBO threshold (Ch. 23) and keep hot payloads under it.
+- **Small-buffer optimization (SBO) / small-vector types.** Store small payloads **inline** (no heap) and only spill to the heap when they grow: `std::string`'s SBO, and `boost::small_vector`/`absl::InlinedVector`/`llvm::SmallVector` for "usually ≤ N elements" sequences. On the hot path, a small-vector sized to the common case is allocation-free for the common case and contiguous always. Know the SBO threshold and keep hot payloads under it: libstdc++'s `std::string` keeps 15 chars inline (libc++: 22); libstdc++'s `std::function` stores a callable inline only up to 16 bytes / pointer alignment (`sizeof` 32); and a small-vector's `N` is whatever you chose — check each with a `static_assert` or a one-off `sizeof` print, not folklore.
 - **Index handles over pointers.** Storing **indices** into a contiguous arena/vector instead of pointers makes structures relocatable (rehash/grow doesn't invalidate), shrinks the handle (a 32-bit index vs 64-bit pointer — Ch. 9), and keeps everything in one cache-friendly region — a common low-latency idiom (slot maps, generational indices).
 
 ### 25.4.4 Case Study — Building the Limit Order Book
@@ -156,7 +160,7 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 
 ## 25.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn
 
-- **`std::map`/`std::unordered_map` on the hot path.** The default reach — and a parade of cache misses + per-element `malloc` (§25.2-24.3). Use a flat/open-addressing map (§25.4.1) or `flat_map` (§25.4.2); reserve the rare justified `std::map` use (need stable addresses *and* ordered *and* insert-heavy) and know you're paying for it.
+- **`std::map`/`std::unordered_map` on the hot path.** The default reach — and a parade of cache misses + per-element `malloc` (§25.2–25.3). Use a flat/open-addressing map (§25.4.1) or `flat_map` (§25.4.2); reserve the rare justified `std::map` use (need stable addresses *and* ordered *and* insert-heavy) and know you're paying for it.
 - **`shared_ptr` copies on the hot path.** Every copy is an **atomic** refcount bump; shared across cores, the refcount line ping-pongs (Ch. 33) — a serializing cost dwarfing the "pointer copy" it looks like. Pass by `const&`/raw/`unique_ptr`; only copy `shared_ptr` when transferring genuine shared ownership, off the hot path. `make_shared` to fuse the control-block allocation when you do use it.
 - **Holding pointers into a flat/rehashing container.** Open-addressing and `vector`-backed containers **move elements** on rehash/grow/insert; a stored pointer/iterator dangles. Use **indices/handles** (§25.4.3) or reserve enough to never rehash on the hot path. (This is the trade for the locality win — design for it.)
 - **Not `reserve`-ing → hot-path rehash/realloc.** A flat map or vector that rehashes/reallocates mid-stream is a latency spike (a big alloc + reinsert/move — Ch. 23). Size to the working set up front; keep growth on the cold path.
@@ -170,9 +174,9 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 
 **Exercises**
 
-1. **Flat vs chained.** Build `flatmap.cpp`; run `chained` vs `flat` pinned with `perf stat -e L1-dcache-load-misses,dtlb_load_misses`. Confirm the flat map's lower misses and ~3-4× speed. Sweep N from L1-sized to >L3 — how does the gap grow with working-set size?
+1. **Flat vs chained.** Build `flatmap.cpp`; run `chained` vs `flat` pinned with `perf stat -e L1-dcache-load-misses,dTLB-load-misses` (or `dtlb_load_misses.walk_completed`, as Ch. 15 uses). Confirm the flat map's lower misses and ~3-4× speed. Sweep N from L1-sized to >L3 — how does the gap grow with working-set size?
 2. **Library shootout.** Replace the toy flat map with `absl::flat_hash_map`, `ankerl::unordered_dense`, and `boost::unordered_flat_map`; compare against `std::unordered_map` on the same workload. Quantify the production gap.
-3. **`shared_ptr` churn.** Hammer a `shared_ptr` copied/destroyed across two threads on different cores; measure throughput and `mem_load..._retired.remote_hitm`/contention (Ch. 16, 33) vs passing `const&`. How expensive is the "free pointer copy"?
+3. **`shared_ptr` churn.** Hammer a `shared_ptr` copied/destroyed across two threads on different cores; measure throughput and the HITM counters — `mem_load_l3_hit_retired.xsnp_fwd` (older alias `xsnp_hitm`) for two cores on one socket, `mem_load_l3_miss_retired.remote_hitm` only across sockets (Ch. 16), or simply `perf c2c` (Ch. 33, *False Sharing*) vs passing `const&`. How expensive is the "free pointer copy"?
 4. **Build the LOB core.** Implement the §25.4.4 book: flat tick-indexed level arrays + intrusive pool-backed FIFOs + a flat `orderID→Order` map. Feed it captured (or synthetic) ITCH-like adds/cancels/executes; measure ns/update distribution and confirm zero hot-path allocation (`operator new` override — Ch. 23). Compare to a `std::map<Price,std::list<Order>>` baseline.
 5. **`flat_map` crossover.** For an ordered map, find the insert-rate at which `std::flat_map` loses to `std::map` (shift cost vs locality). Where does each win (§25.4.2)?
 
@@ -190,7 +194,7 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 ## 25.7 References
 
 - ISO C++ / cppreference — the complexity and interface guarantees of `std::map`/`std::unordered_map`/`std::list`/`std::shared_ptr`, and `std::flat_map`/`std::flat_set` (C++23); the bucket-interface mandate that forces chaining (§25.2).
-- M. Kulukundis, *"Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step"* (CppCon, the Abseil SwissTable talk) — open addressing, SIMD probing, and why `std::unordered_map` is slow (§25.3-24.4.1).
+- M. Kulukundis, *"Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step"* (CppCon, the Abseil SwissTable talk) — open addressing, SIMD probing, and why `std::unordered_map` is slow (§25.3–25.4.1).
 - The Abseil (`flat_hash_map`), `ankerl::unordered_dense` (robin-hood), and Boost.Unordered (`unordered_flat_map`) documentation — production flat hash maps and their design trade-offs.
 - The Boost.Intrusive and Boost.Container (`flat_map`, `small_vector`) documentation — intrusive containers and flat/small-buffer types (§25.4.3).
 - The LMAX Disruptor paper and Martin Thompson's "Mechanical Sympathy" writings — cache-friendly data structures and the order-book/queue patterns motivating §25.4.4 (ties Ch. 37).
