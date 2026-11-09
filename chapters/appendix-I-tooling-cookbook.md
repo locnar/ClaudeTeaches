@@ -36,6 +36,21 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 11, 12).
    perf stat --topdown ./app                    # top-down: retiring / bad-spec / front-end / back-end
    perf stat --topdown --td-level 2 ./app       # level-2 breakdown — Sapphire Rapids+ only (Ice Lake-SP: level 1); --td-level does nothing without --topdown; pre-Ice Lake needs -a
    toplev.py -l3 --no-desc ./app                # pmu-tools top-down, level 3 (Andi Kleen's toplev)
+   # --- beyond the core PMU (Ch. 2 §2.4.4): socket-scoped, never touch an isolated core ---
+   perf list uncore | head -40                                                     # the uncore boxes this CPU exposes (uncore_imc/cha/upi/iio/m2m…)
+   perf stat -a -I 1000 -e 'uncore_imc/cas_count_read/,uncore_imc/cas_count_write/'   # DRAM bandwidth: CAS × 64 B per channel (Ch. 7, 16)
+   perf stat -a -I 1000 -e 'uncore_upi/txl_flits.all_data/'                         # cross-socket traffic (Ch. 16)
+   perf stat -a -I 1000 -e 'uncore_iio/data_req_of_cpu.mem_write.part0/'           # PCIe inbound writes per IIO stack = NIC DMA (Ch. 58, 68)
+   perf stat -a -I 1000 -e power/energy-pkg/,power/energy-ram/                       # RAPL joules → watts: is the socket power-limited? (Ch. 6, 82)
+   perf stat -C 5 -e core_power.lvl0_turbo_license,core_power.lvl1_turbo_license,core_power.lvl2_turbo_license -- sleep 10   # AVX licence time (Ch. 29) — ONE attach IPI; not -I
+   perf stat -a -I 1000 -e msr/smi/                                                  # SMI count per second — must be 0 (Ch. 6 §6.4.4, 46, 82)
+   perf record -e ibs_op//  -c 100000 ./app; perf report                            # AMD IBS: precise op sampling (what perf mem/c2c use on Zen)
+   perf record -e ibs_fetch// ./app                                                  # AMD IBS: front-end sampling (Ch. 12)
+   perf stat -M PipelineL1 ./app                                                     # Zen 4 pipeline-utilization top-down (names: perf list metricgroup)
+   # --- what it costs the hot core, and the syscall-free alternative (Ch. 84 §84.4.4) ---
+   perf record -C 5 -e cycles:u -c 2000000 --call-graph fp --overwrite --switch-output=signal -o perf.data -- sleep 36000 &   # bounded, fp, frozen on SIGUSR2
+   cat /sys/bus/event_source/devices/cpu/rdpmc                                      # 1 = rdpmc allowed for mmap'd events (default), 2 = always, 0 = never
+   ./rdpmc                                                                           # Ch. 84 §84.4.4's listing: cycles + LLC misses per stage from the thread itself
 ```
 
 **Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 12); **bad speculation** → branch mispredicts (Ch. 13); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 7, 11); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).
@@ -51,7 +66,7 @@ Finding cache-line contention and load latency (Ch. 7, 33).
    perf mem report --stdio                      # where loads are served from (L1/L2/L3/DRAM/remote)
 ```
 
-**Interpreting:** `perf c2c` is *the* false-sharing detector (Ch. 33) — it points at the exact cache line and the two offsets whose writers are ping-ponging it; the fix is padding/alignment (`alignas(std::hardware_destructive_interference_size)`, Ch. 33). `perf mem` reveals a memory-bound loop's data source — lots of remote-DRAM hits means a NUMA-placement problem (Ch. 16).
+**Interpreting:** on AMD both `perf mem` and `perf c2c` sample through IBS (`ibs_op`), with the same reports (Ch. 2 §2.4.4); the data-source and latency columns are IBS's, which have no skid. `perf c2c` is *the* false-sharing detector (Ch. 33) — it points at the exact cache line and the two offsets whose writers are ping-ponging it; the fix is padding/alignment (`alignas(std::hardware_destructive_interference_size)`, Ch. 33). `perf mem` reveals a memory-bound loop's data source — lots of remote-DRAM hits means a NUMA-placement problem (Ch. 16).
 
 ## I.4 VTune quick recipes
 

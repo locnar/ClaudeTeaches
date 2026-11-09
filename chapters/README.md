@@ -40,6 +40,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 2.4.1 IPC, cache-miss, and branch-mispredict counters
   - 2.4.2 Flame graphs for hot-path attribution
   - 2.4.3 VTune for microarchitectural drill-down
+  - 2.4.4 Beyond the core PMU: uncore, IBS, RAPL, SMI and Intel PT
 - 2.5 Pitfalls & anti-patterns: skid, multiplexed counters, profiling the wrong build
 - 2.6 Exercises & checklist
 
@@ -1100,12 +1101,13 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ### [84. Production Profiling & End-to-End Case Study](84-production-profiling-end-to-end-case-study.md)
 - 84.1 Why it matters: tying the whole book together
-- 84.2 Mental model: continuous performance monitoring in production
+- 84.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
 - 84.3 Measure it: a full tick-to-trade walkthrough
 - 84.4 Techniques
   - 84.4.1 Regression detection and latency-regression gates in CI
   - 84.4.2 Deterministic replay of captured market data
   - 84.4.3 Simulation harnesses
+  - 84.4.4 Profiling the live system safely
 - 84.5 Pitfalls & anti-patterns: drift between test and production
 - 84.6 Exercises & checklist
 

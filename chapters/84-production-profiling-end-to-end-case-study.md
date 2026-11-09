@@ -16,27 +16,35 @@ Two things make this more than a summary. First, **the budget is a sum of distri
 
 Second, **performance is not a state you reach but one you defend.** A path tuned to 800 ns today regresses to 1.2 µs next week because someone added an indirect call (Ch. 14), changed a struct's layout (Ch. 9), introduced an allocation (Ch. 23), or a compiler/kernel update changed codegen. Without **continuous monitoring** (you can't see a regression you don't measure) and **automated regression gates** (you can't prevent one you don't block), the latency you spent the book earning silently bleeds away. The deterministic state machine (Ch. 78) and capture/replay (Ch. 80) exist precisely so you *can* build a gate: replay a golden capture through the build in CI and assert the outputs are bit-identical *and* the per-stage latency hasn't regressed. This chapter covers the production-monitoring mental model (§84.2), walks a full tick-to-trade decomposition (§84.3), builds the CI regression gates / replay / simulation techniques (§84.4), and warns about the gap between what you test and what production actually does (§84.5). It's where the book stops being a list of techniques and becomes a *system*.
 
-## 84.2 Mental model: continuous performance monitoring in production
+## 84.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
 
-Low-latency systems must be observed **continuously, in production, at near-zero overhead** — because the behavior that matters (tail latency under real market conditions) only happens in production, and the lab can't reproduce the open. The mental model:
+Low-latency systems must be observed **continuously, in production, at near-zero overhead** — because the behaviour that matters (tail latency under real market conditions) only happens in production, and the lab cannot reproduce the open. Earlier drafts of this chapter drew that as two halves: *production = cheap counters*, *offline = heavy tools on a replay*. Part XII has since filled in the middle, and the honest model has **three tiers**, distinguished by what each costs the hot thread and who is allowed to arm it:
 
 ```
-   PRODUCTION (always-on, ~free)                    OFFLINE / CI (deep, expensive)
-   ─────────────────────────────                    ─────────────────────────────
-   • per-stage timestamps (TSC/PTP, Ch.17/60)       • perf/VTune/top-down (Ch.2) on a replay
-   • HdrHistogram per stage (Ch.3) — the tail        • flame graphs, PMU counters (Ch.2)
-   • eBPF/bpftrace low-overhead tracing (Ch.63)      • deterministic replay (Ch.78-80) + golden diff
-   • capture every tick/order (Ch.80)                • latency-regression gate (§84.4.1)
-   • counters: drops, gaps, queue depths, restarts   • simulation harness (§84.4.3)
-        │                                                      ▲
-        └──────── capture (Ch.80) feeds offline analysis & replay ───────┘
+   ALWAYS-ON (≈ free; on every hot thread, all session)      TARGETED-LIVE (bounded; armed per investigation,    OFFLINE / REPLAY (deep; never on the trading host)
+                                                              by a housekeeping core, for a session)
+   ───────────────────────────────────────────────────────── ─────────────────────────────────────────────────── ──────────────────────────────────────────────────
+   • trace header: rdtscp stage stamps per message (Ch. 74)  • perf record --overwrite, low rate, ONE core,      • perf / VTune / top-down on the replay (Ch. 2)
+   • per-stage + end-to-end HdrHistograms in the shm           fp or LBR unwinding, frozen on trigger (§84.4.4,  • flame graphs, uncore / IBS attribution (Ch. 2 §2.4.4)
+     telemetry segment, scraped off-core (Ch. 75)              Ch. 81 §81.4.3)                                   • deterministic replay + golden diff + per-event
+   • binary log (Ch. 73) and the per-thread flight recorder  • LBR snapshot / Intel PT snapshot of the hot core    digest → first diverging event (Ch. 78 §78.4.6)
+     frozen on an over-budget message (Ch. 81 §81.4.2)        (2–15 % while armed; decode elsewhere)              • latency-regression gate with CIs (§84.4.1)
+   • rdpmc per-stage counter reads from the thread itself    • hardware data breakpoint armed from a sidecar        • simulation harness (§84.4.3)
+     (§84.4.4) — cycles, LLC misses per stage, no syscall      (0 cost until the write — Ch. 5 §5.4.5)             • rr / gdb on the replay harness (Ch. 5 §5.4.2)
+   • ftrace ring in x86-tsc on isolated cores (Ch. 46, 81)   • gdb non-stop on a HOUSEKEEPING thread; process_    • post-mortem of a core + crash record (Ch. 79 §79.4.5)
+   • host / network samplers from housekeeping cores           vm_readv of versioned state (Ch. 5 §5.4.4)
+     (Ch. 82, 83); uncore / RAPL / SMI counters (Ch. 2 §2.4.4) • bpftrace on boundaries and slow paths (Ch. 63)
+   • capture of every tick and order (Ch. 80)
+        │                                                          │                                                        ▲
+        └──── triggers (Ch. 75 §75.4.4) freeze the rings ─────────┘──── capture (Ch. 80) + bundle (Appendix N) feed ──────┘
 ```
 
-The two halves and how they connect:
+The three tiers and the rules between them:
 
-- **Production observation must be ~free** (Ch. 1's whole thesis applies to *observing* too): you cannot run a 2× profiler (Ch. 76's ASan point) on the trading path. So production uses *cheap* instrumentation — TSC timestamps at stage boundaries (~25–35 cycles / ~10 ns each when fenced — Ch. 17 §17.3; NIC hardware timestamps only at the wire edges — Ch. 60), per-stage HdrHistograms (Ch. 3, recorded into the shared-memory telemetry segment of Ch. 75 with a few stores and scraped off-core — merged by adding buckets, never by averaging percentiles), eBPF/bpftrace for low-overhead production tracing of latency and syscalls (Ch. 63 — the production-safe profiler), and the capture stream (Ch. 80) itself as the richest observability source. The hot path *timestamps and records*; analysis happens off-path, exactly like logging and capture (Ch. 73, 80).
-- **Deep analysis happens offline, on replays.** The expensive tools — `perf`, VTune, top-down microarchitecture analysis, flame graphs (Ch. 2) — run *off* the production path, on a **deterministic replay** (Ch. 78–80) of the captured session. Because replay is bit-identical to production (Ch. 78), you can profile the *exact* production behavior with heavy tooling without touching the production box. This is the payoff of determinism: you get production fidelity *and* deep profiling, separated in time.
-- **The two halves close a loop:** production capture (Ch. 80) → offline replay + deep analysis (Ch. 2) → find the regression/hotspot → fix → CI gate (replay-based, §84.4.1) prevents recurrence → deploy → monitor. Continuous monitoring detects, replay diagnoses, the gate defends. A low-latency system that lacks any of these three is one deploy away from a silent regression.
+- **Always-on must be ~free, and its evidence must survive the event.** Ch. 1's thesis applies to *observing* too: you cannot run a 2× profiler (Ch. 76's ASan point) on the trading path. So this tier is stores, not syscalls: TSC stamps at stage boundaries carried *in the message* (Ch. 74 — ~10–17 ns per stage, measured), histogram records into the shm segment (Ch. 75 — a few stores), binary log and flight-recorder records (Ch. 73, 81 — ~10 ns each with `rdtsc`), `rdpmc` reads of the core counters (§84.4.4 — ~20–40 cycles, no kernel), and the capture stream (Ch. 80) as the richest source. The one thing the hot thread *evaluates* is the per-message budget compare (Ch. 75 §75.4.4), and on breach it **freezes** its ring and the kernel's (Ch. 81 §81.2.4) so the evidence is not overwritten a millisecond later. Everything in this column is read by somebody else's core.
+- **Targeted-live is bounded, and a housekeeping core arms it.** Between "free" and "offline" there is a sanctioned middle: `perf record` on *one* isolated core at a few hundred Hz with frame-pointer or LBR unwinding costs that core a ~1–2 µs NMI per sample and nothing else (§84.4.4 has the numbers and the `-C` IPI caveat); an Intel PT or LBR snapshot costs a few percent *while armed* and is frozen on the same trigger; a hardware data breakpoint costs nothing until the corrupting write (Ch. 5 §5.4.5); a non-stop attach to a housekeeping thread or an out-of-process read of versioned state costs the hot thread nothing (Ch. 5 §5.4.4); the uncore counters never touch the hot core at all (Ch. 2 §2.4.4). The rules: one investigation at a time, armed and disarmed from a housekeeping core, never a `perf -C` left running all day on an isolated core, never an all-stop attach, never a decode on the trading host.
+- **Deep analysis happens offline, on replays — and it starts from the live tiers' evidence.** The expensive tools — `perf`, VTune, top-down, uncore attribution, flame graphs (Ch. 2) — run *off* the production path on a **deterministic replay** (Ch. 78, 80) of the captured session, bit-identical to production (Ch. 78 §78.2.2), so you profile the *exact* production behaviour with heavy tooling without touching the box. When the replay disagrees with production, the per-event digest (Ch. 78 §78.4.6) says at which event; when the question is one unrepeatable spike, the frozen rings and the incident bundle (Ch. 81, Appendix N) are the input, because a replay runs the message in 180 ns and cannot show the 41 µs the kernel took.
+- **The tiers close a loop:** always-on detects and freezes → targeted-live and the bundle attribute → offline replay reproduces, the fix is made, the CI gate (§84.4.1) defends → deploy → the always-on tier watches the trend. A low-latency system that lacks any of the three is one deploy — or one 09:31:42 — away from a silent regression it cannot explain.
 
 ## 84.3 Measure it: a full tick-to-trade walkthrough
 
@@ -94,11 +102,83 @@ Replay reproduces what *did* happen; **simulation** explores what *would* happen
 - **Inject the rare and the hostile.** Simulation is also where you test the tail conditions production rarely shows on demand: the microburst (Ch. 54), the gap/recovery (Ch. 54–55), the malformed packet (Ch. 76), the failover (Ch. 78) — drive them deterministically and assert the system stays correct, safe, and within latency budget.
 - **Simulation complements, doesn't replace, replay.** Replay gives *fidelity* (exactly what happened); simulation gives *counterfactual* exploration (what if). The book's testing strategy uses both: replay for regression/debugging/compliance, simulation for strategy research and tail-condition validation.
 
+### 84.4.4 Profiling the live system safely
+
+The targeted-live tier has one hard question — *what does it cost the hot thread?* — and this section answers it mechanism by mechanism. *Toolchain and machine: Appendix L.3. The VM the revision's measurements ran on exposes no core PMU (so `perf record`, LBR and `rdpmc` could not be timed there); the per-sample costs below are derived from the measured components — the frame-pointer walk and signal-frame costs of Ch. 22 §22.4.4 and Ch. 79 §79.3 — and the published mechanics, and are labelled representative for the reference Xeon Gold 6326.*
+
+**1. What one `perf record` sample costs the sampled core.** A sample is an NMI: the counter overflows, the core takes the interrupt (no `XSAVE` — the NMI path saves integer state only), `perf` records the IP and, if asked, the user stack, writes the record into the per-CPU ring and returns.
+
+```
+   --call-graph        what the NMI path does                                                   per sample (representative)    at 99 Hz    999 Hz      9999 Hz
+   ─────────────────── ──────────────────────────────────────────────────────────────────────── ────────────────────────────── ─────────── ─────────── ───────────
+   (none, IP only)     NMI entry/exit + one 32-B record                                            ~0.5–1 µs                    0.01 %      0.1 %       1 %
+   fp                  + frame-pointer walk of the user stack, ≤ 127 frames (Ch. 22 §22.4.4:       ~1–1.5 µs                    0.015 %     0.15 %      1.5 %
+                         152 cycles at 37 frames) + 8 B per frame
+   lbr                 + read the 32 LBR MSRs (~50–100 cycles each) — the CPU recorded them free   ~1–2 µs                      0.02 %      0.2 %       2 %
+   dwarf               + copy 8 KiB (default) of user stack and the registers into the ring;       ~3–8 µs + 8 MB/s of ring     0.05 %      0.5 %       5 %
+                         unwind OFFLINE in perf report                                             traffic at 999 Hz
+```
+
+The *percentage* is never the problem — even `dwarf` at 999 Hz is half a percent of the core. The **gap** is: every sample is a 1–8 µs hole in the hot thread's timeline, once per 1 / *f*, and at 9999 Hz that is a hole every 100 µs on a thread whose tick-to-trade budget is 2 µs — the observer *is* the tail. Hence the rule: on an isolated core, `-c <period>` (a fixed count, not `-F`'s adaptive frequency) tuned to a few hundred samples per second, `fp` or `lbr` (never `dwarf` — the copy is the cost, and the stacks are the same), `--overwrite` so the ring holds the last few seconds, and a trigger (Ch. 81 §81.4.3) rather than a session-long recording.
+
+**2. What `perf -C <isolated core>` does to that core besides sampling.** `perf_event_open` for a *specific CPU* installs the event with a cross-CPU function call — **one IPI to the target core** at arm and one at disarm (`irq_vectors:call_function_single_entry` in the Ch. 46 ring; the `CAL` column of `/proc/interrupts` moves by one). A *counting* `perf stat -C 5 -I 1000` is worse: each interval **read of an active event on another CPU is itself an IPI** (`perf_event_read` → `smp_call_function_single`), so `-I 1000` IPIs the hot core once per second per event group, and asking for more events than the core has counters adds **multiplexing** — a 1–4 ms hrtimer *on the target core* that rotates the counters and, on a `nohz_full` core, brings the tick back (`timer:tick_stop success=0 dependency=PERF_EVENTS` — Ch. 46 §46.4.2). The consequence for the always-on tier: **the hot thread should read its own counters** (below); for the targeted tier: arm once, disarm once, and never multiplex on an isolated core (`perf stat -e` with at most the programmable-counter count — 8 on Ice Lake-SP with SMT off, 4 with it on — and no `-I` against a hot core).
+
+**3. `rdpmc`: syscall-free, IPI-free counter reads from the hot thread.** Open the event *from the thread itself* (`pid = 0, cpu = -1`: it follows the thread), `mmap` the event's first page, and read the counter in user space with `rdpmc` using the index the page publishes — the kernel keeps the page's `lock`/`index`/`offset` consistent across context switches and counter reprogramming, so the read is a seqlock (Ch. 35):
+
+```cpp
+// rdpmc.cpp — syscall-free per-stage counter reads: perf_event_open once, mmap the event page, then rdpmc in user space.
+// Build: g++ -O2 -std=c++20 rdpmc.cpp -o rdpmc    (GCC 13.3 / Clang 18.1 both build it; running needs a core PMU and
+//        /sys/bus/event_source/devices/cpu/rdpmc = 1 (default: allowed for mmap'd events) or 2)
+#include <cstdint>
+#include <cstdio>
+#include <linux/perf_event.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <x86intrin.h>
+
+struct UserCounter {                               // one hardware counter, readable with rdpmc by the thread that opened it
+    perf_event_mmap_page* pg = nullptr; int fd = -1;
+    bool open(std::uint32_t type, std::uint64_t config) {
+        perf_event_attr a{}; a.type = type; a.size = sizeof a; a.config = config; a.exclude_kernel = 1; a.exclude_hv = 1;
+        fd = (int)syscall(SYS_perf_event_open, &a, 0, -1, -1, 0); if (fd < 0) return false;      // pid 0 = this thread, cpu -1 = follow it
+        pg = (perf_event_mmap_page*)mmap(nullptr, 4096, PROT_READ, MAP_SHARED, fd, 0);
+        return pg != MAP_FAILED && pg->cap_user_rdpmc;                                            // the kernel allows user-space reads of this event
+    }
+    inline std::uint64_t read() const {            // ~20–40 cycles (representative), no syscall; seqlock'd against reprogramming
+        std::uint32_t seq; std::uint64_t v;
+        do { seq = pg->lock; asm volatile("" ::: "memory");
+             std::uint32_t idx = pg->index; v = pg->offset;                                        // index 0 = not currently on a counter
+             if (idx) { std::uint64_t pmc = _rdpmc(idx - 1); pmc <<= 64 - pg->pmc_width; pmc >>= 64 - pg->pmc_width; v += pmc; }
+             asm volatile("" ::: "memory"); } while (pg->lock != seq);
+        return v;
+    }
+};
+int main() {
+    UserCounter cyc, llc;
+    if (!cyc.open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES) || !llc.open(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES)) { perror("perf_event_open/rdpmc"); return 1; }
+    volatile std::uint64_t sink = 0; static std::uint64_t big[1 << 22];
+    std::uint64_t c0 = cyc.read(), m0 = llc.read();                                               // stage start: two user-space reads
+    for (std::uint64_t i = 0; i < (1u << 22); i += 64) sink += big[(i * 7919) & ((1u << 22) - 1)];   // the "stage"
+    std::uint64_t c1 = cyc.read(), m1 = llc.read();                                               // stage end
+    std::uint64_t t0 = __rdtsc(); for (int i = 0; i < 1000000; ++i) sink += cyc.read(); std::uint64_t t1 = __rdtsc();
+    std::printf("stage: %llu cycles, %llu LLC misses; rdpmc read cost %.1f cycles\n", (unsigned long long)(c1 - c0), (unsigned long long)(m1 - m0), (t1 - t0) / 1e6);
+}
+```
+
+Two reads per stage boundary — `cycles` and `LLC-load-misses`, or `instructions` for an IPC-per-stage — at ~20–40 cycles each (representative; `rdpmc` is a ~25-cycle instruction plus the two page loads) ride beside the Ch. 74 TSC stamp and give the always-on tier the one thing the TSC cannot: *why* the stage was slow (misses up with cycles up = memory; cycles up with misses flat = frequency or a stall elsewhere — Ch. 81 §81.4.4 rows 6–7). The event is opened once per thread at startup (a syscall, allowed there), never multiplexed (open at most the core's counter count), and `exclude_kernel` keeps `perf_event_paranoid = 2` happy. Log the deltas into the trace record or the flight recorder, not a histogram, unless the stage's histogram is the question.
+
+**4. LBR snapshots and Intel PT windows on a tail event.** The last-branch record is the cheapest *history* the hardware keeps: 32 taken branches, recorded for free, read at a sample. `perf record -C 5 -e cycles:u -c 2000000 --call-graph lbr --overwrite --switch-output=signal` (Ch. 81 §81.4.3) keeps a ring of them and dumps the last few seconds on the trigger — the sample nearest the over-budget message shows the 32 branches before it. Intel PT (Ch. 2 §2.4.4) is the complete version at 2–15 % while armed: `perf record -e intel_pt//u -C 5 --snapshot`, frozen on the same `SIGUSR2`, decoded on another box. Both are *targeted-live*: armed for a market open under investigation, from a housekeeping core, disarmed after.
+
+**5. Continuous profilers.** Parca, Pyroscope, Elastic Universal Profiling and their relatives attach an eBPF-driven `perf_event` sampler to **every CPU** at ~19–99 Hz and unwind in the kernel (frame pointers or their own DWARF/`.eh_frame` interpretation) — a fleet-wide 0.1–1 % that is excellent for the housekeeping half of the box and exactly the wrong thing for an isolated core: each sample is an NMI on the hot thread, the attach is an IPI, and the per-CPU event is a `nohz_full` tick dependency (Ch. 46). Run them with the isolated cores excluded (their CPU filter, or a `cpuset` that never includes the hot cores — Appendix C.4), and let the hot cores' "continuous profile" be what it already is: the per-stage histograms (Ch. 75) and the `rdpmc` deltas above, which cost no NMI at all.
+
+The observer-effect budget, in one line: **the hot thread pays for stores and `rdpmc`; a housekeeping core pays for everything else; and anything that IPIs or NMIs the hot core is armed for a session, bounded, and frozen on a trigger.**
+
 ## 84.5 Pitfalls & anti-patterns: drift between test and production
 
 - **Optimizing the mean, shipping the tail (the book's cardinal sin, one last time).** Tuning the stage with the worst *average* while the p99.9 is dominated by a different stage (§84.3). Always decompose the *distribution* and attack the *tail's* dominant stage (Ch. 1).
 - **Drift between test and production.** The lab box isn't tuned like production (different BIOS/C-states/isolation — Ch. 6, Appendix C), the test data lacks the open's microburst (Ch. 54), the replay omits an input the production core consumes (a timer, a config change — Ch. 77/78), or the build flags differ (Ch. 22). The result: green in CI, regressed in production. Make test fidelity a first-class concern — same flags, same tuning, capture-based data, *all* inputs replayed.
-- **Profiling overhead distorting the measurement.** Running a heavy profiler (or shipped sanitizers — Ch. 76) on the production path changes the thing you're measuring (and wrecks latency). Production observation is *cheap* (TSC/eBPF/histograms — §84.2); deep profiling runs *offline on replay* (§84.4.2).
+- **Profiling overhead distorting the measurement.** Running a heavy profiler (or shipped sanitizers — Ch. 76) on the production path changes the thing you're measuring (and wrecks latency). Production observation is *cheap* (stamps, histograms, `rdpmc`, frozen rings — §84.2's always-on tier); the live tools that *are* sanctioned are bounded and armed per investigation from a housekeeping core (§84.4.4: a `perf` sample is a 1–8 µs NMI hole, a `perf -C` attach and every interval read is an IPI, `dwarf` unwinding copies 8 KiB per sample); deep profiling runs *offline on replay* (§84.4.2).
 - **A regression gate too noisy to trust.** Run on an untuned/shared box, too few iterations, comparing single runs or means → the gate flaps, people disable it, regressions flow. Stabilize it (Ch. 3, Appendix C) and compare distributions (§84.4.1).
 - **No continuous production monitoring.** Measuring latency only in the lab and assuming production matches. The tail that matters happens at the open under real conditions — instrument production continuously (§84.2) or you're blind to your actual p99.9.
 - **Non-deterministic core silently breaking replay/gates.** If the core isn't truly deterministic (§78.5), replay diverges and both the correctness and latency gates become meaningless. The determinism gate (§84.4.1) must itself be enforced — replay must match golden bit-for-bit, always — and when it fails, §78.4.6's digest diff and checkpoint bisection localise the event instead of leaving a four-hour replay to be eyeballed.
