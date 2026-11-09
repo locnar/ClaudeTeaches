@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 98 chapters are grouped into thirteen Parts; fifteen appendices (A–O) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 98 chapters are grouped into thirteen Parts; sixteen appendices (A–P) follow.
 
 ---
 
@@ -258,7 +258,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part III — Compile-Time & Language Mechanics
 
-*Moving work to compile time and paying for abstractions only when they cost.*
+*Moving work to compile time and paying for abstractions only when they cost: `constexpr`/`consteval` and the template cost model, zero-cost design (CRTP, policies, strong types, concepts), a protocol decoder generated from a schema at compile time, the abstractions that are not free (exceptions, the calling convention, statics and TLS), the cost model of modern idioms and strings without allocation, aliasing and object lifetime, the toolchain flags, and the build system as a latency path and a correctness boundary.*
 
 ### [18. Compile-Time Mechanics](18-compile-time-mechanics.md)
 - 18.1 Why it matters: work done at compile time is free at runtime
@@ -1457,6 +1457,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - I.9 Codegen, binaries & sanitizers (`objdump`, Godbolt, BOLT, ASan/UBSan/TSan)
 - I.10 Crash, core-dump, live-introspection & incident one-liners (`coredumpctl`, `eu-stack`, gdb non-stop, `perf record --snapshot`, Intel PT, the ftrace freeze, the bundle)
 - I.11 Other toolchains: asm, runtime logs and the C-ABI waist (rustc/cargo asm, zig, `-Xlog:gc*,safepoint`/`PrintCompilation`/hsdis, `DOTNET_JitDisasm`, `gctrace`/`-gcflags`, `ocamlopt -S`, `nm -D`/`abidiff`)
+- I.12 Build, toolchain, attributes, statics & TLS
 
 ### [Appendix J — HFT Market-Structure & Protocol Primer](appendix-J-market-structure-primer.md)
 - J.1 Market microstructure: exchanges, matching engines, price-time priority
@@ -1516,3 +1517,9 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - O.11 Measurement and observability mistakes
 - O.12 Operational and architectural
 - O.13 The ten that pay for the appendix
+
+### [Appendix P — Attributes, Builtins & the UB Catalogue](appendix-P-attributes-builtins-ub-catalogue.md)
+- P.1 How to read this appendix
+- P.2 Attribute and builtin reference: what each tells the optimizer, and how to verify it
+- P.3 The UB catalogue for performance programmers
+- P.4 Verifying a hint, and finding a UB-licensed transformation you did not want

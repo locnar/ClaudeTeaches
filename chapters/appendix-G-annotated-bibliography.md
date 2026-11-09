@@ -29,6 +29,11 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **The low-latency transport and congestion papers** — Zhu et al., "Congestion Control for Large-Scale RDMA Deployments" (**DCQCN**, SIGCOMM 2015); Kalia, Kaminsky & Andersen, "Datacenter RPCs can be General and Fast" (**eRPC**, NSDI 2019); Montazeri, Li, Alizadeh & Ousterhout, "Homa: A Receiver-Driven Low-Latency Transport Protocol Using Network Priorities" (SIGCOMM 2018). Why RoCEv2 needs ECN-driven rate control — **Ch. 72** (§72.2) — and what a µs-scale, head-of-line-free transport looks like beyond TCP — **Ch. 73** (§73.4.2–§73.4.3).
 - **Gil Tene, "How NOT to Measure Latency" (and the coordinated-omission material).** Why naive latency measurement lies and how HdrHistogram fixes it — the measurement rigor of **Ch. 3** and the tail-latency framing of Ch. 1.
 - **Daniel Bristot de Oliveira et al., "Demystifying the Real-Time Linux Scheduling Latency" (ECRTS 2020), and the osnoise/timerlat write-ups (Linux Plumbers 2021; LWN).** Latency as a sum of attributable intervals — the model the `osnoise` and `timerlat` tracers implement and that **Ch. 52** uses to name the source of the last spike on an isolated core.
+- **P0593R6, *Implicit creation of objects for low-level object manipulation* (R. Smith, W. Brown, et al., C++20/DR) and P2590R2, *Explicit lifetime management* (`std::start_lifetime_as`, T. Köppe, C++23).** The object-lifetime rules that make `memcpy` of a wire struct well-defined and give the struct-over-receive-buffer overlay a sanctioned, zero-instruction form — **Ch. 23 §23.2, §23.4.2**, Ch. 60.
+- **P0732R2, *Class Types in Non-Type Template Parameters* (J. Maurer, C++20) and P2996, *Reflection for C++26* (B. Revzin, W. Childers, P. Dimov, A. Katz, D. Vandevoorde, D. Stone).** The language machinery behind the compile-time protocol decoder — string literals as template arguments today, member enumeration tomorrow — **Ch. 20**.
+- **P0792R14, *`function_ref`: a type-erased callable reference* (V. Zverovich, T. Brindle, et al., C++26); P0288R9, *`move_only_function`* (M. Klimek et al., C++23).** The lighter type erasers measured against `std::function` and a template parameter — **Ch. 14 §14.4.5**, Ch. 22 §22.4.1.
+- **P0896R4, *The One Ranges Proposal* (E. Niebler, C. Carter, C. Di Bella, C++20).** Iterators, sentinels, views and adaptors — and, read with the asm, why `views::filter` costs what a searched loop costs — **Ch. 22 §22.2.2**.
+- **J. Regehr, *A Guide to Undefined Behavior in C and C++* (2010) and C. Lattner, *What Every C Programmer Should Know About Undefined Behavior* (LLVM blog, 2011); X. Wang et al., *Towards Optimization-Safe Systems* (SOSP 2013).** UB as the optimizer's licence, with the catalogue of real deletions (null checks, overflow checks) it produced in shipped code — the reading **Appendix P.3** follows; ties Ch. 23, 45, 87.
 
 ## G.2 Vendor & reference manuals
 
@@ -87,6 +92,8 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Mara Bos, *Rust Atomics and Locks* (O'Reilly, 2023).** The Rust memory model and its x86/ARM codegen — the companion to Ch. 33 for **Ch. 80** (§80.2.3, §80.4.3).
 - **Nicholas Nethercote, *The Rust Performance Book*; Jon Gjengset, *Rust for Rustaceans*.** Bounds-check elision, allocation avoidance, `unsafe` abstraction and FFI engineering — **Ch. 80**, **Ch. 81**.
 - **Konrad Kokosa, *Pro .NET Memory Management*; Minsky, Madhavapeddy & Hickey, *Real World OCaml* (memory representation, GC chapters).** The .NET and OCaml runtimes at the depth **Ch. 82** (§82.4.4, §82.4.6) can only summarise.
+- **T. Winters, T. Manshreck, H. Wright, *Software Engineering at Google* (O'Reilly, 2020), chs. 18–21.** The case for hermetic, declared-input builds and content-addressed caching — the policy half of **Ch. 25**.
+- **C. Scott, *Professional CMake: A Practical Guide*.** Presets, toolchain files, interface targets, PCH/unity properties and the C++20 module file sets — the CMake side of **Ch. 25 §25.4.3–§25.4.5**.
 
 ## G.4 Influential talks & blogs
 
@@ -108,7 +115,10 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Josh Poimboeuf and others, LWN coverage of SFrame and deferred user-space unwinding (2023–2025).** Where stack capture without frame pointers or DWARF is heading in the kernel — **Ch. 24 §24.4.4, Ch. 92 §92.4.2**.
 - **Steven Rostedt, "Finding Origins of Latencies Using Ftrace" (Linux Plumbers / ELC).** The stop-on-threshold technique that Ch. 52's recipe and **Ch. 95**'s frozen kernel ring build on.
 - **Brendan Gregg, "Linux Performance Analysis in 60,000 Milliseconds" (Netflix TechBlog).** The triage-order idea behind Appendix N.6's ten-minute first look and **Ch. 95 §95.4.4**'s cheap-exonerations-first table.
-
+- **Chandler Carruth, *"There Are No Zero-Cost Abstractions"* (CppCon 2019) and *"Garbage In, Garbage Out: Arguing about Undefined Behavior"* (CppCon 2016).** `unique_ptr` by value and the calling convention (**Ch. 21 §21.4.5**, Ch. 22); why the UB licences exist (**Appendix P**).
+- **Jason Turner, *"constexpr ALL the Things!"* (C++Now 2017) and Hana Dusíková, *"Compile Time Regular Expressions"* (CppCon 2018).** Parsing a string literal into code at compile time — the style of the **Ch. 20** `consteval` schema parser.
+- **The Reproducible Builds project (reproducible-builds.org): *SOURCE_DATE_EPOCH* specification and documentation.** The flags and discipline behind bit-identical binaries — **Ch. 25 §25.4.6**, Ch. 87 §87.4.7.
+- **Aras Pranckevičius, *ClangBuildAnalyzer* and the *"Investigating compile times"* posts.** Build-time profiling with `-ftime-trace` — **Ch. 25 §25.3–§25.4.1**.
 
 ## G.5 Tooling documentation
 
@@ -143,7 +153,7 @@ For quick navigation, the heaviest sources per Part:
 
 - **Part I (Foundations/Methodology):** Tene & HdrHistogram, Google Benchmark, `perf`/VTune, Dean's numbers, Godbolt/Compiler Explorer (Ch. 1–6).
 - **Part II (Microarchitecture):** Drepper, Hennessy & Patterson, Agner Fog, the Intel SDM/optimization manual (Ch. 7–17).
-- **Part III (Compile-time/Language):** Williams, Meyers, the Core Guidelines, Agner Fog's C++ manual, Compiler Explorer (Ch. 18–24).
+- **Part III (Compile-time/Language):** Williams, Meyers, the Core Guidelines, Agner Fog's C++ manual, Compiler Explorer; P0732/P2996 and the Turner/Dusíková talks for the compile-time decoder (Ch. 20), P0896 and Carruth's "no zero-cost abstractions" for the idioms and the ABI (Ch. 21–22), P0593/P2590 for object lifetime (Ch. 23), Winters et al., Scott, ClangBuildAnalyzer and Reproducible Builds for the build chapter (Ch. 25) (Ch. 18–25).
 - **Part IV (Memory):** Drepper, Kerrisk/Love, `std::pmr` and allocator literature (Ch. 26–29).
 - **Part V (Numerics/SIMD):** *Hacker's Delight*, Lemire, Agner Fog's tables, the Intel intrinsics guide (Ch. 30–32).
 - **Part VI (Concurrency):** ★ Williams, ★ McKenney, the Disruptor paper, Michael & Scott, the C++ memory-model references, Dean & Barroso and SEDA/Kleinrock for the topology and flow-control chapters (Ch. 41–42), Aeron's agent/flow-control documentation, and the `std::execution`/P2300 material (Ch. 33–45).

@@ -2,7 +2,7 @@
 
 # Chapter 26 — Memory Management Fundamentals
 
-> **Prerequisites:** Ch. 15 (virtual memory & page faults — the page-fault mechanics this chapter measures as allocation cost), Ch. 7 (caches — a fresh allocation is cold memory), Ch. 1 (tail latency — `malloc` is a tail event), Ch. 3 (benchmarking distributions — allocation cost is a *distribution*, not a mean), Ch. 21 (`noexcept` moves — why container growth copies or moves).
+> **Prerequisites:** Ch. 15 (virtual memory & page faults — the page-fault mechanics this chapter measures as allocation cost), Ch. 7 (caches — a fresh allocation is cold memory), Ch. 1 (tail latency — `malloc` is a tail event), Ch. 3 (benchmarking distributions — allocation cost is a *distribution*, not a mean), Ch. 21 (`noexcept` moves — why container growth copies or moves); Ch. 25 (the build that produced the binary — reproducible, with a build ID — so that the allocation profiles of this Part are attributable to one build).
 >
 > **Leads into:** Ch. 27 (custom allocators — arenas/pools that make the steady state zero-allocation), Ch. 28 (cache-friendly containers — which STL containers allocate and when), Ch. 29 (`mmap`/`mlock`/pre-faulting — the syscall-level controls), Ch. 53 (warming — pre-faulting and pre-touching as part of warm-up). Opens **Part IV**.
 

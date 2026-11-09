@@ -2,7 +2,7 @@
 
 # Chapter 23 — Aliasing, `restrict` & Type Punning
 
-> **Prerequisites:** Ch. 11 (out-of-order execution and dependency chains — aliasing is what forces the compiler to *assume* a dependency it can't disprove), Ch. 32-preview/Ch. 8 (vectorization and data layout — the optimization aliasing most often blocks), Ch. 4 (reading asm — §23.5 is the whole proof), Ch. 9 (object model — type punning is reinterpreting object representation).
+> **Prerequisites:** Ch. 11 (out-of-order execution and dependency chains — aliasing is what forces the compiler to *assume* a dependency it can't disprove), Ch. 32-preview/Ch. 8 (vectorization and data layout — the optimization aliasing most often blocks), Ch. 4 (reading asm — §23.5 is the whole proof), Ch. 9 (object model — type punning is reinterpreting object representation); Ch. 22 (the `string_view`-over-the-buffer and symbol-as-integer idioms whose legality §23.2's object-lifetime model settles).
 >
 > **Leads into:** Ch. 32 (SIMD & vectorization — `restrict` is frequently the difference between a vectorized and a scalar loop), Ch. 60 (zero-copy wire decoding — overlaying structs on a byte buffer is type punning, done safely with `bit_cast`/`memcpy`), Ch. 87 (secure programming — strict-aliasing UB as a vulnerability class). Ch. 24 (build toolchain — the flags that gate these optimizations) closes **Part III**.
 

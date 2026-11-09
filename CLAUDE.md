@@ -59,8 +59,8 @@ Code & content guidelines:
 
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
-> appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to **95 chapters in thirteen Parts and fifteen appendices (A–O)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–O)
+> appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to 95 chapters in thirteen Parts and fifteen appendices (A–O), and then — with the modern-C++ depth chapters — to **98 chapters in thirteen Parts and sixteen appendices (A–P)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
+> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–P)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
 
@@ -437,20 +437,31 @@ Code & content guidelines:
   measurement; operational/architectural), each row symptom → the counter/probe that exposes it
   (Appendix I's invocations) → fix → the §N.6 that develops it; a ten-row short list; the pre-merge
   review checklist Ch. 95 §95.4.1 asks for and Appendix I's companion.
+- **Appendix P — Attributes, Builtins & the UB Catalogue** (added 2026-11-09 with the modern-C++ depth
+  chapters) — the per-function companion to Appendix D's per-build flags: a table of attribute/builtin →
+  what it tells the optimizer → GCC/Clang spelling → the chapter that measures it → the asm fingerprint
+  that proves it fired (`[[likely]]`/`expect_with_probability`, hot/cold/inlining/`flatten`, `pure`/`const`,
+  `[[assume]]`/`unreachable`, `assume_aligned`, `restrict`/`may_alias`, `target_clones`/ifunc, `musttail`,
+  `trivial_abi`, `no_unique_address`, `init_priority`, overflow builtins/`add_sat`, C++26 contracts); and the
+  UB catalogue — rule → optimisation licensed → buy-back flag with its measured cost (`-fwrapv` 2.5× on a
+  strided loop in GCC, `-fno-strict-aliasing` 3.6× on an `int*`-bounded axpy in Clang,
+  `-fno-delete-null-pointer-checks` +0.15 ns/call, `-ftrivial-auto-var-init` 0 where the buffer dies, full
+  trapping UBSan 2.5–20× vs the overflow/bounds/shift/null subset 1.0–1.5×) → sanctioned replacement
+  (current numbering: Ch. 4, 12–14, 21, 23, 30, 32, 45, 60, 87; Appendices D, H, I).
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 95
-  chapters and appendices A–O — see Phases 2–3 and the four 2026-11-09 insertions below).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 98
+  chapters and appendices A–P — see Phases 2–3 and the five 2026-11-09 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 95 chapters + 15 appendices (A–O);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 98 chapters + 16 appendices (A–P);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
-  with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters and O with
-  the 2026-11-09 design-pattern chapters.**
+  with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters, O with
+  the 2026-11-09 design-pattern chapters and P with the 2026-11-09 modern-C++ depth chapters.**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 95 chapters + 15 appendices (A–O). Appendix H's version numbers and
+  now: front matter + 98 chapters + 16 appendices (A–P). Appendix H's version numbers and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
 - Phase 3 (done): **the book was reorganized into twelve topical Parts** (thirteen since the
@@ -461,31 +472,35 @@ Code & content guidelines:
   - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup.
   - **II — CPU Microarchitecture** (7–17).
-  - **III — Compile-Time & Language Mechanics** (18–25).
+  - **III — Compile-Time & Language Mechanics** (18–25): compile-time mechanics, templates & zero-cost
+    abstractions (with concepts, §19.4.6), compile-time protocol decoders (Ch. 20, added 2026-11-09 P3-5), the cost
+    of abstractions (with the calling convention and statics/TLS, §21.4.5–§21.4.6), the cost of modern idioms &
+    strings without allocation (Ch. 22, P3-5), aliasing & type punning (with object lifetime / `start_lifetime_as`),
+    the build toolchain, build systems & hermetic toolchains (Ch. 25, P3-5).
   - **IV — Memory Management** (26–29).
   - **V — Numerics & Data Parallelism** (30–32).
-  - **VI — Concurrency** (33–45): …the Disruptor, threading topologies & the hot loop (Ch. 38, added
-    2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 39, P3-4), coroutines, `std::execution`,
+  - **VI — Concurrency** (33–45): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
+    2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 42, P3-4), coroutines, `std::execution`,
     correctness tooling.
   - **VII — OS, Scheduling & Isolation** (46–53): context switching, timers & deadlines without jitter
-    (Ch. 44, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
-    residual noise (Ch. 49, added 2026-11-09 P3-1), warming.
+    (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
+    residual noise (Ch. 52, added 2026-11-09 P3-1), warming.
   - **VIII — Kernel I/O, Sockets & Zero-Copy** (54–59): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
   - **IX — Market Data, NIC & Fabric** (60–68): decoding, reliable multicast, multicast membership &
-    dark-feed detection (Ch. 56, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
+    dark-feed detection (Ch. 59, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
   - **X — Kernel Bypass, RDMA & Transport** (69–73): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (74–78): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Beyond C++: Languages at the Latency Floor** (73–77, added 2026-11-09 P3-3): hand-written
+  - **XII — Beyond C++: Languages at the Latency Floor** (76–80, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
   - **XIII — Observability & Operations in Production** (84–98): logging, in-band latency tracing
-    (Ch. 82, added 2026-11-09 P3-2), application telemetry (Ch. 83, P3-1), security, hot reload, process
-    topology, the pre-trade risk gate & kill-switch path (Ch. 87, P3-4), idempotent order entry &
-    order-state recovery (Ch. 88, P3-4), crash handling & post-mortem (Ch. 89, P3-2), capture/replay, the
-    sequencer & replicated deterministic consumers (Ch. 91, P3-4), latency-spike forensics (Ch. 92, P3-2),
-    host health telemetry and network health & drop forensics (Ch. 93–94, P3-1), end-to-end case study
+    (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
+    topology, the pre-trade risk gate & kill-switch path (Ch. 90, P3-4), idempotent order entry &
+    order-state recovery (Ch. 91, P3-4), crash handling & post-mortem (Ch. 92, P3-2), capture/replay, the
+    sequencer & replicated deterministic consumers (Ch. 94, P3-4), latency-spike forensics (Ch. 95, P3-2),
+    host health telemetry and network health & drop forensics (Ch. 96–97, P3-1), end-to-end case study
     (the capstone, still last).
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved
@@ -556,6 +571,30 @@ Code & content guidelines:
   re-pointed), Appendix G (Schneider, Lamport, Défago et al., Varghese & Lauck, hrtimers, Helland,
   Gray & Reuter, SEDA/Kleinrock, 15c3-5/RTS 6/FIA, venue session specs; G.6 lines), Appendix I.6
   timer-slack/RT-throttle one-liners, Appendix J.6/K.4 and Ch. 1/27/84/86/90/95 pointers.
+- **2026-11-09 modern-C++ insertion (work-queue item P3-5):** three chapters and one appendix were
+  added with `insert_chapter.py` (three ascending insertions, one commit each — no new Part; the tool
+  does not extend a Part's upper bound when inserting after its last chapter, so the Part III range was
+  corrected to 18–25 by hand): **20** Compile-Time Protocol Decoders: From Schema to Code (after the
+  templates chapter), **22** The Cost of Modern Idioms & Strings Without Allocation (after the
+  abstractions chapter), **25** Build Systems, Build-Time Hygiene & Hermetic Toolchains (closing Part
+  III), and **Appendix P** Attributes, Builtins & the UB Catalogue. Renumber map from the post-P3-4
+  numbering: 1–19 unchanged; old 20–21 → 21, 23 (old 20 abstractions → 21, old 21 aliasing → 23); old 22
+  (toolchain) → 24; old 23–95 → 26–98. Composite from the Phase-3 (pre-P3-1) numbering: 1–19 unchanged;
+  20 → 21; 21 → 23; 22 → 24; 23–37 → 26–40; 38–41 → 43–46; 42–45 → 48–51; 46–54 → 53–61; 55–70 → 63–78;
+  71 → 84; 72 → 87; 73 → 88; 74 → 89; 75 → 93; 76 → 98. Also added: Ch. 19 §19.4.6 (concepts and
+  constrained overload sets — four dispatch mechanisms, identical asm, diagnostics compared), Ch. 21
+  §21.4.5 (values, copy elision and the SysV calling convention) and §21.4.6 (statics, `thread_local`
+  and initialization, measured) with Ch. 4 §4.2.1's classification paragraphs, Ch. 23 §23.2's
+  object-lifetime paragraph and §23.4.2 renamed to include `std::start_lifetime_as` (with the
+  `memmove`+`launder` C++20 polyfill, zero-instruction proof in §23.5), Ch. 14 §14.4.5 (`function_ref`,
+  `move_only_function`, in-place functions, measured; §14.2.3 design space, §14.3 rows), Ch. 33 §33.4.3
+  (`atomic_ref`, `wait`/`notify`, 16-byte CAS and the libatomic trap, measured; Ch. 37/57 `static_assert`
+  discipline), Ch. 28 §28.4.3 renamed with `std::inplace_vector`, Ch. 32 §32.4.4 (`std::simd` and portable
+  wrappers, measured); Appendix D pointers to P, Appendix F (25 entries), G (G.1/G.3/G.4 entries; G.6 Part
+  III line), H (rows for concepts, class-type NTTPs, reflection, modules/`import std`, `musttail`,
+  `atomic_ref`, DWCAS, `function_ref`, `move_only_function`, `start_lifetime_as`, `std::simd`,
+  `inplace_vector`, `add_sat`), I.12 (build/toolchain/attribute/statics/TLS one-liners; I.12–I.13 →
+  I.13–I.14), the README legend (98 chapters, A–P) and Part III intro, and the preface counts.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to

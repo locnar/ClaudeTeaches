@@ -306,7 +306,37 @@ The "verify the codegen" step and the runtime's own diagnostics for the language
 
 **Interpreting:** every toolchain can show you its machine code; the questions are the same ones Ch. 4 asks of C++ — is the hot method one block of loads and arithmetic, with no call to an allocator, no barrier, no type check, no bounds-check branch to a panic — and for the managed runtimes, the runtime's own log is the second instrument beside the hot thread's clock (Ch. 82 §82.3): read time-to-safepoint and deoptimisations, not only pause time.
 
-## I.12 References
+## I.12 Build, toolchain, attributes, statics & TLS
+
+Profiling and policing the build (Ch. 25), checking that an attribute fired (Appendix P), and finding the hidden runtime in statics and `thread_local` (Ch. 21 §21.4.6).
+
+```
+   clang++ -ftime-trace -c hot.cpp -o hot.o                 # per-TU build profile → hot.json (headers, instantiations, passes; Ch. 25 §25.4.1)
+   ClangBuildAnalyzer --all build/ out.bin && ClangBuildAnalyzer --analyze out.bin   # aggregate: most expensive headers/templates across a build
+   g++ -ftime-report -c hot.cpp                              # GCC per-pass times (no per-header view)
+   clang++ -std=c++23 --precompile book.cppm -o book.pcm && clang++ -std=c++23 -fmodule-file=book=book.pcm -c tu.cpp   # named module, Clang 18 (Ch. 25 §25.4.4)
+   cmake -G Ninja -B build -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS=$(which clang-scan-deps-18)   # CMake 3.28 module scanning
+   SOURCE_DATE_EPOCH=1700000000 g++ -O2 -ffile-prefix-map=$PWD=/src -frandom-seed=x.cpp -Wl,--build-id=sha1 x.cpp -o x && cmp x x.rebuilt   # reproducible? (Ch. 25 §25.4.6)
+   readelf -p .GCC.command.line hot.o                        # the flags THIS object was built with (-frecord-gcc-switches; Ch. 25 §25.4.5)
+   llvm-dwarfdump --debug-info hot.o | grep -m1 DW_AT_producer   # same, Clang (DWARF producer string)
+   readelf -n ./app | grep -A1 'Build ID'                    # content-derived build ID (Ch. 25, 92)
+   # attributes & UB licences (Appendix P):
+   clang++ -O2 -Rpass=inline -Rpass-missed=inline -Rpass-missed=loop-vectorize -c hot.cpp     # what inlined / vectorised, and why not
+   g++ -O2 -fopt-info-vec-all -fopt-info-inline-optimized -c hot.cpp
+   readelf -S hot.o | grep -E 'text\.(hot|unlikely)'          # hot/cold placement ([[gnu::hot]]/[[gnu::cold]], [[likely]]; Ch. 12)
+   nm hot.o | grep -E '\.resolver|\.avx2|\.avx512'             # target_clones bodies + ifunc resolver
+   objdump -d -M intel hot.o | grep -cE 'cmpxchg16b|__atomic_compare_exchange'   # inline DWCAS vs libatomic call (Ch. 33 §33.4.3)
+   g++ -O2 -fwrapv -S -o wrap.s hot.cpp && g++ -O2 -S -o nowrap.s hot.cpp && diff wrap.s nowrap.s   # what the overflow licence bought (App. P.3)
+   # statics & TLS (Ch. 21 §21.4.6):
+   nm -C hot.o | grep 'guard variable'                       # function-local statics with a __cxa_guard check on every call
+   objdump -d libstrategy.so | grep -c __tls_get_addr         # general-dynamic TLS accesses (should be 0 on a hot .so; -ftls-model=initial-exec)
+   readelf -d libstrategy.so | grep -i tls; readelf -l libstrategy.so | grep TLS   # TLS segment size (static TLS budget for dlopen'd objects)
+   objdump -s -j .init_array ./app                           # dynamic-initialiser order (init_priority; link order)
+```
+
+**Interpreting:** the `-ftime-trace` `Source` events are per-header parse cost *including* nested includes — the top one is usually a convenience include in a shared header (Ch. 25 §25.3 found `<chrono>` at 566 ms/TU); a difference in `.GCC.command.line` across objects in a meaning-class flag (`-fwrapv`, `-fno-strict-aliasing`, `-fno-exceptions`, sanitizers, an ISA-dependent `-march`) is an ODR hazard the linker will not report; a non-empty `guard variable` list or `__tls_get_addr` count on a hot object is a per-call cost the chapter measured (0.2 ns and a branch; 1.3–3 ns and a first-touch `malloc`).
+
+## I.13 References
 
 - The **`perf`** documentation — `perf-stat`, `perf-record`, `perf-report`, `perf-annotate`, `perf-c2c`, `perf-mem` man pages, and the kernel `tools/perf` docs (I.1–I.3).
 - **Brendan Gregg's** `perf` examples and *BPF Performance Tools* / `bpftrace` reference (I.5), and the `bcc`/`bpftrace` repositories.
@@ -314,7 +344,7 @@ The "verify the codegen" step and the runtime's own diagnostics for the language
 - The `hwloc`/`lstopo`, `numactl`, `ethtool`, `pahole` (dwarves), `chrt`, `taskset`, `objdump`, and `llvm-bolt`/`perf2bolt` man pages and docs (I.6–I.9).
 - `core(5)`, `coredumpctl(1)`, `eu-stack(1)`, `eu-unstrip(1)`, `addr2line(1)`, the gdb manual's *Non-Stop Mode* and *Debugging Programs with Multiple Threads* chapters, `perf-record(1)` (`--overwrite`, `--switch-output`, `--snapshot`), `perf-intel-pt(1)`, and `Documentation/trace/ftrace.rst` (I.10).
 
-## I.13 Additional Reading
+## I.14 Additional Reading
 
 - **Appendix C** (System Tuning Checklist) — where many of these commands are applied as *configuration* (IRQ pinning, ring sizing, governor) rather than one-off *observation*.
 - **Appendix D** (Compiler Flag Reference) — the build flags behind I.9 (`-fno-omit-frame-pointer`, LTO/PGO/BOLT, sanitizers).

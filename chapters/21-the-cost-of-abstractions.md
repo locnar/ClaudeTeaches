@@ -2,7 +2,7 @@
 
 # Chapter 21 — The Cost of Abstractions
 
-> **Prerequisites:** Ch. 19 (zero-cost abstractions — this chapter is its counterweight: the abstractions that *aren't* free), Ch. 12 (code layout / hot-cold splitting — the cold path is exactly where unwinding code belongs), Ch. 1 (tail latency — an exception throw is a tail event), Ch. 4 (reading asm — §21.5 reads unwinding tables and landing pads).
+> **Prerequisites:** Ch. 19 (zero-cost abstractions — this chapter is its counterweight: the abstractions that *aren't* free) and Ch. 20 (the compile-time decoder, whose generated accessors return the small values §21.4.5 classifies for the calling convention), Ch. 4 §4.2.1 (the SysV register model), Ch. 12 (code layout / hot-cold splitting — the cold path is exactly where unwinding code belongs), Ch. 1 (tail latency — an exception throw is a tail event), Ch. 4 (reading asm — §21.5 reads unwinding tables and landing pads).
 >
 > **Leads into:** Ch. 23 (aliasing & type punning — more language-level codegen gates), Ch. 60 (zero-copy parsing — hot-path error handling on untrusted input), Ch. 87 (secure programming — UB and error handling as a vulnerability class). `std::expected` ties back to Ch. 19 (a zero-cost error channel) and forward to Ch. 28/30 (hot-path APIs).
 
