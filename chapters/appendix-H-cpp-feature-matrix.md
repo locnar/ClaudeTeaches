@@ -1,6 +1,6 @@
 # Appendix H — Modern C++ (C++20/23/26) Feature Availability Matrix
 
-> **Consolidates:** the modern-C++ features this book reaches for across many chapters — `std::expected` (Ch. 20), `std::flat_map`/`std::flat_set` (Ch. 25), `<bit>` operations and `std::bit_cast`/`std::byteswap` (Ch. 28), `std::print`/`std::println` (Ch. 80), `std::span` (Ch. 4, 83) and `std::mdspan` (Ch. 29 is its natural home), `std::atomic_ref` (Ch. 35) and `std::jthread` (setup threads — Ch. 31), and `std::execution` senders/receivers (Ch. 41). This book's convention (stated in the Preface) is to use modern C++ where it helps and to **name the standard + toolchain support**. This appendix is where that support is named in one place, so a reader on an older toolchain knows what compiles, what to feature-test, and what to fall back to.
+> **Consolidates:** the modern-C++ features this book reaches for across many chapters — `std::expected` (Ch. 20), `std::flat_map`/`std::flat_set` (Ch. 25), `<bit>` operations and `std::bit_cast`/`std::byteswap` (Ch. 28), `std::print`/`std::println` (Ch. 81), `std::span` (Ch. 4, 84) and `std::mdspan` (Ch. 29 is its natural home), `std::atomic_ref` (Ch. 35) and `std::jthread` (setup threads — Ch. 31), and `std::execution` senders/receivers (Ch. 41). This book's convention (stated in the Preface) is to use modern C++ where it helps and to **name the standard + toolchain support**. This appendix is where that support is named in one place, so a reader on an older toolchain knows what compiles, what to feature-test, and what to fall back to.
 
 **How to read the matrix:** each row lists — the paper (P/N number), the first **GCC + libstdc++** release, the first **Clang + libc++** release, the **feature-test macro** to `#if` on, and the **C++17/20 fallback** to use when the feature is absent. Library support (libstdc++/libc++) lags language support (the compiler) and is tracked separately — a feature can be "a C++23 language feature GCC 13 accepts" yet "a libstdc++ 14 library type." **Always gate on the `__cpp_lib_*` / `__cpp_*` feature-test macro (H.6), never on `__cplusplus` or `-std=`,** because vendor support is piecemeal and a `-std=c++23` compiler is *not* a guarantee the library type exists. Version numbers below are the "first shipped" releases as checked against the libstdc++, libc++, GCC and Clang implementation-status pages in November 2026 (GCC 16 / LLVM 21 era); **treat them as a starting point and confirm against cppreference's compiler-support page for your exact toolchain** — this is the one appendix that dates fastest.
 
@@ -23,17 +23,17 @@ The everyday modern-library types the book leans on hardest.
 | Feature | Paper | GCC / libstdc++ | Clang / libc++ | Feature-test macro | Fallback |
 |---|---|---|---|---|---|
 | `std::expected` (Ch. 20 — hot-path error handling) | P0323 | GCC 12 | Clang 16 / libc++ 16 | `__cpp_lib_expected >= 202202` | `tl::expected`, `boost::outcome`, or an error-code + out-param |
-| `std::span` (Ch. 4, 83) | P0122 | GCC 10 | Clang 7 / libc++ 7 | `__cpp_lib_span >= 202002` | `gsl::span`, or `(ptr, len)` pair |
+| `std::span` (Ch. 4, 84) | P0122 | GCC 10 | Clang 7 / libc++ 7 | `__cpp_lib_span >= 202002` | `gsl::span`, or `(ptr, len)` pair |
 | `std::mdspan` (Ch. 29) | P0009 | GCC 16 / libstdc++ 16 (no `<mdspan>` in 13–15) | Clang/libc++ 18 | `__cpp_lib_mdspan >= 202207` | `Kokkos::mdspan` reference impl, or manual index math |
 | `std::flat_map` / `std::flat_set` (Ch. 25) | P0429 / P1222 | libstdc++ 15 | libc++ 20 (`flat_map`) / 21 (`flat_set`) | `__cpp_lib_flat_map` / `_flat_set >= 202207` | `boost::container::flat_map`, or a sorted `std::vector` + `lower_bound` |
-| `std::print` / `std::println`, `<print>` (Ch. 80) | P2093 | libstdc++ 14 | libc++ 18 | `__cpp_lib_print >= 202207` | `fmt::print` (the library it standardizes) |
+| `std::print` / `std::println`, `<print>` (Ch. 81) | P2093 | libstdc++ 14 | libc++ 18 | `__cpp_lib_print >= 202207` | `fmt::print` (the library it standardizes) |
 | `std::source_location` (Ch. 20 §20.4.4, 73 — zero-cost log-site tags) | P1208 | GCC 11 | Clang 16 / libc++ 16 (needs `__builtin_source_location`) | `__cpp_lib_source_location >= 201907` | `__FILE__`/`__LINE__`/`__func__` macros |
-| `std::stacktrace` (Ch. 20 §20.4.4, 79 — terminate/assert path only) | P0881 | libstdc++ 12 (link `-lstdc++_libbacktrace` on GCC 12–13, `-lstdc++exp` on GCC 14) | not in libc++ 18 | `__cpp_lib_stacktrace >= 202011` | `backtrace()`/`backtrace_symbols_fd` (glibc), libunwind, or a frame-pointer walk (Ch. 86 §86.4.1) |
+| `std::stacktrace` (Ch. 20 §20.4.4, 79 — terminate/assert path only) | P0881 | libstdc++ 12 (link `-lstdc++_libbacktrace` on GCC 12–13, `-lstdc++exp` on GCC 14) | not in libc++ 18 | `__cpp_lib_stacktrace >= 202011` | `backtrace()`/`backtrace_symbols_fd` (glibc), libunwind, or a frame-pointer walk (Ch. 87 §87.4.1) |
 | `std::unreachable` (Ch. 20 §20.4.4, 13) | P0627 | GCC 12 | Clang 15 / libc++ 15 | `__cpp_lib_unreachable >= 202202` | `__builtin_unreachable()`; `__builtin_trap()` in non-release builds |
 | `<debugging>`: `std::breakpoint`, `breakpoint_if_debugging`, `is_debugger_present` (Ch. 20 §20.4.4) | P2546 (C++26) | not in libstdc++ 13–14 (gate on the macro) | not in libc++ 18 | `__cpp_lib_debugging >= 202311` | `__builtin_debugtrap()` (Clang) / `raise(SIGTRAP)`; `TracerPid` in `/proc/self/status` |
 | `std::format` (underlies `<print>`) | P0645 | libstdc++ 13 | libc++ 14 (`__cpp_lib_format` defined only from libc++ 19) | `__cpp_lib_format >= 201907` — on libc++ 14–18 also accept `__has_include(<format>)` | `fmt::format` |
 
-**Trading relevance.** `std::expected` is the one to prioritize adopting — it gives branch-predictable, allocation-free error handling on the decode/order path (Ch. 20) with none of the throw-path cost (Ch. 20's exception discussion). `std::flat_map`/`flat_set` matter for small ordered structures where node-based `std::map` cache-misses dominate (Ch. 25) — both mainstream libraries ship them now (libstdc++ 15, libc++ 20/21), but they landed recently enough that the `boost::container::flat_map` / sorted-`vector` fallback is still what most deployed toolchains need. `std::print` is strictly off-hot-path (Ch. 80) — its value is ergonomics and avoiding iostream overhead in setup/logging code, not tick-to-trade.
+**Trading relevance.** `std::expected` is the one to prioritize adopting — it gives branch-predictable, allocation-free error handling on the decode/order path (Ch. 20) with none of the throw-path cost (Ch. 20's exception discussion). `std::flat_map`/`flat_set` matter for small ordered structures where node-based `std::map` cache-misses dominate (Ch. 25) — both mainstream libraries ship them now (libstdc++ 15, libc++ 20/21), but they landed recently enough that the `boost::container::flat_map` / sorted-`vector` fallback is still what most deployed toolchains need. `std::print` is strictly off-hot-path (Ch. 81) — its value is ergonomics and avoiding iostream overhead in setup/logging code, not tick-to-trade.
 
 ## H.3 Language features (`consteval`/`constinit`, concepts, coroutines, `[[likely]]`, `[[assume]]`)
 
@@ -71,23 +71,23 @@ The threading/atomics and async surface (Part VI).
 
 ## H.5 Numerics & bit manipulation (`std::bit_cast`, `<bit>`, `std::byteswap`, saturating arithmetic, `from_chars`/`to_chars`)
 
-The bit-twiddling and numeric-conversion surface (Part V, Ch. 28; parsing in Ch. 56).
+The bit-twiddling and numeric-conversion surface (Part V, Ch. 28; parsing in Ch. 57).
 
 | Feature | Paper | GCC / libstdc++ | Clang / libc++ | Macro | Fallback |
 |---|---|---|---|---|---|
 | `std::bit_cast` (Ch. 21, 27) | P0476 | GCC 11 / libstdc++ 11 | Clang 14 / libc++ 14 | `__cpp_lib_bit_cast >= 201806` | `memcpy` into the target type (same codegen, defeats strict-aliasing UB — Ch. 21) |
 | `<bit>`: `popcount`, `countl/r_zero`, `bit_width`, `rotl/rotr` (Ch. 28) | P0553 / P0556 | libstdc++ 9 | libc++ 9 | `__cpp_lib_bitops >= 201907` | `__builtin_popcount`/`_clz`/`_ctz`, `_mm_popcnt_u64`, BMI intrinsics |
-| `std::byteswap` (Ch. 56 — endianness) | P1272 | libstdc++ 12 | libc++ 14 | `__cpp_lib_byteswap >= 202110` | `__builtin_bswap16/32/64`, `bswap_*` |
-| `std::endian` (Ch. 56) | P0463 | libstdc++ 8 | libc++ 7 | `__cpp_lib_endian >= 201907` | `__BYTE_ORDER__` / `__ORDER_LITTLE_ENDIAN__` |
-| Saturating arithmetic `add_sat` etc. (Ch. 83) | P0543 (C++26) | libstdc++ 14 | libc++ 18 | `__cpp_lib_saturation_arithmetic >= 202311` | manual clamp with overflow check (Ch. 83), or `__builtin_add_overflow` + clamp |
+| `std::byteswap` (Ch. 57 — endianness) | P1272 | libstdc++ 12 | libc++ 14 | `__cpp_lib_byteswap >= 202110` | `__builtin_bswap16/32/64`, `bswap_*` |
+| `std::endian` (Ch. 57) | P0463 | libstdc++ 8 | libc++ 7 | `__cpp_lib_endian >= 201907` | `__BYTE_ORDER__` / `__ORDER_LITTLE_ENDIAN__` |
+| Saturating arithmetic `add_sat` etc. (Ch. 84) | P0543 (C++26) | libstdc++ 14 | libc++ 18 | `__cpp_lib_saturation_arithmetic >= 202311` | manual clamp with overflow check (Ch. 84), or `__builtin_add_overflow` + clamp |
 | `std::assume_aligned<N>(p)` (Ch. 21, 29) | P1007 | libstdc++ 10 | libc++ 15 | `__cpp_lib_assume_aligned >= 201811` | `__builtin_assume_aligned(p, N)` |
 | `std::unreachable()` (Ch. 21) | P0627 | libstdc++ 12 | libc++ 15 | `__cpp_lib_unreachable >= 202202` | `__builtin_unreachable()` |
-| `std::start_lifetime_as<T>(p)` (Ch. 21, 56 — the sanctioned struct-over-bytes overlay) | P2590 | libstdc++ 16 (experimental; absent in 13–15) | not yet | `__cpp_lib_start_lifetime_as >= 202207` | `memcpy`/`std::bit_cast` into a local, or the `reinterpret_cast` the chapters mark as technically UB |
+| `std::start_lifetime_as<T>(p)` (Ch. 21, 57 — the sanctioned struct-over-bytes overlay) | P2590 | libstdc++ 16 (experimental; absent in 13–15) | not yet | `__cpp_lib_start_lifetime_as >= 202207` | `memcpy`/`std::bit_cast` into a local, or the `reinterpret_cast` the chapters mark as technically UB |
 | `std::simd` (C++26; Ch. 29, Appendix A.2) | P1928 | libstdc++ 16 (experimental); `<experimental/simd>` (Parallelism TS v2) since libstdc++ 11 | not yet | `__cpp_lib_simd` (when shipped); `__cpp_lib_experimental_parallel_simd` for the TS | `std::experimental::simd`, xsimd, Google Highway, or raw intrinsics (Ch. 29) |
 | `std::inplace_vector` (C++26 — fixed-capacity, no allocation) | P0843 | libstdc++ 15 | not yet (check) | `__cpp_lib_inplace_vector >= 202406` | a `std::array` + size field, `boost::container::static_vector` |
-| `std::from_chars` / `std::to_chars` (Ch. 56) | P0067 | libstdc++ 8 (integers) / 11 (floating point) | libc++ 7 (integers) / 14 (FP `to_chars`) / 20 (FP `from_chars`) | `__cpp_lib_to_chars >= 201611` — never defined by libc++ (`long double` unimplemented); there gate on `_LIBCPP_VERSION` or a configure-time test-compile | hand-rolled branch-free integer/decimal parse (Ch. 56) |
+| `std::from_chars` / `std::to_chars` (Ch. 57) | P0067 | libstdc++ 8 (integers) / 11 (floating point) | libc++ 7 (integers) / 14 (FP `to_chars`) / 20 (FP `from_chars`) | `__cpp_lib_to_chars >= 201611` — never defined by libc++ (`long double` unimplemented); there gate on `_LIBCPP_VERSION` or a configure-time test-compile | hand-rolled branch-free integer/decimal parse (Ch. 57) |
 
-**Trading relevance.** The `<bit>` operations are the highest-value adoption here (Ch. 28 — order-book occupancy bitmaps, free-list scans) and the best-supported (shipped in GCC 9 / Clang 9), but the fallback intrinsics are what they lower to and are equally fast — so `<bit>` buys readability and constexpr-friendliness, not speed. `std::bit_cast` is the *correct* type-pun that avoids the strict-aliasing UB the `reinterpret_cast` fallback risks (Ch. 21) — prefer it. `std::from_chars`/`to_chars` are the standard's locale-independent, non-throwing, allocation-free number conversions (Ch. 56 shows where a hand-rolled branch-free parser still wins) — but libc++'s *floating-point* `from_chars` shipped only in libc++ 20 and libc++ never defines `__cpp_lib_to_chars`, so gate on the library version if you parse floats there.
+**Trading relevance.** The `<bit>` operations are the highest-value adoption here (Ch. 28 — order-book occupancy bitmaps, free-list scans) and the best-supported (shipped in GCC 9 / Clang 9), but the fallback intrinsics are what they lower to and are equally fast — so `<bit>` buys readability and constexpr-friendliness, not speed. `std::bit_cast` is the *correct* type-pun that avoids the strict-aliasing UB the `reinterpret_cast` fallback risks (Ch. 21) — prefer it. `std::from_chars`/`to_chars` are the standard's locale-independent, non-throwing, allocation-free number conversions (Ch. 57 shows where a hand-rolled branch-free parser still wins) — but libc++'s *floating-point* `from_chars` shipped only in libc++ 20 and libc++ never defines `__cpp_lib_to_chars`, so gate on the library version if you parse floats there.
 
 ## H.6 Feature-test macros & graceful degradation
 
@@ -117,15 +117,15 @@ The pattern that makes all of the above portable across the toolchain spread.
 - **cppreference** — the *C++ compiler support* and *C++ feature-test macros* pages: the authoritative, continuously-updated matrix this appendix summarizes. Check these for your exact toolchain before relying on any row above.
 - The **libstdc++** ("Implementation Status → C++ 2023/2026") and **libc++** ("Implementation Status") pages, and the GCC/Clang release notes — the library-vs-language split (H.1) is documented there.
 - The **WG21 papers** cited per row (P0323 `expected`, P0122 `span`, P0009 `mdspan`, P0429/P1222 `flat_map`/`flat_set`, P2093 `print`, P0645 `format`, P2300 `std::execution`, P0553/P0556 `<bit>`, P0476 `bit_cast`, P1272 `byteswap`, P0543 saturating, P0067 `to_chars`, P1007 `assume_aligned`, P2590 `start_lifetime_as`, P1928 `simd`, P0843 `inplace_vector`, P0154 interference sizes).
-- The chapters that use each feature: Ch. 4, 8, 12, 18–21, 25, 27–33, 35, 40–41, 56, 80–83.
+- The chapters that use each feature: Ch. 4, 8, 12, 18–21, 25, 27–33, 35, 40–41, 57, 81–84.
 
 ## H.8 Additional Reading
 
 - **Appendix D** (Compiler Flag Reference) — the `-std=`/`-stdlib=` flags (D.4) that select these standards and libraries.
-- **Part XII** (Ch. 76 §76.4.5, Ch. 79 §79.4.3) and **Appendix B** (B.3) — where a feature's *absence* (or a whole missing capability) is an argument for another language; and how `constexpr`, `std::expected`, coroutines and `bit_cast`-style punning compare with their Rust/Zig counterparts (B.1–B.2).
+- **Part XII** (Ch. 77 §77.4.5, Ch. 80 §80.4.3) and **Appendix B** (B.3) — where a feature's *absence* (or a whole missing capability) is an argument for another language; and how `constexpr`, `std::expected`, coroutines and `bit_cast`-style punning compare with their Rust/Zig counterparts (B.1–B.2).
 - **Appendix G** (Annotated Bibliography) — the standards-committee and library-design background reading.
 - The `<version>` header, `__has_include`, and Godbolt (Ch. 4) — the fastest way to answer "does *my* toolchain have it?" for real, which no static table can.
 
 ---
 
-*Next: Appendix I — Tooling Command Cookbook, a copy-paste one-liner reference for the tools used throughout the book — `perf`, VTune, `bpftrace`/eBPF, `numactl`/`taskset`/`chrt`, `pahole`, `ethtool`, `objdump`, and the sanitizers — consolidating the commands scattered across Ch. 2–5, 65 and the operations chapters.*
+*Next: Appendix I — Tooling Command Cookbook, a copy-paste one-liner reference for the tools used throughout the book — `perf`, VTune, `bpftrace`/eBPF, `numactl`/`taskset`/`chrt`, `pahole`, `ethtool`, `objdump`, and the sanitizers — consolidating the commands scattered across Ch. 2–5, 66 and the operations chapters.*

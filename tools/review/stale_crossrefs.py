@@ -45,6 +45,7 @@ STEPS = [
     ("insert", 76),  # Ch. 77 choosing-a-language-per-latency-tier
     ("insert", 37),  # Ch. 38 threading-topologies-hot-loop
     ("insert", 38),  # Ch. 39 flow-control-backpressure-conflation
+    ("insert", 43),  # Ch. 44 timers-deadlines-without-jitter
     # INSERT_STEPS_END
 ]
 def old2new(n):

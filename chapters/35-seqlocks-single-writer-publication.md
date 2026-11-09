@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 30 (atomics & memory ordering — the seqlock's correctness rests entirely on acquire/release and fences), Ch. 31 (single-writer discipline — the seqlock *is* the single-writer/many-reader primitive), Ch. 33 (false sharing — the sequence counter and data layout), Ch. 34 (lock-free — the SPSC ring is for *streams*, the seqlock for *snapshots*), Ch. 7 (coherence — readers don't write, so they don't bounce the line).
 >
-> **Leads into:** Ch. 36 (safe reclamation — the alternative for *large/pointer* state), Ch. 37 (Disruptor — publishes via sequences), Ch. 84 (hot reload — config published via seqlock/pointer swap), Ch. 26/53 (shared-memory publication across processes). The single-writer pattern reappears in Ch. 85.
+> **Leads into:** Ch. 36 (safe reclamation — the alternative for *large/pointer* state), Ch. 37 (Disruptor — publishes via sequences), Ch. 85 (hot reload — config published via seqlock/pointer swap), Ch. 26/54 (shared-memory publication across processes). The single-writer pattern reappears in Ch. 86.
 
 ---
 
@@ -69,7 +69,7 @@ The seqlock's signature is **read latency that stays flat as readers scale**, be
 #include <pthread.h>
 #include <sched.h>
 
-static void pin_to(int core) {                           // Ch. 44
+static void pin_to(int core) {                           // Ch. 45
     cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
     if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
 }
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16 cores), writer pinned to core 1 and R readers to cores 2..R+1 (R ≤ 15 so no SMT sibling pair is used — Ch. 45), writer paced to **one update per µs** (the reads ≫ writes precondition, printed by the program as writes/s and retry %), turbo off (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16 cores), writer pinned to core 1 and R readers to cores 2..R+1 (R ≤ 15 so no SMT sibling pair is used — Ch. 46), writer paced to **one update per µs** (the reads ≫ writes precondition, printed by the program as writes/s and retry %), turbo off (illustrative):
 
 ```
    R readers (1 writer @ 1 update/µs):
@@ -236,8 +236,8 @@ The reader side — read optimistically and validate, never accepting a torn val
 ## 35.8 Additional Reading
 
 - J. Preshing's blog — memory ordering and publication patterns, helpful for getting the seqlock fences right.
-- Talks/posts on "single-writer principle" (Martin Thompson / Mechanical Sympathy) — why single-writer is the foundation of fast publication (ties Ch. 31, 85).
-- Ch. 30 (*Atomics*) — the ordering the seqlock depends on; Ch. 31 (*Foundations*) — single-writer discipline; Ch. 34 (*Lock-Free*) — the streaming (ring) alternative; Ch. 36 (*Safe Reclamation*) — pointer-swap/RCU for large state; Ch. 37 (*Disruptor*) — sequence publication; Ch. 84 (*Hot Reload*) — config/reference-data publication; Ch. 26/53 (*mmap/IPC*) — cross-process publication.
+- Talks/posts on "single-writer principle" (Martin Thompson / Mechanical Sympathy) — why single-writer is the foundation of fast publication (ties Ch. 31, 86).
+- Ch. 30 (*Atomics*) — the ordering the seqlock depends on; Ch. 31 (*Foundations*) — single-writer discipline; Ch. 34 (*Lock-Free*) — the streaming (ring) alternative; Ch. 36 (*Safe Reclamation*) — pointer-swap/RCU for large state; Ch. 37 (*Disruptor*) — sequence publication; Ch. 85 (*Hot Reload*) — config/reference-data publication; Ch. 26/54 (*mmap/IPC*) — cross-process publication.
 - **Appendix A** — ARM weak ordering (where naive seqlocks break); **Appendix F** — seqlock/single-writer glossary entries.
 
 ---
