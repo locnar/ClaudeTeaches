@@ -44,4 +44,4 @@ TODO
 
 ---
 
-*Next: Ch. 76 — Zero-Overhead Logging.*
+*Next: Ch. 76 — Managed Runtimes Near the Hot Path, Measured.*

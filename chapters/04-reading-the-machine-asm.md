@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1–3. You reason about the distribution (Ch. 1), you can find a bottleneck with the PMU (Ch. 2), and you can build a trustworthy microbenchmark (Ch. 3). You do **not** need to be an assembly programmer — this chapter teaches you to *read* x86-64, not write it. For the hands-on parts: [Compiler Explorer](https://godbolt.org) (nothing to install) and/or a local GCC/Clang.
 >
-> **Leads into:** This is the verification skill the rest of the book leans on. Every "verify the codegen" section from here forward (Ch. 9–14, 19–21, 27–30, 39, 54, 76) assumes you can read the asm in this chapter. Build-flag effects on that asm are Ch. 22.
+> **Leads into:** This is the verification skill the rest of the book leans on. Every "verify the codegen" section from here forward (Ch. 9–14, 19–21, 27–30, 39, 54, 77) assumes you can read the asm in this chapter. Build-flag effects on that asm are Ch. 22.
 
 ---
 

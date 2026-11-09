@@ -41,6 +41,7 @@ STEPS = [
     ("insert", 72),  # Ch. 73 hand-written-inline-assembly
     ("insert", 73),  # Ch. 74 rust-for-the-hot-path
     ("insert", 74),  # Ch. 75 language-interop-abi-boundaries
+    ("insert", 75),  # Ch. 76 managed-runtimes-measured
     # INSERT_STEPS_END
 ]
 def old2new(n):

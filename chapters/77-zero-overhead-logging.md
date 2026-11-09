@@ -1,22 +1,22 @@
 # Part XIII — Observability & Operations in Production
 
-# Chapter 76 — Zero-Overhead Logging
+# Chapter 77 — Zero-Overhead Logging
 
 > **Prerequisites:** Ch. 34 (lock-free SPSC queues — the producer→consumer ring under an async logger), Ch. 37 (Disruptor — the batching pipeline pattern), Ch. 23–24 (no allocation/syscalls on the hot path — logging must obey both), Ch. 17 (TSC timestamps — cheap per-record time), Ch. 4 (reading codegen — proving the log call is tiny), Ch. 1 (tail latency — a logging stall is a tail event).
 >
-> **Leads into:** Ch. 78 (telemetry — the same capture-here/format-there discipline applied to counters and histograms), Ch. 83 (capture/persistence — binary logging is the same off-hot-path-writer discipline applied to ticks/orders), Ch. 87 (the case study — logging is how you *see* the tick-to-trade path in production). Opens Part XIII — observability and operations: making a low-latency system *visible* without slowing it down.
+> **Leads into:** Ch. 79 (telemetry — the same capture-here/format-there discipline applied to counters and histograms), Ch. 84 (capture/persistence — binary logging is the same off-hot-path-writer discipline applied to ticks/orders), Ch. 88 (the case study — logging is how you *see* the tick-to-trade path in production). Opens Part XIII — observability and operations: making a low-latency system *visible* without slowing it down.
 
 ---
 
-## 76.1 Why it matters: logging must never stall the hot path
+## 77.1 Why it matters: logging must never stall the hot path
 
 Every other chapter of this book worked to shave nanoseconds off the tick-to-trade path. A single careless `log("order sent: {} @ {}", id, price)` on that path can throw all of it away — because the *obvious* way to log does, on the hot path, every single thing this book forbids: it **formats** (parses a format string, converts integers/floats to text — hundreds of ns to microseconds), it may **allocate** (Ch. 23 — `std::string`, stream buffers), it takes a **lock** (Ch. 32 — the logger mutex, contended with other threads), and it does **I/O** (Ch. 48 — a `write()` syscall, or worse a blocking disk/network write that can stall for *milliseconds*). Any one of these is a tail-latency catastrophe (Ch. 1): the median is fine, but the one log call that hit a page fault, a lock convoy, or a flushing disk just produced a p99.9 outlier measured in milliseconds on a path with a microsecond budget.
 
-Yet you *cannot* run a production trading system blind. You need to know what every strategy decided, what every order did, why a position is what it is — for debugging, for compliance, for post-trade analysis (Ch. 83–87). The requirement is absolute on *both* sides: **log everything you need, and spend almost nothing on the hot path doing it.** The resolution is the theme of this chapter and much of Part XIII: **do the cheap part on the hot path, defer the expensive part off it.** The hot path does the minimum to *capture* the event — copy a few raw bytes into a lock-free buffer (Ch. 34) and move on, ideally in a handful of nanoseconds. A *separate* thread, on a *non-isolated* core (Ch. 42), does the expensive part — formatting, I/O — where its cost doesn't matter because it's off the path that trades.
+Yet you *cannot* run a production trading system blind. You need to know what every strategy decided, what every order did, why a position is what it is — for debugging, for compliance, for post-trade analysis (Ch. 84–88). The requirement is absolute on *both* sides: **log everything you need, and spend almost nothing on the hot path doing it.** The resolution is the theme of this chapter and much of Part XIII: **do the cheap part on the hot path, defer the expensive part off it.** The hot path does the minimum to *capture* the event — copy a few raw bytes into a lock-free buffer (Ch. 34) and move on, ideally in a handful of nanoseconds. A *separate* thread, on a *non-isolated* core (Ch. 42), does the expensive part — formatting, I/O — where its cost doesn't matter because it's off the path that trades.
 
-This is "zero-overhead" logging: not *zero* cost (capturing the event costs *something*), but **as close to zero as possible on the hot path**, with all the real work moved to where latency is free. The hot-path log call should compile to little more than "store these few values into the ring buffer and bump a pointer" (§76.5 proves it). This chapter shows the deferred-formatting / binary-logging mental model (§76.2), measures what a naive vs a deferred log call actually costs (§76.3), builds the async/lock-free/binary techniques (§76.4), verifies the hot-path call is tiny in the codegen (§76.5), and warns about the ways logging sneaks back onto the hot path (§76.6).
+This is "zero-overhead" logging: not *zero* cost (capturing the event costs *something*), but **as close to zero as possible on the hot path**, with all the real work moved to where latency is free. The hot-path log call should compile to little more than "store these few values into the ring buffer and bump a pointer" (§77.5 proves it). This chapter shows the deferred-formatting / binary-logging mental model (§77.2), measures what a naive vs a deferred log call actually costs (§77.3), builds the async/lock-free/binary techniques (§77.4), verifies the hot-path call is tiny in the codegen (§77.5), and warns about the ways logging sneaks back onto the hot path (§77.6).
 
-## 76.2 Mental model: deferred formatting; binary logging
+## 77.2 Mental model: deferred formatting; binary logging
 
 The core idea is **separate capture from formatting**, in time and across threads:
 
@@ -43,7 +43,7 @@ The enabling structure underneath is the **lock-free SPSC ring buffer** (Ch. 34)
 
 The mental shift: **a log call is not "produce a log line," it's "enqueue an event."** The line is produced elsewhere, later, by someone whose latency doesn't matter.
 
-## 76.3 Measure it: log-call cost on the hot path
+## 77.3 Measure it: log-call cost on the hot path
 
 *Toolchain and machine: Appendix L.3.*
 
@@ -58,43 +58,43 @@ Measure the *hot-path cost of the log call itself* — the time the trading thre
 The story the table tells (read as a *distribution*, Ch. 1):
 
 - **Naive synchronous logging is a tail-latency weapon pointed at your own foot.** Even when the median `write()` is "fast," the call that triggers a page fault (Ch. 23), hits a flushing buffer, or contends the logger lock (Ch. 32) is a *millisecond* outlier on a microsecond path. One such call per million ruins p99.9. This is the thing to never do on the hot path.
-- **Moving I/O off the path buys roughly an order of magnitude at the median; deferring the *formatting* too buys another ~10-100×.** Row 2 (async, still formatting) removes the `write()` but leaves hundreds of ns and a possible allocation on the path; row 3 (binary records) removes those as well and — critically — makes the cost *flat* (no allocation, no syscall, nothing that can stall). The hot path's cost is just the ring-buffer write (a few stores + a sequence update, Ch. 34), which §76.5 confirms in the asm.
+- **Moving I/O off the path buys roughly an order of magnitude at the median; deferring the *formatting* too buys another ~10-100×.** Row 2 (async, still formatting) removes the `write()` but leaves hundreds of ns and a possible allocation on the path; row 3 (binary records) removes those as well and — critically — makes the cost *flat* (no allocation, no syscall, nothing that can stall). The hot path's cost is just the ring-buffer write (a few stores + a sequence update, Ch. 34), which §77.5 confirms in the asm.
 - **The async-but-still-formatting middle row is the common half-measure.** Many teams move I/O off the hot path (good) but still format the string *on* the hot path before enqueuing it (e.g. enqueue a `std::string`) — keeping hundreds of ns and a possible allocation on the path. The full win requires deferring *formatting*, not just I/O.
 
-Also measure the **consumer side** and the **back-pressure behavior** (§76.6): what happens when the hot path produces faster than the consumer drains? The ring fills; your policy (drop, overwrite-oldest, or — never — *block the producer*) is a correctness/observability decision measured under burst load (Ch. 54 microbursts), not an afterthought.
+Also measure the **consumer side** and the **back-pressure behavior** (§77.6): what happens when the hot path produces faster than the consumer drains? The ring fills; your policy (drop, overwrite-oldest, or — never — *block the producer*) is a correctness/observability decision measured under burst load (Ch. 54 microbursts), not an afterthought.
 
-## 76.4 Techniques
+## 77.4 Techniques
 
-### 76.4.1 Async/lock-free loggers
+### 77.4.1 Async/lock-free loggers
 
 The foundation: a **lock-free SPSC ring per producer thread** (Ch. 34), drained by a dedicated consumer thread pinned to a *housekeeping* core (Ch. 42), never an isolated hot core.
 
-- **Surviving the crash.** The records still sitting in the rings when the process dies (SIGSEGV, `abort`, a kill) are the most valuable of all — the last microseconds before the fault — and a heap-allocated ring dies with the process. Either drain the rings from a crash handler (the NanoLog/Quill approach: a `SIGSEGV`/`SIGABRT` handler that flushes what it can before re-raising — fragile, since the handler runs on a corrupted process) or, better, place the rings in a **shared-memory segment** (`memfd_create`/`shm_open` — Ch. 51) that the consumer thread *or a separate process* maps: the records survive the producer's death and a hot restart (Ch. 81), and the reader is out of the blast radius.
+- **Surviving the crash.** The records still sitting in the rings when the process dies (SIGSEGV, `abort`, a kill) are the most valuable of all — the last microseconds before the fault — and a heap-allocated ring dies with the process. Either drain the rings from a crash handler (the NanoLog/Quill approach: a `SIGSEGV`/`SIGABRT` handler that flushes what it can before re-raising — fragile, since the handler runs on a corrupted process) or, better, place the rings in a **shared-memory segment** (`memfd_create`/`shm_open` — Ch. 51) that the consumer thread *or a separate process* maps: the records survive the producer's death and a hot restart (Ch. 82), and the reader is out of the blast radius.
 - **Per-thread single-producer rings.** Each hot thread owns its ring (thread-local). Single-producer means the producer side is a plain sequenced write — no CAS contention, no lock (Ch. 32, 34). The consumer reads all rings round-robin. This sidesteps MPSC contention and false sharing (Ch. 33 — pad each ring's head/tail to a cache line).
-- **Pre-allocated, fixed-capacity.** The ring is allocated once at startup (Ch. 23–24) — never on the hot path. Fixed capacity forces an explicit full-buffer policy (§76.6) instead of an unbounded allocation that page-faults mid-trade.
+- **Pre-allocated, fixed-capacity.** The ring is allocated once at startup (Ch. 23–24) — never on the hot path. Fixed capacity forces an explicit full-buffer policy (§77.6) instead of an unbounded allocation that page-faults mid-trade.
 - **Consumer batching (Disruptor sympathy, Ch. 37).** The consumer drains as many records as are available per wakeup, formats and writes them in bulk, then sleeps/polls. Batching amortizes formatting and especially I/O (one `write()` for many records, Ch. 48; or io_uring, Ch. 49). Poll with a backoff (Ch. 32) or a brief sleep — the consumer's latency doesn't matter, only that it keeps up on average.
 - **Cheap timestamps.** Stamp each record with `rdtsc`/`rdtscp` (Ch. 17), not `clock_gettime` — tens of cycles, no syscall, converted to wall-clock offline using the calibration (Ch. 17). The timestamp is part of the captured event, applied on the hot path, formatted later.
 
-### 76.4.2 Binary logging with offline formatting
+### 77.4.2 Binary logging with offline formatting
 
 Push deferral to its limit: the hot path writes a **binary record**, and *no* text is produced in production.
 
 - **Compile-time format-site IDs.** Each `LOG("order sent: {} @ {}", id, price)` is assigned a small integer ID at compile time (via a macro + a static registration, or a `consteval` mechanism — Ch. 18), and the site's file/line/function come from a defaulted `std::source_location::current()` parameter — the C++20 default, one `lea` of a static per call site and correct inside templates and lambdas (Ch. 20 §20.4.4 measures it); the `__FILE__`/`__LINE__` macro is the C++17 fallback. The format string and the argument *types* are recorded in a side table extracted from the binary at build time. The hot path stores only `{site_id, tsc, id, price}` — raw bytes, no string.
 - **Type-safe argument capture.** A variadic template (Ch. 19) captures the arguments by value into the record, computing the record size at compile time (`constexpr` — Ch. 18). The hot path memcpy's the packed arguments into the ring — no per-argument formatting, no `std::string`, no `std::format` *at runtime*.
 - **Offline decoder.** A separate program reads the binary log + the format-site table and reconstructs human-readable lines on demand — for analysis, compliance, debugging. Because the decoder runs offline, formatting cost is *completely* free; the production process never paid it. This is the NanoLog model and the route to single-digit-ns (median) log calls.
-- **The hot-path half, in code.** Everything above in forty lines — the record, the reserve, the raw capture, the publish — is what §76.5 disassembles:
+- **The hot-path half, in code.** Everything above in forty lines — the record, the reserve, the raw capture, the publish — is what §77.5 disassembles:
 
 ```cpp
 // binlog.cpp — the hot-path half of a deferred/binary logger: fixed record, SPSC reserve, raw-argument capture.
 // Build: g++ -O2 -std=c++23 -march=icelake-server -fno-stack-protector -c binlog.cpp   (GCC 13/14; Clang 18 same shape;
-//        without -fno-stack-protector Ubuntu's default adds a canary load/compare around the rdtscp out-parameter — Ch. 79)
+//        without -fno-stack-protector Ubuntu's default adds a canary load/compare around the rdtscp out-parameter — Ch. 80)
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <new>
 #include <x86intrin.h>
 
-struct alignas(64) Ring {                                    // one per producer thread (§76.4.1)
+struct alignas(64) Ring {                                    // one per producer thread (§77.4.1)
     static constexpr std::size_t N = 1 << 16;               // bytes, power of two
     alignas(64) /* hardware_destructive_interference_size; Clang 18 lacks the constant */ std::atomic<std::uint64_t> head{0};   // producer-owned
     alignas(64) /* hardware_destructive_interference_size; Clang 18 lacks the constant */ std::atomic<std::uint64_t> tail{0};   // consumer-owned
@@ -110,7 +110,7 @@ template <class... Args>
     constexpr std::uint32_t len = sizeof(Hdr) + (0 + ... + sizeof(Args));   // compile-time record size
     Ring& r = *tls_ring;
     const std::uint64_t h = r.head.load(std::memory_order_relaxed);
-    if (h - r.tail.load(std::memory_order_acquire) > Ring::N - len) [[unlikely]] return false;   // full: drop + count (§76.6)
+    if (h - r.tail.load(std::memory_order_acquire) > Ring::N - len) [[unlikely]] return false;   // full: drop + count (§77.6)
     std::uint8_t* p = r.buf + (h & (Ring::N - 1));          // (records never straddle the end: N is a multiple of every len)
     unsigned aux;
     Hdr hd{site_id, len, __rdtscp(&aux)};                   // the TSC, not clock_gettime (Ch. 17)
@@ -120,7 +120,7 @@ template <class... Args>
     return true;
 }
 // LOG(): the site id is __COUNTER__ at compile time; the format string + arg types go to a side table the
-// build extracts (a static registration keyed by the id) — the decoder (§76.4.2) uses it offline.
+// build extracts (a static registration keyed by the id) — the decoder (§77.4.2) uses it offline.
 #define LOG(fmt, ...) log_record(__COUNTER__, __VA_ARGS__)
 
 void on_fill(std::uint64_t order_id, std::int64_t price_ticks, std::uint32_t qty) {
@@ -128,18 +128,18 @@ void on_fill(std::uint64_t order_id, std::int64_t price_ticks, std::uint32_t qty
 }
 ```
 
-- **Compact on disk (ties Ch. 83).** Binary records are *small* (no text bloat) — cheaper to write, cheaper to store, cheaper to replay. The same binary-record discipline is exactly what Ch. 83 uses to journal every tick and order for deterministic replay; a zero-overhead logger and a capture journal are the same machine pointed at different events.
+- **Compact on disk (ties Ch. 84).** Binary records are *small* (no text bloat) — cheaper to write, cheaper to store, cheaper to replay. The same binary-record discipline is exactly what Ch. 84 uses to journal every tick and order for deterministic replay; a zero-overhead logger and a capture journal are the same machine pointed at different events.
 
-### 76.4.3 `std::print`/`std::println` for off-hot-path output
+### 77.4.3 `std::print`/`std::println` for off-hot-path output
 
 Not everything is hot-path. **Setup/teardown, control-plane, periodic status, and the consumer thread's own output** are *off* the hot path (Ch. 1's steady-state-vs-setup distinction) — and there, clarity beats nanoseconds.
 
 - **Use `std::print`/`std::println` (C++23, `<print>`) for off-hot-path output.** It's type-safe (no `printf` format/argument mismatch — a format-string bug class closed at compile time), leaner than iostreams (no locale machinery or sentry per call) and far more readable than stream insertion; libstdc++ 14 / libc++ 18 — Appendix H. For startup banners, config dumps, periodic stats, and the *consumer thread's* formatting-and-writing step, it's the right tool. (Fallback: `fmt::print` for pre-C++23 toolchains; `std::format` to a buffer + one `write`.)
 - **Keep it strictly off the hot path.** `std::print` *formats* — it does exactly the expensive work the hot path must avoid. It belongs on the consumer thread and in setup code, *never* in a `LOG` on the trading path. The rule: the hot path *captures* (binary, deferred); everything that *formats* — including `std::print` — runs off the hot path. Naming the two output channels differently in the codebase (`LOG(...)` = hot-path binary capture; `std::println(...)` = off-path human output) keeps the distinction honest.
 
-## 76.5 Verify the codegen: the hot-path log call is a few stores
+## 77.5 Verify the codegen: the hot-path log call is a few stores
 
-The whole claim is "the hot-path `LOG` compiles to little more than a ring-buffer write." Prove it (Ch. 4) — the §76.4.2 listing's `on_fill`, GCC 13.3 `-O2 -std=c++23 -march=icelake-server -fno-stack-protector`, `objdump -d -M intel` (Clang 18 produces the same shape):
+The whole claim is "the hot-path `LOG` compiles to little more than a ring-buffer write." Prove it (Ch. 4) — the §77.4.2 listing's `on_fill`, GCC 13.3 `-O2 -std=c++23 -march=icelake-server -fno-stack-protector`, `objdump -d -M intel` (Clang 18 produces the same shape):
 
 ```asm
 on_fill(unsigned long, long, unsigned int):
@@ -172,62 +172,62 @@ on_fill(unsigned long, long, unsigned int):
 .Lfull: ret
 ```
 
-No call to a formatting routine, no `std::string` constructor, no `malloc`, no `write`. Twenty-six instructions, one predictable branch, five stores and a release — exactly the Ch. 34 ring-buffer producer, plus the argument stores. (Two things worth noticing: `rdtscp` returns the TSC split across EDX:EAX, so the `shl`/`or` pair is the compiler assembling the 64-bit stamp — a hand-written "`mov [rbx+8], rax`" would store only the low 32 bits; and with Ubuntu's default `-fstack-protector-strong` the `aux` out-parameter makes GCC add a canary load and compare around the call — the Ch. 79 hardening-vs-latency trade in miniature.) What to confirm in the codegen:
+No call to a formatting routine, no `std::string` constructor, no `malloc`, no `write`. Twenty-six instructions, one predictable branch, five stores and a release — exactly the Ch. 34 ring-buffer producer, plus the argument stores. (Two things worth noticing: `rdtscp` returns the TSC split across EDX:EAX, so the `shl`/`or` pair is the compiler assembling the 64-bit stamp — a hand-written "`mov [rbx+8], rax`" would store only the low 32 bits; and with Ubuntu's default `-fstack-protector-strong` the `aux` out-parameter makes GCC add a canary load and compare around the call — the Ch. 80 hardening-vs-latency trade in miniature.) What to confirm in the codegen:
 
 - **No `call` to format/allocate.** If you see a `call` to `std::__cxx11::basic_string`, `operator new`, `std::format`, `vfprintf`, or `write` on the hot-path side, formatting or I/O leaked onto the path — the deferral failed. The hot-path side must be call-free (or call only an inlined, allocation-free reserve).
 - **The site ID is an immediate.** The format string's identity is resolved at *compile time* (Ch. 18) — it appears as a constant in the instruction stream, not a runtime string lookup.
 - **Arguments are stored raw.** `id` and `price` move straight from their registers into the ring; no per-argument conversion. The record size is a compile-time constant (the reservation is `add` of an immediate).
 - **Compare against the naive version.** Put a `fprintf`/`std::ofstream <<` call beside it: the naive version's asm is dominated by `call`s into formatting and I/O. The contrast *is* the lesson — and it's why you read the codegen rather than trust the API name.
 
-If the asm shows the few-stores-and-publish shape, the measurement of §76.3 (single-digit ns at the median) follows; if it shows calls, the logger is not zero-overhead no matter what its README claims.
+If the asm shows the few-stores-and-publish shape, the measurement of §77.3 (single-digit ns at the median) follows; if it shows calls, the logger is not zero-overhead no matter what its README claims.
 
-## 76.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O
+## 77.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O
 
-- **Formatting on the hot path.** The cardinal sin — building the string (`std::format`, `fmt::format`, `sprintf`, stream insertion, or even `std::to_string`) *on the trading thread*. Hundreds of ns and a possible allocation, every call. Defer formatting (§76.4.2); the hot path stores raw values only.
-- **Blocking on I/O.** A synchronous `write()`/`fwrite`/`flush` on the hot path can stall for *milliseconds* on a page fault, a full pipe, a flushing disk, or a slow network sink — a Ch. 1 tail catastrophe. *All* I/O lives on the consumer thread (§76.4.1), off the isolated core (Ch. 42).
+- **Formatting on the hot path.** The cardinal sin — building the string (`std::format`, `fmt::format`, `sprintf`, stream insertion, or even `std::to_string`) *on the trading thread*. Hundreds of ns and a possible allocation, every call. Defer formatting (§77.4.2); the hot path stores raw values only.
+- **Blocking on I/O.** A synchronous `write()`/`fwrite`/`flush` on the hot path can stall for *milliseconds* on a page fault, a full pipe, a flushing disk, or a slow network sink — a Ch. 1 tail catastrophe. *All* I/O lives on the consumer thread (§77.4.1), off the isolated core (Ch. 42).
 - **Allocating on the hot path.** Enqueuing a `std::string`, growing a buffer, or any `new` on the path reintroduces page faults and allocator latency (Ch. 23–24). The ring is pre-allocated and fixed-capacity; records are fixed/bounded size.
 - **A contended (locked) logger.** A single global logger behind a mutex (Ch. 32) serializes all threads and produces lock convoys — the one log call that loses the lock race is your p99.9. Use per-thread single-producer rings (Ch. 34), no shared lock.
-- **Ignoring back-pressure / full-buffer policy.** When the hot path out-produces the consumer (a microburst, Ch. 54), the ring fills. **Never block the producer** (that puts the consumer's slowness on the hot path — the exact inversion you're avoiding). Choose explicitly: *drop* newest (and count drops), or *overwrite* oldest (lossy but bounded). Overwrite-oldest is not a free variant of the SPSC ring: the oldest slot may be the one the consumer is reading, so it needs per-slot sequence numbers for the consumer to detect and discard a slot overwritten under it (the Disruptor's scheme — Ch. 34, 37); with a plain head/tail ring, drop-newest-and-count is the only race-free policy. Measure it under burst (§76.3). Silent blocking-on-full is a hidden hot-path stall.
+- **Ignoring back-pressure / full-buffer policy.** When the hot path out-produces the consumer (a microburst, Ch. 54), the ring fills. **Never block the producer** (that puts the consumer's slowness on the hot path — the exact inversion you're avoiding). Choose explicitly: *drop* newest (and count drops), or *overwrite* oldest (lossy but bounded). Overwrite-oldest is not a free variant of the SPSC ring: the oldest slot may be the one the consumer is reading, so it needs per-slot sequence numbers for the consumer to detect and discard a slot overwritten under it (the Disruptor's scheme — Ch. 34, 37); with a plain head/tail ring, drop-newest-and-count is the only race-free policy. Measure it under burst (§77.3). Silent blocking-on-full is a hidden hot-path stall.
 - **`clock_gettime` per record.** With the `tsc` clocksource it is a vDSO call, not a syscall (≈18 ns — Ch. 17; a real syscall only when the clocksource is not vDSO-capable, e.g. `hpet` or some VMs) — but that is still ~3× a raw `rdtscp` plus a conversion per record. Store the raw TSC and convert offline (Ch. 17).
 - **Logging too much / dynamic log levels checked expensively.** Even a few-ns call, made millions of times, adds up; and a runtime log-level check that *isn't* trivially predicted (Ch. 13) costs on every call. Make the level check a single predictable branch (often compiled out for disabled levels, Ch. 18), and be deliberate about hot-path log volume.
 - **False sharing between producer and consumer.** The ring's head and tail indices on the same cache line ping-pong between the producing and consuming cores (Ch. 33). Pad them to separate cache lines (`hardware_destructive_interference_size`).
-- **Trusting the API name over the codegen.** A logger advertised as "async" or "fast" may still format on the calling thread (the §76.3 middle row). Verify in the asm (§76.5) that the hot-path side is call-free — don't trust the label.
+- **Trusting the API name over the codegen.** A logger advertised as "async" or "fast" may still format on the calling thread (the §77.3 middle row). Verify in the asm (§77.5) that the hot-path side is call-free — don't trust the label.
 
-## 76.7 Exercises & checklist
+## 77.7 Exercises & checklist
 
 **Exercises:**
 
-1. **Three-way cost measurement.** Benchmark (Ch. 3) the hot-path cost of: (a) `fprintf` to a file, (b) async-but-format-on-path (enqueue a `std::string`), (c) deferred/binary (enqueue raw args). Reproduce the §76.3 spread and, crucially, the *tail* — induce a page fault / disk flush during (a) and capture the millisecond outlier with HdrHistogram.
-2. **Build a minimal binary logger.** Implement a `LOG` macro that captures a compile-time site ID + `rdtscp` + raw args into a per-thread SPSC ring (Ch. 34), and an offline decoder that reconstructs the text. Verify in Godbolt (§76.5) that the hot-path call is a few stores with no `call` to formatting/allocation.
+1. **Three-way cost measurement.** Benchmark (Ch. 3) the hot-path cost of: (a) `fprintf` to a file, (b) async-but-format-on-path (enqueue a `std::string`), (c) deferred/binary (enqueue raw args). Reproduce the §77.3 spread and, crucially, the *tail* — induce a page fault / disk flush during (a) and capture the millisecond outlier with HdrHistogram.
+2. **Build a minimal binary logger.** Implement a `LOG` macro that captures a compile-time site ID + `rdtscp` + raw args into a per-thread SPSC ring (Ch. 34), and an offline decoder that reconstructs the text. Verify in Godbolt (§77.5) that the hot-path call is a few stores with no `call` to formatting/allocation.
 3. **Codegen contrast.** Put your binary `LOG` and an `std::ofstream <<` line side by side in Compiler Explorer (Ch. 4). Confirm the binary version has no format/alloc/`write` calls and the stream version is all calls. This contrast is the chapter.
 4. **Back-pressure under burst.** Drive the logger with a microburst (Ch. 54) that out-produces the consumer. Implement *drop-and-count* vs *overwrite-oldest* and measure the hot-path cost stays flat under both — and verify neither ever blocks the producer.
 5. **Consumer batching.** Measure consumer throughput with per-record vs batched formatting+I/O (Ch. 37, Ch. 49 io_uring). Show batching lets the consumer keep up with a producer it couldn't match one-at-a-time.
 
 **Checklist:**
 
-- [ ] The hot-path log call does **no formatting, no allocation, no lock, no syscall** — it stores raw values (+ site ID + TSC) to a pre-allocated lock-free ring and returns (§76.2, §76.4).
-- [ ] Verified in the **codegen** (§76.5) that the hot-path side is **call-free** (no `std::string`/`new`/`format`/`write`) — not trusted from the API name.
-- [ ] Formatting and **all I/O** run on a dedicated **consumer thread** pinned to a **housekeeping** core (Ch. 42), batched (Ch. 37), never on an isolated hot core (§76.4.1).
-- [ ] Each hot thread has its **own single-producer ring** (Ch. 34); head/tail are **padded** against false sharing (Ch. 33); no shared logger mutex (§76.6).
-- [ ] Timestamps use **`rdtscp`** (Ch. 17), converted offline — no `clock_gettime` on the path (§76.6).
-- [ ] The **full-buffer policy** is explicit (drop-and-count or overwrite-oldest) and **never blocks the producer**; measured under burst (§76.3, §76.6).
-- [ ] Off-hot-path output (setup, status, the consumer's own writes) uses **`std::print`/`std::println`** (C++23) for type-safe, readable formatting — kept strictly off the hot path (§76.4.3).
+- [ ] The hot-path log call does **no formatting, no allocation, no lock, no syscall** — it stores raw values (+ site ID + TSC) to a pre-allocated lock-free ring and returns (§77.2, §77.4).
+- [ ] Verified in the **codegen** (§77.5) that the hot-path side is **call-free** (no `std::string`/`new`/`format`/`write`) — not trusted from the API name.
+- [ ] Formatting and **all I/O** run on a dedicated **consumer thread** pinned to a **housekeeping** core (Ch. 42), batched (Ch. 37), never on an isolated hot core (§77.4.1).
+- [ ] Each hot thread has its **own single-producer ring** (Ch. 34); head/tail are **padded** against false sharing (Ch. 33); no shared logger mutex (§77.6).
+- [ ] Timestamps use **`rdtscp`** (Ch. 17), converted offline — no `clock_gettime` on the path (§77.6).
+- [ ] The **full-buffer policy** is explicit (drop-and-count or overwrite-oldest) and **never blocks the producer**; measured under burst (§77.3, §77.6).
+- [ ] Off-hot-path output (setup, status, the consumer's own writes) uses **`std::print`/`std::println`** (C++23) for type-safe, readable formatting — kept strictly off the hot path (§77.4.3).
 
-## 76.8 References
+## 77.8 References
 
-- The **NanoLog** papers and implementation (Stanford) — nanosecond-scale logging via compile-time format extraction and binary records; the canonical deferred/binary-logging design (§76.2, §76.4.2).
-- The **LMAX Disruptor** paper (Ch. 37 references) — the batched single-producer/consumer ring that underlies a fast async logger (§76.4.1).
-- `std::print`/`std::println` and `<print>` (C++23) and the `{fmt}` library documentation — type-safe off-hot-path formatting (§76.4.3).
-- Production low-latency logger implementations and talks (Quill, the binary-logging approaches used in HFT) — real-world async/deferred designs (§76.4).
+- The **NanoLog** papers and implementation (Stanford) — nanosecond-scale logging via compile-time format extraction and binary records; the canonical deferred/binary-logging design (§77.2, §77.4.2).
+- The **LMAX Disruptor** paper (Ch. 37 references) — the batched single-producer/consumer ring that underlies a fast async logger (§77.4.1).
+- `std::print`/`std::println` and `<print>` (C++23) and the `{fmt}` library documentation — type-safe off-hot-path formatting (§77.4.3).
+- Production low-latency logger implementations and talks (Quill, the binary-logging approaches used in HFT) — real-world async/deferred designs (§77.4).
 - Ch. 34 (lock-free SPSC ring), Ch. 37 (Disruptor batching), Ch. 17 (TSC timestamps), Ch. 23–24 (no alloc/syscall on the path) — the pieces this chapter assembles.
 
-## 76.9 Additional Reading
+## 77.9 Additional Reading
 
 - CppCon talks on low-latency logging and "logging without slowing down" — the deferral and binary-record patterns in practice.
 - The NanoLog and Quill design write-ups — compile-time site IDs, type-safe argument capture, offline decoding.
-- Ch. 83 (*Capture/Persistence*) — the same binary-record, off-hot-path-writer discipline applied to journaling ticks/orders for replay; Ch. 87 (*Case Study*) — logging as production observability of the tick-to-trade path; Ch. 49 (*io_uring*) — getting the consumer's batched writes to disk efficiently; Ch. 79 (*Secure Programming*) — keeping secrets out of logs (§79.4.5).
+- Ch. 84 (*Capture/Persistence*) — the same binary-record, off-hot-path-writer discipline applied to journaling ticks/orders for replay; Ch. 88 (*Case Study*) — logging as production observability of the tick-to-trade path; Ch. 49 (*io_uring*) — getting the consumer's batched writes to disk efficiently; Ch. 80 (*Secure Programming*) — keeping secrets out of logs (§80.4.5).
 - **Appendix E** — the cost of a syscall / page fault (why I/O can't be on the path); **Appendix F** — SPSC/Disruptor glossary.
 
 ---
 
-*Next: Ch. 77 — In-Band Latency Tracing & Budget Attribution, where the binary record this chapter writes gains a passenger: a fixed trace header — the venue sequence number or `ClOrdID` as correlation ID plus a vector of raw-TSC stage stamps — carried in every ring slot across the feed handler, strategy and gateway processes, so the tick-to-trade budget can be attributed per stage, per message, in production, and then split between you, the wire and the matching engine using the timestamps the venue itself puts on the wire.*
+*Next: Ch. 78 — In-Band Latency Tracing & Budget Attribution, where the binary record this chapter writes gains a passenger: a fixed trace header — the venue sequence number or `ClOrdID` as correlation ID plus a vector of raw-TSC stage stamps — carried in every ring slot across the feed handler, strategy and gateway processes, so the tick-to-trade budget can be attributed per stage, per message, in production, and then split between you, the wire and the matching engine using the timestamps the venue itself puts on the wire.*
