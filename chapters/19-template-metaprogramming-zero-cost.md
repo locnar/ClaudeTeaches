@@ -379,4 +379,4 @@ Zero runtime cost is *not* zero cost (Ch. 18): each instantiation is build time 
 
 ---
 
-*Next: Ch. 20 — Compile-Time Protocol Decoders: From Schema to Code.*
+*Next: Ch. 20 — Compile-Time Protocol Decoders: From Schema to Code, where the techniques of this chapter and Ch. 18 build something a feed handler ships: a venue's field list written once as a schema, parsed in `consteval`, turned into overlay accessors by `if constexpr`, `static_assert`ed against the venue document — and proven in the asm to be the same `movbe` as the hand-written decoder of Ch. 60.*

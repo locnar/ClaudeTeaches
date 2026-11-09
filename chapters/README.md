@@ -284,13 +284,23 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 19.7 Exercises & checklist
 
 ### [20. Compile-Time Protocol Decoders: From Schema to Code](20-compile-time-protocol-decoders.md)
-- 20.1 Why it matters: TODO
-- 20.2 Mental model: TODO
-- 20.3 Measure it: TODO
+- 20.1 Why it matters: the venue document is the source of truth, and it changes
+- 20.2 Mental model: the schema is data; the decoder is a function of it
+  - 20.2.1 Three representations of one message
+  - 20.2.2 Class-type NTTPs and `fixed_string`: a string literal as a type-level value
+  - 20.2.3 `consteval` parsing and the field table
+  - 20.2.4 What C++26 static reflection would change (unverified here)
+- 20.3 Measure it: decode latency identical, build time proportional to message types
 - 20.4 Techniques
-  - 20.4.1 TODO
-- 20.5 Pitfalls & anti-patterns: TODO
-- 20.6 Exercises & checklist
+  - 20.4.1 From schema string to `constexpr` field table
+  - 20.4.2 Generating the overlay accessors
+  - 20.4.3 `static_assert` against the venue document and the schema version
+  - 20.4.4 Message-type dispatch and repeating groups: what stays at runtime
+  - 20.4.5 Keeping the build-time cost bounded
+  - 20.4.6 The C++26 reflection form (unverified: no shipping compiler implements it)
+- 20.5 Verify the codegen: the generated accessor is the hand-written instruction
+- 20.6 Pitfalls & anti-patterns: compile-time layout, runtime data
+- 20.7 Exercises & checklist
 
 ### [21. The Cost of Abstractions](21-the-cost-of-abstractions.md)
 - 21.1 Why it matters: error handling on the hot path

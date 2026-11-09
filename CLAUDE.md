@@ -461,7 +461,7 @@ Code & content guidelines:
   - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup.
   - **II — CPU Microarchitecture** (7–17).
-  - **III — Compile-Time & Language Mechanics** (18–24).
+  - **III — Compile-Time & Language Mechanics** (18–25).
   - **IV — Memory Management** (26–29).
   - **V — Numerics & Data Parallelism** (30–32).
   - **VI — Concurrency** (33–45): …the Disruptor, threading topologies & the hot loop (Ch. 38, added

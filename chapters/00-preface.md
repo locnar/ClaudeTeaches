@@ -34,7 +34,7 @@ The ninety-eight chapters are grouped into thirteen Parts that build from the fo
 
 - **Part I — Foundations & Methodology** (Ch. 1–6): the latency mindset, profiling, micro-benchmarking, reading assembly, debugging optimized code, and building a quiet machine. Start here; everything later assumes you can measure.
 - **Part II — CPU Microarchitecture** (Ch. 7–17): caches, data-oriented design, object layout, prefetching, pipelines, the front-end, branch prediction, virtual dispatch, the TLB, NUMA, and timekeeping. The hardware reality under all the code.
-- **Part III — Compile-Time & Language Mechanics** (Ch. 18–24): `constexpr`, templates and zero-cost abstractions, the cost of abstractions, aliasing, and the build toolchain.
+- **Part III — Compile-Time & Language Mechanics** (Ch. 18–25): `constexpr`, templates and zero-cost abstractions, the cost of abstractions, aliasing, and the build toolchain.
 - **Part IV — Memory Management** (Ch. 26–29): allocation cost, custom allocators, hot-path-hostile STL and cache-friendly containers (with the limit-order-book case study), and memory mapping.
 - **Part V — Numerics & Data Parallelism** (Ch. 30–32): fixed/floating-point for prices, bit manipulation, and SIMD.
 - **Part VI — Concurrency** (Ch. 33–45): the memory model and atomics, multithreading, spinlocks, false sharing, lock-free structures, seqlocks, safe reclamation, the Disruptor, threading topologies and the hot loop, flow control and conflation, coroutines, `std::execution`, and correctness tooling.
