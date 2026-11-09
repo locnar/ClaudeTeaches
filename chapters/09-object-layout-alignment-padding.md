@@ -90,7 +90,7 @@ struct OrderFlags {
 };                                  // 4 bytes instead of 4 separate fields
 ```
 
-This shrinks the struct (good for footprint), but the trade-off is **codegen**: reading or writing a bit-field is not a plain load/store — it's a load + **mask + shift** (and read-modify-write for stores), which is more instructions and, crucially, makes the field a **non-atomic** sub-word (you cannot `std::atomic` a bit-field; concurrent writes to *different* bit-fields in the same unit race — Ch. 30, 33). Bit-field layout (bit order within the unit, straddling) is also **implementation-defined**, so they're risky for wire/overlay formats (Ch. 54 prefers explicit shifts/masks for protocol parsing). Use them to shrink *internal* hot structs where the mask/shift cost is below the cache-footprint win — and measure both (§9.5, Ch. 28 covers the bit-manipulation codegen in depth).
+This shrinks the struct (good for footprint), but the trade-off is **codegen**: reading or writing a bit-field is not a plain load/store — it's a load + **mask + shift** (and read-modify-write for stores), which is more instructions and, crucially, makes the field a **non-atomic** sub-word (you cannot `std::atomic` a bit-field; concurrent writes to *different* bit-fields in the same unit race — Ch. 30, 33). Bit-field layout (bit order within the unit, straddling) is also **implementation-defined**, so they're risky for wire/overlay formats (Ch. 55 prefers explicit shifts/masks for protocol parsing). Use them to shrink *internal* hot structs where the mask/shift cost is below the cache-footprint win — and measure both (§9.5, Ch. 28 covers the bit-manipulation codegen in depth).
 
 ---
 
@@ -132,7 +132,7 @@ struct LevelHot {
 
 The free win from §9.2.1: **order members from largest/most-aligned to smallest.** Doubles and longs and pointers (8) first, then ints (4), then shorts (2), then chars/bools (1), then bit-fields. This packs the small members into what would otherwise be tail/inter-member padding, usually achieving the minimum size automatically. Re-run `pahole` to confirm; lock with `static_assert`.
 
-Caveats: declaration order is also **readability and API**, so don't obfuscate a cold struct to save bytes nobody pays for (Ch. 1 tiering — this matters on hot structs in hot arrays, not on a config object instantiated once). And for **wire/overlay** formats (Ch. 54) you *can't* reorder freely — the layout is dictated by the protocol; there you use explicit field offsets and packing, accepting the constraints. The reorder technique is for your *internal* hot data types, where you own the layout.
+Caveats: declaration order is also **readability and API**, so don't obfuscate a cold struct to save bytes nobody pays for (Ch. 1 tiering — this matters on hot structs in hot arrays, not on a config object instantiated once). And for **wire/overlay** formats (Ch. 55) you *can't* reorder freely — the layout is dictated by the protocol; there you use explicit field offsets and packing, accepting the constraints. The reorder technique is for your *internal* hot data types, where you own the layout.
 
 ### 9.4.2 Sizing a struct to a cache line
 
@@ -152,7 +152,7 @@ And the **deliberate over-align** case (§9.2.2): a per-thread counter or queue 
 - **Atomics on a packed (misaligned) member are undefined / a "split lock"** — catastrophic (§9.6).
 - On **AArch64** (Appendix A) ordinary misaligned scalar loads/stores to normal memory are handled in hardware (with a split-access penalty, as on x86), but load/store-exclusive, `LDAR`/`STLR` and the atomic instructions *fault* (`SIGBUS`) on a misaligned address — a packed struct containing an atomic is fatal there, not merely slow. Older ARM cores and other RISC targets may trap or emulate.
 
-So `pack` is the right tool for **wire/overlay structs you parse off the network** (Ch. 54), where the layout is fixed by the protocol and you typically copy fields out rather than vectorize over them — and the wrong tool for **internal hot compute structs**, where you want alignment for SIMD and atomics. Don't reach for `pack` to save footprint on a hot array; reorder and hot/cold-split instead.
+So `pack` is the right tool for **wire/overlay structs you parse off the network** (Ch. 55), where the layout is fixed by the protocol and you typically copy fields out rather than vectorize over them — and the wrong tool for **internal hot compute structs**, where you want alignment for SIMD and atomics. Don't reach for `pack` to save footprint on a hot array; reorder and hot/cold-split instead.
 
 ---
 
@@ -217,8 +217,8 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 - **Assuming `sizeof` = sum of fields.** It almost never is. Always measure with `pahole`; don't compute footprint by adding field sizes.
 - **Over-aligning everything.** `alignas(64)` on every struct "to be safe" wastes huge amounts of memory and cache (a 16-byte struct padded to 64 = 4× footprint, *worse* miss rate). Over-align *only* what needs SIMD alignment or false-sharing isolation, and measure the size cost.
 - **`[[no_unique_address]]` assumptions / empty-member bloat.** Forgetting that a stateless policy stored as a plain member costs a byte + padding (defeating a "zero-cost" abstraction); or assuming `[[no_unique_address]]` *always* collapses to zero (it's "may" — two `[[no_unique_address]]` members of the *same* empty type can't both overlap the same address). Verify with `static_assert(sizeof)`.
-- **Bit-field hazards.** Treating bit-fields as atomic or as a stable wire layout — both wrong (§9.2.4): concurrent writes to sibling bit-fields race (Ch. 33), and bit ordering is implementation-defined (use explicit masks/shifts for protocols — Ch. 28, 54).
-- **Wire structs without `static_assert(offsetof/sizeof)`.** An overlay struct for a market-data message whose layout silently shifted across compilers/flags → you parse garbage. Pin every offset and the total size (Ch. 54).
+- **Bit-field hazards.** Treating bit-fields as atomic or as a stable wire layout — both wrong (§9.2.4): concurrent writes to sibling bit-fields race (Ch. 33), and bit ordering is implementation-defined (use explicit masks/shifts for protocols — Ch. 28, 55).
+- **Wire structs without `static_assert(offsetof/sizeof)`.** An overlay struct for a market-data message whose layout silently shifted across compilers/flags → you parse garbage. Pin every offset and the total size (Ch. 55).
 
 ---
 
@@ -238,7 +238,7 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 - [ ] Hot array elements are **ordered largest-to-smallest** to minimize padding, and sized to **pack cleanly into a cache line** (no straddling).
 - [ ] I **`static_assert`** the size/alignment (and `offsetof` for overlay types) so regressions fail the build.
 - [ ] I **over-align (`alignas(64)`) only** where needed — SIMD or false-sharing isolation (Ch. 29, 33) — and accounted for the size cost.
-- [ ] No `#pragma pack`/`packed` on **internal hot** structs (it kills vectorization, §9.5, and risks split-lock atomics); packing reserved for **wire/overlay** formats (Ch. 54).
+- [ ] No `#pragma pack`/`packed` on **internal hot** structs (it kills vectorization, §9.5, and risks split-lock atomics); packing reserved for **wire/overlay** formats (Ch. 55).
 - [ ] Every **atomic** is naturally aligned and ideally cache-line-isolated (no split locks — §9.6, Ch. 30).
 - [ ] Empty policies use **`[[no_unique_address]]`/EBO** so abstractions are zero-cost in `sizeof` (verified).
 - [ ] Bit-fields used only to shrink **internal** structs where the mask/shift cost < the footprint win — never for atomicity or wire layout.
@@ -257,7 +257,7 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 
 - E. S. Raymond, *"The Lost Art of Structure Packing"* (catb.org/esr/structure-packing) and similar write-ups — a practical tour of padding and reordering with `pahole`.
 - CppCon talks on `[[no_unique_address]]` and EBO in the standard library (`std::vector`/`std::tuple` layout) — §9.2.3 in real library code.
-- Ch. 33 (*False Sharing*) — the over-alignment side of this chapter, with `hardware_destructive_interference_size` and `perf c2c`; Ch. 54 (*Zero-Copy Wire Handling*) — packed overlay structs done safely; Ch. 28 (*Bit Manipulation*) — bit-field and mask/shift codegen.
+- Ch. 33 (*False Sharing*) — the over-alignment side of this chapter, with `hardware_destructive_interference_size` and `perf c2c`; Ch. 55 (*Zero-Copy Wire Handling*) — packed overlay structs done safely; Ch. 28 (*Bit Manipulation*) — bit-field and mask/shift codegen.
 - **Appendix A** — ARM/Graviton alignment and 128-byte cache-line differences and their effect on the sizing decisions here.
 
 ---

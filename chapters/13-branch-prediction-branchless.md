@@ -35,7 +35,7 @@ The branch predictor's job, every cycle the front-end fetches, is to answer two 
 
 - **Finite capacity and aliasing.** History tables and the BTB (branch target buffer) are finite. A hot path with *thousands* of distinct branches (over-inlined, sprawling code — Ch. 12) can **alias** in the tables: two branches collide on an entry and destructively interfere, degrading prediction even for individually-predictable branches. Smaller, denser hot code (Ch. 12) helps the predictor too — another reason the front-end and prediction chapters are siblings.
 
-- **Cold predictors.** After a quiet spell the history tables are stale/evicted; the first pass through a rarely-run path mispredicts more (a cold-start tail — Ch. 47). Steady-state hot loops warm the predictor; the rare-but-latency-critical path may not be warm when it matters.
+- **Cold predictors.** After a quiet spell the history tables are stale/evicted; the first pass through a rarely-run path mispredicts more (a cold-start tail — Ch. 48). Steady-state hot loops warm the predictor; the rare-but-latency-critical path may not be warm when it matters.
 
 The actionable model: **a branch is cheap if the predictor can learn its pattern, and expensive in proportion to its *entropy given history*.** Your lever is to lower that entropy (make it predictable or biased), eliminate the branch, or move it off the hot path.
 
@@ -242,7 +242,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 - **Branch on cache-missing data.** A branch whose condition depends on a just-loaded, cache-missing value is the worst case (§13.2.2): it can't resolve for hundreds of cycles while the core speculates deep down a possibly-wrong path. Prefetch (Ch. 10) or restructure so the condition's data is resident before the branch.
 - **Optimizing branches when you're not Bad-Speculation-bound.** If top-down (Ch. 2) says Memory-Bound (Ch. 7) or Core-Bound (Ch. 11), removing branches does nothing. Confirm elevated `branch-misses` / Bad-Speculation *first*.
 - **Predictor aliasing from code bloat.** Thousands of branches in over-inlined hot code (Ch. 12) can alias in the history tables and degrade otherwise-predictable branches. Lean hot code (Ch. 12) helps the predictor — the two chapters reinforce each other.
-- **Forgetting the cold predictor (Ch. 47).** A rarely-run but latency-critical branch may be *cold* when it finally matters, mispredicting on the message you most need fast. Branchless code (no prediction needed) can be a deliberate choice for cold-but-critical paths even when it'd lose in steady state.
+- **Forgetting the cold predictor (Ch. 48).** A rarely-run but latency-critical branch may be *cold* when it finally matters, mispredicting on the message you most need fast. Branchless code (no prediction needed) can be a deliberate choice for cold-but-critical paths even when it'd lose in steady state.
 
 ---
 
@@ -281,7 +281,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical Bad-Speculation analysis and branchless transformation case studies with `perf`.
 - H. Warren, *Hacker's Delight* — the bit-twiddling foundation for branchless min/max/abs/sign/select and masking idioms (developed in Ch. 28).
-- Ch. 14 (*Indirect Calls & Virtual Dispatch*) — *target* prediction (BTB) for indirect branches, the harder cousin of this chapter's *direction* prediction; Ch. 28 (*Bit Manipulation*) — the branchless toolkit; Ch. 29 (*SIMD*) — predication/masking taken to the vector level; Ch. 47 (*Keeping the Hot Path Warm*) — warming the predictor for cold-but-critical branches.
+- Ch. 14 (*Indirect Calls & Virtual Dispatch*) — *target* prediction (BTB) for indirect branches, the harder cousin of this chapter's *direction* prediction; Ch. 28 (*Bit Manipulation*) — the branchless toolkit; Ch. 29 (*SIMD*) — predication/masking taken to the vector level; Ch. 48 (*Keeping the Hot Path Warm*) — warming the predictor for cold-but-critical branches.
 - **Appendix E** — the branch-mispredict penalty in cycles/ns that frames "Bad Speculation."
 
 ---

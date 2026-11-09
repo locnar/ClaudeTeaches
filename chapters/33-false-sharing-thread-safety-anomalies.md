@@ -82,7 +82,7 @@ constexpr std::size_t kLine = 64;
 struct Unpadded { std::atomic<std::uint64_t> v{0}; };    // 8 bytes — adjacent ones share a line
 struct alignas(kLine) Padded { std::atomic<std::uint64_t> v{0}; };   // own cache line
 
-static void pin_to(int core) {                           // Ch. 42
+static void pin_to(int core) {                           // Ch. 43
     cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
     if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
 }
@@ -160,8 +160,8 @@ The structural cure (ties Ch. 31): give each thread/core its own data, laid out 
 - **Assuming 64 bytes is always enough.** Intel's adjacent-line prefetcher (§33.2) can make two 64-apart lines false-share; some ARM cores have 128-byte lines (Appendix A). Use `hardware_destructive_interference_size` as the floor (it is a compile-time constant — 64 on x86-64 — not a measurement) and verify with `perf c2c` on the target; pad to 128 where the prefetcher measurably bites.
 - **False sharing across sockets (Ch. 16).** Cross-NUMA false sharing bounces the line over the interconnect (~150 ns) — far worse than within-socket. Per-node data placement (Ch. 16) plus padding.
 - **Hidden sharing you didn't write (the thread-safety anomalies).** Shared-nothing code still shares through its *libraries*: a `std::shared_ptr` copied on two threads bounces its control-block refcount line (Ch. 25 — use `unique_ptr`/intrusive single-owner handles on the hot path); `malloc`/`free` from several threads touch the allocator's arena locks and per-thread caches, and a block freed on a different thread than it was allocated on crosses arenas (Ch. 23–24 — per-thread pools); a function-local `static` is guarded by a once-flag every call reads (cheap, but a line every core reads); `std::vector<bool>` and C bit-fields pack several threads' flags into one *word*, so "independent" bits are a read-modify-write race *and* false sharing (Ch. 28 — a padded `uint64` per thread); `errno`, `std::locale`, and lazily-initialised `thread_local`s add TLS-init checks and a shared guard the first time each thread touches them. None of these appear in your source as sharing; all of them appear in `perf c2c`.
-- **Thread-safety anomalies mistaken for false sharing (and vice versa).** A *correctness* bug (a data race — Ch. 30, a missing atomic, a torn read — Ch. 35) is different from false sharing (a *performance* bug on correct code). Don't "fix" a race with padding (it's still a race — UB); don't chase a coherence-cost problem with locks. Diagnose which you have (TSan — Ch. 40 — for races; `perf c2c` for false sharing).
-- **Padding that breaks atomicity/alignment assumptions.** Adding padding can change a struct's size/layout in ways that affect `is_lock_free` (Ch. 30), ABI, or serialization (Ch. 54). Pad deliberately and re-check the constraints.
+- **Thread-safety anomalies mistaken for false sharing (and vice versa).** A *correctness* bug (a data race — Ch. 30, a missing atomic, a torn read — Ch. 35) is different from false sharing (a *performance* bug on correct code). Don't "fix" a race with padding (it's still a race — UB); don't chase a coherence-cost problem with locks. Diagnose which you have (TSan — Ch. 41 — for races; `perf c2c` for false sharing).
+- **Padding that breaks atomicity/alignment assumptions.** Adding padding can change a struct's size/layout in ways that affect `is_lock_free` (Ch. 30), ABI, or serialization (Ch. 55). Pad deliberately and re-check the constraints.
 
 ## 33.6 Exercises & checklist
 
@@ -181,8 +181,8 @@ The structural cure (ties Ch. 31): give each thread/core its own data, laid out 
 - [ ] I **detected/verified with `perf c2c` / HITM counters** (Appendix I §I.3, Ch. 2) — confirmed coherence misses dropped to ~0 after padding — not by eyeballing or throughput-only profiling.
 - [ ] I **padded only what actually false-shares** (hot + independently-written + measured) — no reflexive padding bloat that wastes memory or breaks within-thread locality (Ch. 7–9).
 - [ ] I accounted for **adjacent-line prefetch / 128-byte lines** (`hardware_destructive_interference_size` as the compile-time floor, the real penalty verified on the target) — not assumed 64 always suffices.
-- [ ] I distinguished **false sharing (a perf bug on correct code) from a data race (a correctness bug)** — padding for the former, atomics/synchronization (Ch. 30, TSan — Ch. 40) for the latter.
-- [ ] Padding didn't break **`is_lock_free`/ABI/serialization** assumptions (Ch. 30, 54).
+- [ ] I distinguished **false sharing (a perf bug on correct code) from a data race (a correctness bug)** — padding for the former, atomics/synchronization (Ch. 30, TSan — Ch. 41) for the latter.
+- [ ] Padding didn't break **`is_lock_free`/ABI/serialization** assumptions (Ch. 30, 55).
 
 ## 33.7 References
 
@@ -196,7 +196,7 @@ The structural cure (ties Ch. 31): give each thread/core its own data, laid out 
 
 - J. Mario / Red Hat blog posts on `perf c2c` and real-world false-sharing case studies — practical detection and fixes.
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — coherence-miss analysis and false-sharing detection.
-- Ch. 7 (*Caches/MESI*) — the coherence mechanics; Ch. 9 (*Alignment/Padding*) — the layout tools; Ch. 30–32 (*Atomics/Foundations/Spinlocks*) — the contention this is the accidental form of; Ch. 34–37 (*Lock-Free/Seqlock/Disruptor*) — structures whose indices must be padded; Ch. 16 (*NUMA*) — cross-socket false sharing; Ch. 40 (*Concurrency Tooling*) — distinguishing races from false sharing.
+- Ch. 7 (*Caches/MESI*) — the coherence mechanics; Ch. 9 (*Alignment/Padding*) — the layout tools; Ch. 30–32 (*Atomics/Foundations/Spinlocks*) — the contention this is the accidental form of; Ch. 34–37 (*Lock-Free/Seqlock/Disruptor*) — structures whose indices must be padded; Ch. 16 (*NUMA*) — cross-socket false sharing; Ch. 41 (*Concurrency Tooling*) — distinguishing races from false sharing.
 - **Appendix A** — cache-line-size differences (64 vs 128) on ARM and their effect on `hardware_destructive_interference_size`; **Appendix E** — HITM/coherence latency numbers; **Appendix F** — false-sharing/HITM glossary.
 
 ---

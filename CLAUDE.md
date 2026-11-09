@@ -456,20 +456,20 @@ Code & content guidelines:
   - **III — Compile-Time & Language Mechanics** (18–22).
   - **IV — Memory Management** (23–26).
   - **V — Numerics & Data Parallelism** (27–29).
-  - **VI — Concurrency** (30–40): …coroutines, `std::execution`, correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (41–47): …SMT, cache allocation (RDT), RT scheduling, hunting
+  - **VI — Concurrency** (30–41): …coroutines, `std::execution`, correctness tooling.
+  - **VII — OS, Scheduling & Isolation** (42–48): …SMT, cache allocation (RDT), RT scheduling, hunting
     residual noise (Ch. 46, added 2026-11-09), warming.
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (48–53): native I/O, io_uring, zero-copy fast path,
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (49–54): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
-  - **IX — Market Data, NIC & Fabric** (54–62): decoding, reliable multicast, multicast membership &
+  - **IX — Market Data, NIC & Fabric** (55–63): decoding, reliable multicast, multicast membership &
     dark-feed detection (Ch. 56, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (63–67): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (64–68): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (69–73): PCIe, GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (73–77, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (78–89): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (79–90): logging, in-band latency tracing
     (Ch. 74, added 2026-11-09 P3-2), application telemetry (Ch. 75, added 2026-11-09 P3-1), security,
     hot reload, process topology, crash handling & post-mortem (Ch. 79, P3-2), capture/replay,
     latency-spike forensics (Ch. 81, P3-2), host health telemetry and network health & drop forensics
