@@ -288,6 +288,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 20.4.1 `noexcept` and the happy path
   - 20.4.2 `std::expected` for hot-path errors
   - 20.4.3 Disabling RTTI where unused
+  - 20.4.4 Assertions, contracts and the diagnostics library on the hot path
 - 20.5 Verify the codegen: unwinding tables and landing pads
 - 20.6 Pitfalls & anti-patterns: throwing on the hot path
 - 20.7 Exercises & checklist
@@ -311,6 +312,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 22.4.1 `-march`/`-mtune` targeting
   - 22.4.2 LTO
   - 22.4.3 PGO and BOLT
+  - 22.4.4 Debug info, frame pointers and unwind tables: what the production binary carries
 - 22.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
 - 22.6 Exercises & checklist
 
