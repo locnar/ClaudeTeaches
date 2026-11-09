@@ -237,16 +237,16 @@ When something fails, the system must reach a **safe state** fast, then recover:
 - **Fast restart with warm-up (Ch. 47).** Restart is crash-only recovery (§78.2.4): map the surviving shared state (Ch. 26), replay from the last snapshot to current (Ch. 80), **warm** the process (pre-touch pages, prime caches/TLB/predictors, run shadow traffic — Ch. 47) so its *first real tick is at full speed*, then go live. Skipping the warm step (§78.3) means the freshly restarted process limps through its first ticks — a tail event right after a failure, when the market may be moving.
 - **Determinism makes restart correct.** Because the core is a deterministic state machine (§78.2.2) fed from the captured input stream (Ch. 80), a restarted process replays the inputs and arrives at *exactly* the correct current state — no guesswork, no divergence from the process that died. Crash-only + deterministic-replay = provably-correct fast recovery.
 
-### 78.4.5 Core dumps without stalling survivors; symbol/venue sharding
+### 78.4.5 Symbol/venue sharding (core dumps → Ch. 79)
 
-Two operational techniques for keeping failures small and debuggable:
+Two operational techniques for keeping failures small and debuggable — one developed here, one handed to the next chapter:
 
-- **Capture core dumps without stalling survivors.** A core dump of a crashed process can be large and slow to write — and if it stalls the box (I/O storm, lock, freezing the writing thread) it can hurt the *surviving* processes (a shared-fate hazard, §78.5). Mitigate: shrink the dump first — `madvise(MADV_DONTDUMP)` on the data-plane segments every role maps (or clear the matching `coredump_filter` bits), `RLIMIT_CORE` for file dumps (note it is *not* enforced for piped dumps) — then pipe `core_pattern` to a handler on a housekeeping core (Ch. 42) that writes to a separate disk/path and compresses asynchronously, or capture a minimal dump. The dead process must yield *diagnostics* without taking the survivors' latency with it.
+- **Core dumps that do not stall survivors — Ch. 79.** A crashed role must yield *diagnostics* without taking the survivors' latency with it: the kill-switch handoff from inside the fault handler (so the gateway cancels the dead shard's orders ~20 µs after the fault, not after a 20 s dump), `madvise(MADV_DONTDUMP)` on the hugepage-backed book and data-plane segments every role maps, `coredump_filter`, `RLIMIT_CORE` (not enforced for piped dumps), a bounded `core_pattern` pipe handler on a housekeeping core writing to a separate disk, systemd-coredump's limits, and minidumps. Ch. 79 builds the async-signal-safe handler and measures the dump's cost to the survivors (a 2–4 GiB dump stretched a survivor's worst gap 20–50×; excluding the book shrank it to a sub-millisecond event).
 - **Symbol/venue sharding.** Partition strategies by symbol or venue across processes (and cores, Ch. 42) so that (1) one shard's crash contains to that shard's symbols — the rest keep trading (§78.2.3), and (2) load spreads across cores/NUMA nodes (Ch. 16). Sharding is fault-containment *and* scaling: a bug triggered by one symbol's data takes down only that symbol's strategy, and the blast radius is one shard, not the book. Choose the shard key (symbol, venue, asset class) so correlated work and correlated failures stay within a shard.
 
 ## 78.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 
-- **Shared fate through a back door.** The whole point is isolation, but a shared resource silently re-couples the fault domains: a shared lock (cross-process mutex — Ch. 32) one process can hold while dying (leaving it locked), a shared disk a core dump floods (§78.4.5), a shared core the dead process's restart-storm steals (Ch. 42), or shared memory a writer corrupts (§78.4.2). Audit for *every* shared resource and ensure one process's failure can't stall or corrupt another through it. Isolation you didn't verify is isolation you don't have.
+- **Shared fate through a back door.** The whole point is isolation, but a shared resource silently re-couples the fault domains: a shared lock (cross-process mutex — Ch. 32) one process can hold while dying (leaving it locked), a shared disk a core dump floods (Ch. 79 §79.4.4), a shared core the dead process's restart-storm steals (Ch. 42), or shared memory a writer corrupts (§78.4.2). Audit for *every* shared resource and ensure one process's failure can't stall or corrupt another through it. Isolation you didn't verify is isolation you don't have.
 - **Cascading restarts / crash loops.** A process crashes, its restart triggers load that crashes another, or a crash-loop hammers shared resources and drags everyone down. Use restart backoff, restarts-per-interval caps, and escalation-to-safe-state (§78.4.3) so a persistent failure goes to kill-switch, not an infinite loop.
 - **A non-deterministic "deterministic" core.** Calling `now()`/`clock_gettime` (Ch. 17), reading a random seed, depending on map iteration order or thread scheduling, or doing I/O *inside* the core — any of these breaks exact replay (§78.2.2), and you discover it when a replay diverges from production. Time and randomness are *inputs*; the core touches nothing else. Test it: replay a captured session and assert bit-identical outputs.
 - **Hidden side effects / global state in the core.** A static counter, a cached `errno`, a lazily-initialized singleton — non-obvious state that makes `apply` depend on more than (state, input). Keep the core's state explicit and passed-in.
@@ -255,7 +255,7 @@ Two operational techniques for keeping failures small and debuggable:
 - **Restart that's up-but-cold.** Declaring recovery done when the process is *alive* rather than *warm-and-correct* (Ch. 47, §78.3). The first ticks after a cold restart are slow — measure warm-and-live, not process-alive.
 - **Heartbeat that only catches exits.** Relying on `SIGCHLD` alone misses *hangs* (a live-but-stuck process). Use heartbeats to catch the hang (§78.4.3).
 - **Raw pointers in shared memory.** Segments map at different addresses per process; raw pointers stored in shared memory are garbage in another process (Ch. 26, 77). Use offsets (§78.4.1).
-- **Core dump stalls the survivors.** A synchronous, huge, on-the-hot-disk core dump that freezes the box (§78.4.5). Make dumping async/bounded/off-path.
+- **Core dump stalls the survivors.** A synchronous, huge, on-the-hot-disk core dump that freezes the box — and a kill-switch that waits for `SIGCHLD`, i.e. for the dump to finish. Make dumping small, bounded and off-path, and trigger the kill-switch from the fault handler (Ch. 79 §79.4.3–§79.4.4).
 
 ## 78.6 Exercises & checklist
 
@@ -277,7 +277,7 @@ Two operational techniques for keeping failures small and debuggable:
 - [ ] A **supervisor** watches liveness via **heartbeats** (catches hangs, not just exits) and restarts under **backoff/cap/escalation** policy (§78.4.3).
 - [ ] A **kill-switch / safe-state** lives in a **surviving process** (the gateway) and can cancel a dead component's working orders; the session stays up (§78.4.4).
 - [ ] Processes are **crash-only** (§78.2.4) with durable state in shm/journal; restart is **recovery + warm-up (Ch. 47)** measured to **warm-and-correct**, not process-alive (§78.2.4, §78.3, §78.4.4).
-- [ ] **Core dumps** are async/bounded/off-path and **don't stall survivors**; strategies are **sharded** by symbol/venue so one shard's crash contains to that shard (§78.4.5).
+- [ ] **Core dumps** are small/bounded/off-path and **don't stall survivors** (Ch. 79); strategies are **sharded** by symbol/venue so one shard's crash contains to that shard (§78.4.5).
 - [ ] **No shared-fate back doors** (shared locks/disk/core/segment) re-couple the fault domains — audited and verified (§78.5).
 
 ## 78.7 References
@@ -297,4 +297,4 @@ Two operational techniques for keeping failures small and debuggable:
 
 ---
 
-*Next: Ch. 79 — Crash Handling, Core Dumps & Post-Mortem Diagnostics.*
+*Next: Ch. 79 — Crash Handling, Core Dumps & Post-Mortem Diagnostics, the inside of the failure this chapter contained: the fifty microseconds between the faulting instruction and the core file — an async-signal-safe handler on its own stack that hands the kill-switch to the gateway first, writes registers, frames and the flight recorder with nothing but `write(2)`, and leaves a core small enough (`MADV_DONTDUMP`, `coredump_filter`, a bounded pipe handler) that the survivors never notice.*

@@ -538,6 +538,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 41.4 Techniques
   - 41.4.1 Keeping threads on-core
   - 41.4.2 Busy-poll vs block
+  - 41.4.3 Signals: delivery cost, masking and funneling
 - 41.5 Pitfalls & anti-patterns: involuntary preemption, syscalls on the hot path
 - 41.6 Exercises & checklist
 
@@ -1009,17 +1010,25 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 78.4.2 Single-writer-per-segment discipline
   - 78.4.3 Supervisor/watchdog, heartbeats and liveness
   - 78.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
-  - 78.4.5 Core dumps without stalling survivors; symbol/venue sharding
+  - 78.4.5 Symbol/venue sharding (core dumps → Ch. 79)
 - 78.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 - 78.6 Exercises & checklist
 
 ### [79. Crash Handling, Core Dumps & Post-Mortem Diagnostics](79-crash-handling-core-dumps-post-mortem.md)
-- 79.1 Why it matters: TODO
-- 79.2 Mental model: TODO
-- 79.3 Measure it: TODO
+- 79.1 Why it matters: the fault at 09:30:01 with four hundred working orders
+- 79.2 Mental model
+  - 79.2.1 From the faulting instruction to the core file
+  - 79.2.2 Async-signal safety, and the faults you will see
+  - 79.2.3 The order of business: safety, evidence, dump
+  - 79.2.4 Why dumps stall the box, and what controls their size
+- 79.3 Measure it: a signal's cost, a stack capture's cost, a dump versus its size
 - 79.4 Techniques
-  - 79.4.1 TODO
-- 79.5 Pitfalls & anti-patterns: TODO
+  - 79.4.1 The async-signal-safe fault handler
+  - 79.4.2 Pre-warming, and choosing the stack-capture mechanism
+  - 79.4.3 The kill-switch handoff and the flight recorder
+  - 79.4.4 Dumps that do not stall the box: `coredump_filter`, `MADV_DONTDUMP`, the pipe handler, systemd-coredump and minidumps
+  - 79.4.5 Post-mortem: joining the core, the crash record, the trace record and the capture
+- 79.5 Pitfalls & anti-patterns
 - 79.6 Exercises & checklist
 
 ### [80. Capture, Persistence & Replay Storage](80-capture-persistence-replay-storage.md)

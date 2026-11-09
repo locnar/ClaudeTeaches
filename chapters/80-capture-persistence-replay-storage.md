@@ -2,9 +2,9 @@
 
 # Chapter 80 — Capture, Persistence & Replay Storage
 
-> **Prerequisites:** Ch. 57, 60 (NIC timestamping / PTP — nanosecond, wire-accurate capture times), Ch. 73 (zero-overhead logging — the same off-hot-path-writer, binary-record discipline applied to ticks/orders), Ch. 49 (io_uring — async writes to disk), Ch. 78 (the deterministic state machine — what you replay captures *into*), Ch. 34/37 (SPSC ring / batching — producer→writer hand-off).
+> **Prerequisites:** Ch. 57, 60 (NIC timestamping / PTP — nanosecond, wire-accurate capture times), Ch. 73 (zero-overhead logging — the same off-hot-path-writer, binary-record discipline applied to ticks/orders), Ch. 49 (io_uring — async writes to disk), Ch. 78 (the deterministic state machine — what you replay captures *into*), Ch. 79 (the crash record and the core that the capture pairs with: the core is the end state, the capture is how it got there), Ch. 34/37 (SPSC ring / batching — producer→writer hand-off).
 >
-> **Leads into:** Ch. 84 (the case study — deterministic replay + latency-regression gates in CI). The penultimate chapter: recording everything that happened, losslessly and off the hot path, so the deterministic core (Ch. 78) can be replayed for debugging, research, and compliance.
+> **Leads into:** Ch. 81 (spike forensics — the capture is the input the replay re-runs around one over-budget message, and the flight recorder is its in-memory sibling), Ch. 84 (the case study — deterministic replay + latency-regression gates in CI). Recording everything that happened, losslessly and off the hot path, so the deterministic core (Ch. 78) can be replayed for debugging, research, and compliance.
 
 ---
 
