@@ -150,7 +150,7 @@ The general move: identify work whose inputs are **known at compile time** and c
 - **`constinit` for zero-cost initialization of globals.** A global that must be ready before `main` (a config snapshot, a singleton-ish table) marked `constinit` is initialized at compile time — no runtime static-init cost, no static-init-order fiasco, and it can live in `.rodata` if also `const`.
 - **`if constexpr` to specialize and discard dead code.** Select implementation branches at compile time so only the taken branch is instantiated and emitted — specializing a parser per protocol, a container per size, a path per platform, with *no* runtime branch and no dead code emitted (Ch. 12–13). This is the workhorse for compile-time dispatch (Ch. 19).
 - **Template/`constexpr` parameters instead of runtime arguments.** A loop count, a buffer size, a field offset passed as a template non-type parameter (or `constexpr`) lets the compiler unroll, size stack buffers, and fold address arithmetic — versus a runtime argument it must handle generically.
-- **Compile-time validation.** `static_assert` and `consteval` checks catch errors at build time (a missized struct vs a cache line, Ch. 9; an out-of-range constant) — zero runtime cost, and the bug never ships (ties Ch. 75's security-as-correctness).
+- **Compile-time validation.** `static_assert` and `consteval` checks catch errors at build time (a missized struct vs a cache line, Ch. 9; an out-of-range constant) — zero runtime cost, and the bug never ships (ties Ch. 76's security-as-correctness).
 
 The judgment call: move work to compile time when its inputs are genuinely known then **and** it either removes runtime work or catches a bug — not reflexively, because heavy compile-time work costs build time (§18.5) and can hurt the iterate loop (Ch. 3).
 
@@ -216,7 +216,7 @@ Two cautions that bridge to §18.5: keep the table's **size** in mind (it's `.ro
 - [ ] I watched **build time and binary size** as first-class costs; heavy metaprograms use **iterative `constexpr`** over deep recursion and cap pack sizes (§18.5).
 - [ ] Templates vary **only what must vary**; shared non-dependent code is factored out to avoid **instantiation bloat** (Ch. 12).
 - [ ] Compile-time-only work that's really on the **cold setup path** wasn't over-engineered into a metaprogram when a simple runtime build would do (Ch. 1).
-- [ ] Compile-time **validation** (`static_assert`/`consteval` checks) guards invariants (sizes, ranges) at build time (ties Ch. 9, 75).
+- [ ] Compile-time **validation** (`static_assert`/`consteval` checks) guards invariants (sizes, ranges) at build time (ties Ch. 9, 76).
 
 ---
 

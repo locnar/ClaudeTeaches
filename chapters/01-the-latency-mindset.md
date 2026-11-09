@@ -90,7 +90,7 @@ The discipline is to treat that end-to-end number as a **budget** and to allocat
 | Wire → NIC → host memory (DMA, kernel bypass) | 0.5–1 µs | Ch. 57, 64, 68 |
 | Feed decode / book update | 100–400 ns | Ch. 25, 54 |
 | Strategy / signal logic | 50–300 ns | Ch. 8–14, 18–21 |
-| Risk checks & order encode | 50–200 ns | Ch. 27, 54, 75, 77 |
+| Risk checks & order encode | 50–200 ns | Ch. 27, 54, 76, 78 |
 | Host memory → NIC → wire | 0.4–0.8 µs | Ch. 57, 64, 68 |
 | **Tick-to-trade total** | **≈ 1–3 µs** | the whole book |
 
@@ -225,12 +225,12 @@ Treat latency like a financial budget. Three steps:
 
 1. **State the end-to-end target** as a percentile, e.g. "tick-to-trade ≤ 2.5 µs at p99.9." A target without a percentile is undefined.
 2. **Decompose into stages** and allocate a sub-budget to each — wire-in, decode, strategy, risk, encode, wire-out (§1.2.3). The allocation forces the question "is this stage worth its slice?" and exposes the stages with no slack.
-3. **Measure each stage against its sub-budget at the target percentile**, continuously, in production (Ch. 81). A stage that blows its budget at p99.9 is a defect even if its mean is fine.
+3. **Measure each stage against its sub-budget at the target percentile**, continuously, in production (Ch. 82). A stage that blows its budget at p99.9 is a defect even if its mean is fine.
 
 The budget is also where you decide a piece of code's **latency tier**, which is the highest-leverage decision you will make about it:
 
 - **Hot path (steady state):** runs per market event; on the critical race. The non-negotiable disciplines of this book apply — zero allocation (Ch. 23–24), no syscalls, no locks that can block (Ch. 32, 34), no logging that formats inline (Ch. 73), nothing that can fault or context-switch (Ch. 23, 41). Every nanosecond and, more importantly, every *variance source* is fought.
-- **Warm path (near hot):** runs occasionally — a new-symbol setup, a parameter change (Ch. 76). Should not stall the hot path, but a few microseconds is acceptable. Keep it *off* the hot core's critical section.
+- **Warm path (near hot):** runs occasionally — a new-symbol setup, a parameter change (Ch. 77). Should not stall the hot path, but a few microseconds is acceptable. Keep it *off* the hot core's critical section.
 - **Cold path (setup / control / research):** startup, configuration, risk batch jobs, backtests (Ch. 69–70). A throughput problem. Spending hot-path effort here is wasted effort, and the latency mindset, misapplied, becomes premature optimization.
 
 Most of the bytes in a trading system are cold. The latency mindset's *first* job is to tell you which 5% is hot, so the other 95% can be written for clarity and the hot 5% can be fought for at the nanosecond level. Misclassifying cold code as hot wastes engineering; misclassifying hot code as cold loses races. Get the tier right first.
@@ -258,7 +258,7 @@ The strategic insight is that the worst tail offenders — page faults, allocati
 
 ## 1.5 Pitfalls & anti-patterns: why means lie; throughput-driven design
 
-- **Reporting (or optimizing) the average.** The cardinal sin, demonstrated in §1.3. A mean on a heavy-tailed distribution describes almost no real event and actively *hides* the cliff that costs you races. If a dashboard, a benchmark, or a colleague reports "average latency," the correct response is "at what percentile, and what does the tail look like?" — and when the dashboard *does* show a percentile, the next question is whether it was averaged across hosts or windows, which quietly turns it back into a mean (Ch. 74 §74.2.2).
+- **Reporting (or optimizing) the average.** The cardinal sin, demonstrated in §1.3. A mean on a heavy-tailed distribution describes almost no real event and actively *hides* the cliff that costs you races. If a dashboard, a benchmark, or a colleague reports "average latency," the correct response is "at what percentile, and what does the tail look like?" — and when the dashboard *does* show a percentile, the next question is whether it was averaged across hosts or windows, which quietly turns it back into a mean (Ch. 75 §75.2.2).
 - **Throughput-driven design on the hot path.** Batching, buffering, and pipelining all trade latency for throughput. They are the right tools for the cold/research tier and the wrong tools for the race. Reaching for them reflexively — because that is how general-purpose backend systems are built — is the most common way good engineers build slow trading systems.
 - **Running the box hot.** "We have 40% idle CPU, plenty of room" is the queueing-theory trap of §1.2.1: latency explodes as utilization approaches 1, and the bursts that push you there arrive exactly when the money is on the table. Hot-path cores are kept deliberately under-utilized and, ideally, isolated (Ch. 42, 45).
 - **Trusting a single run, or a tiny sample.** Tail percentiles are sample-size hungry: you cannot measure p99.9 honestly with 1,000 samples (you have only one event out there). And the tail is where the variance lives, so one run tells you almost nothing. Ch. 3 makes this rigorous.

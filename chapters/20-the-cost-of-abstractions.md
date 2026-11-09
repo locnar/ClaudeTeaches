@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 19 (zero-cost abstractions — this chapter is its counterweight: the abstractions that *aren't* free), Ch. 12 (code layout / hot-cold splitting — the cold path is exactly where unwinding code belongs), Ch. 1 (tail latency — an exception throw is a tail event), Ch. 4 (reading asm — §20.5 reads unwinding tables and landing pads).
 >
-> **Leads into:** Ch. 21 (aliasing & type punning — more language-level codegen gates), Ch. 54 (zero-copy parsing — hot-path error handling on untrusted input), Ch. 75 (secure programming — UB and error handling as a vulnerability class). `std::expected` ties back to Ch. 19 (a zero-cost error channel) and forward to Ch. 25/27 (hot-path APIs).
+> **Leads into:** Ch. 21 (aliasing & type punning — more language-level codegen gates), Ch. 54 (zero-copy parsing — hot-path error handling on untrusted input), Ch. 76 (secure programming — UB and error handling as a vulnerability class). `std::expected` ties back to Ch. 19 (a zero-cost error channel) and forward to Ch. 25/27 (hot-path APIs).
 
 ---
 
@@ -261,7 +261,7 @@ The verification habits:
 ## 20.9 Additional Reading
 
 - CppCon talks on exception cost, `std::expected`, and "zero-overhead exceptions" — including asm-level walkthroughs of the throw path and unwinding tables.
-- Ch. 19 (*Zero-Cost Abstractions*) — the abstractions that *are* free, the counterweight to this chapter; Ch. 12 (*Code Layout*) — where landing pads / cold unwinding code belong; Ch. 54 (*Zero-Copy Parsing*) — hot-path error handling on untrusted input with `expected`; Ch. 75 (*Secure Programming*) — UB and error handling as a vulnerability class; Ch. 22 (*Build Toolchain*) — `-fno-exceptions`/`-fno-rtti` in context.
+- Ch. 19 (*Zero-Cost Abstractions*) — the abstractions that *are* free, the counterweight to this chapter; Ch. 12 (*Code Layout*) — where landing pads / cold unwinding code belong; Ch. 54 (*Zero-Copy Parsing*) — hot-path error handling on untrusted input with `expected`; Ch. 76 (*Secure Programming*) — UB and error handling as a vulnerability class; Ch. 22 (*Build Toolchain*) — `-fno-exceptions`/`-fno-rtti` in context.
 - **Appendix D** (Compiler Flag Reference) — `-fno-exceptions`/`-fno-rtti` and their costs; **Appendix B** (B.1–B.2) — error handling in Rust (`Result`/`?`) and Zig (error unions): the value-based model without exceptions.
 
 ---

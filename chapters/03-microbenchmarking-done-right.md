@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution and care about p99/p99.9, not the mean. Ch. 2 (*Measure First*) — you can read PMU counters and know whether a workload is memory- or compute-bound. For the hands-on parts: a Linux box, a C++20 compiler, [Google Benchmark](https://github.com/google/benchmark) and [HdrHistogram_c](https://github.com/HdrHistogram/HdrHistogram_c) (or the C++ port).
 >
-> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 81. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
+> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 82. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
 
 ---
 
@@ -259,7 +259,7 @@ int main() {
 
 Two caveats that matter here. First, **clock overhead and resolution** (Ch. 17): if the operation is only a few nanoseconds, two `clock::now()` calls may cost more than the work — measure the clock's own overhead and subtract it, or time *batches* of N ops and divide (accepting that batching hides per-op tail, a §3.2.2-flavored trade-off). Second, this back-to-back loop measures **service time**, so it is CO-immune by construction but does *not* show queueing tails; to measure response-time-under-load you'd drive it from a scheduled, CO-corrected generator (§3.2.2). Pick the one that matches your question. Appendix L §L.2 gives that generator as copy-paste code: the same loop paced to a fixed intended schedule, keeping this service-time histogram and a second response-time histogram (`end − intended`, one sample per op) side by side — and explains why `hdr_record_corrected_value`'s back-fill belongs only on an *unpaced* closed loop, never combined with pacing or mixed into the service-time histogram.
 
-The production sequel — recording into a shared-memory histogram with a few stores, scraping it off-core, and the rule that histograms merge by adding buckets while percentiles cannot be averaged across hosts or windows — is Ch. 74.
+The production sequel — recording into a shared-memory histogram with a few stores, scraping it off-core, and the rule that histograms merge by adding buckets while percentiles cannot be averaged across hosts or windows — is Ch. 75.
 
 ### 3.4.4 Statistical rigor: repetitions, variance, regression
 
@@ -269,7 +269,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - **Enough samples for the percentile you quote.** You cannot honestly state p99.9 from 1,000 samples — that's *one* event in the tail (Ch. 1). For p99.9 you want ≫ 10⁵ samples; for p99.99, ≫ 10⁶. State your sample count alongside the percentile.
 - **Compare, don't just measure.** The question is almost always "is B faster than A?", which is a *difference of distributions*, not of means. Tools like Google Benchmark's `compare.py` apply a U-test (Mann–Whitney) to tell you whether the difference is statistically significant or noise. A 2% "improvement" inside 5% run-to-run noise is nothing.
 - **Watch for multimodality.** A bimodal histogram (two humps) usually means two regimes — e.g. cache-hit vs cache-miss, or turbo vs non-turbo — and a single percentile summary hides it. Look at the histogram shape (Ch. 1's picture), not just the quantiles.
-- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 81.
+- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 82.
 
 ---
 
@@ -306,7 +306,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - [ ] I have **enough samples** for the percentile I quote (≫10⁵ for p99.9).
 - [ ] I ran **repetitions**, report the **spread**, and used a **significance test** before claiming a win.
 - [ ] I can **explain *why*** the winner won via PMU counters (Ch. 2) — the result generalizes only if I understand it.
-- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 81).
+- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 82).
 
 ---
 

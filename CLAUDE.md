@@ -461,7 +461,7 @@ Code & content guidelines:
   - **X — Kernel Bypass, RDMA & Transport** (63–67): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Observability & Operations in Production** (73–81): logging, application telemetry
+  - **XII — Observability & Operations in Production** (73–82): logging, application telemetry
     (Ch. 74, added 2026-11-09), security, hot reload, process topology, capture/replay, host health
     telemetry and network health & drop forensics (Ch. 79–80, added 2026-11-09), end-to-end case
     study (the capstone, still last).

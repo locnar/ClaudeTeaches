@@ -45,7 +45,7 @@ Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each 
             │
             DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.16)
             │
-            (… and far below: NVMe/disk, Ch.78 — irrelevant to the hot path)
+            (… and far below: NVMe/disk, Ch.79 — irrelevant to the hot path)
 ```
 
 Two structural facts shape everything:
@@ -83,7 +83,7 @@ The rule that matters for latency: **a core that wants to *write* a line must fi
 
 - **False sharing** (Ch. 33): two threads writing *different variables that happen to share one 64-byte line* suffer this ping-pong even though they share no data logically — one of the nastiest and most invisible scalability killers.
 - **Atomics and lock contention** (Ch. 30–34): every contended atomic is a coherence transaction; the cost of a spinlock or a CAS loop *is* coherence traffic.
-- The reason **single-writer designs** (Ch. 35, 77) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
+- The reason **single-writer designs** (Ch. 35, 78) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
 
 For now the takeaway is conceptual: **shared writable data has a hardware cost measured in coherence traffic**, and a huge fraction of Part VI exists to minimize it.
 
