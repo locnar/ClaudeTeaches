@@ -71,7 +71,7 @@ Each row names the file, the producer, and the window to cut. `T0..T1` is the in
                  venue-stamp series for the window (feed latency,   Ch. 85 §85.4.5                blogdecode --fields corr,t_hw_rx,sending_time …
                  wire-out, symmetry check)
    kernel ring   the frozen ftrace ring (per-CPU, x86-tsc)          Ch. 52 §52.4.2, Ch. 98        cat /sys/kernel/tracing/per_cpu/cpu$C/trace > kernel/ftrace-cpu$C.txt
-                 perf.data snapshot(s) + perf archive               Ch. 98 §98.4.3 B, Ch. 103      cp /inc/perf.data.*; perf archive /inc/perf.data.*  (symbols!)
+                 perf.data snapshot(s) + perf archive               Ch. 98 §98.4.3 B, Ch. 104      cp /inc/perf.data.*; perf archive /inc/perf.data.*  (symbols!)
                  Intel PT snapshot (if armed)                       Ch. 98 §98.4.3 C              cp /inc/pt.data*   (decode elsewhere)
                  journal / dmesg window                             —                             journalctl -k -o short-precise --since=@$((T_REAL-300)) --until=@$((T_REAL+60))
    host          Ch. 99 sampler records ±10 min (all signals)       Ch. 99 §99.4.1                awk window over /var/log/trading/host-health.log

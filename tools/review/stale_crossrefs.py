@@ -57,6 +57,7 @@ STEPS = [
     ("insert", 96),  # Ch. 97 failover-without-split-brain-leases-fencing
     ("insert", 100),  # Ch. 101 testing-latency-critical-code
     ("insert", 101),  # Ch. 102 performance-engineering-ci-profile-lifecycle
+    ("insert", 102),  # Ch. 103 release-engineering-measuring-changes-in-production
     # INSERT_STEPS_END
 ]
 def old2new(n):

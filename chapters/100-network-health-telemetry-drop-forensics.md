@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 54 (the kernel receive path — ring, NAPI, softirq, socket), Ch. 58 (socket buffers, `TCP_NODELAY`, the UDP knobs), Ch. 60 §60.2.4 and §60.4.4 (RX rings, microbursts, "detect drops at every layer"), Ch. 62 (membership — the drop that produces no counter), Ch. 63 and Ch. 65 (NIC queues, RSS, steering), Ch. 68 (the fabric), Ch. 70 (bypass stacks and the tooling they take away), Ch. 72 (PFC/ECN on lossless fabrics), Ch. 73 (PCIe — the path behind "FIFO" errors), Ch. 86 and Ch. 99 (the scraper, the invariant alert class, the sampler's footprint).
 >
-> **Leads into:** Ch. 103 (the case study — a drop is the first thing its incident procedure rules out), Appendix M (the feed and link gates read these counters), Appendix I.8 (the one-liners). Four chapters say "monitor `ethtool -S` and alert"; this one says what each counter means, which layer dropped the packet, how to find the exact line of kernel code that freed it, and how to sample all of it without touching the hot core.
+> **Leads into:** Ch. 104 (the case study — a drop is the first thing its incident procedure rules out), Appendix M (the feed and link gates read these counters), Appendix I.8 (the one-liners). Four chapters say "monitor `ethtool -S` and alert"; this one says what each counter means, which layer dropped the packet, how to find the exact line of kernel code that freed it, and how to sample all of it without touching the hot core.
 
 ---
 
@@ -345,7 +345,7 @@ Under kernel bypass (Ch. 70) layers 2b–5 of the table move into the user-space
 - **Arming tracepoints during the session.** `perf record -e skb:kfree_skb`, `dropwatch start`, a `bpftrace` probe — each patches kernel text and IPIs every CPU including the hot ones (Ch. 52 §52.5). Arm before the open; use `-C <housekeeping>`; leave armed.
 - **Flow control on, drops hidden.** Ethernet PAUSE moves your drops into the switch's buffers where your counters cannot see them and other hosts pay for them. Off on market-data NICs (unless the fabric is designed lossless and monitored as such — Ch. 72); treat `tx_pause > 0` as "this host is too slow".
 - **Reading only the host.** The switch port facing you drops in its egress queue and your counters stay clean. The network team's per-port telemetry on the same time axis is not optional.
-- **Diagnosing the application first.** A tail incident investigated in the decoder for an hour while `rx_missed_errors` had been climbing since 09:30:02. The incident procedure reads the layer table top-down (link → NIC → NAPI → stack → socket → application) before anyone opens a profiler (Ch. 103).
+- **Diagnosing the application first.** A tail incident investigated in the decoder for an hour while `rx_missed_errors` had been climbing since 09:30:02. The incident procedure reads the layer table top-down (link → NIC → NAPI → stack → socket → application) before anyone opens a profiler (Ch. 104).
 - **Forgetting the drop with no counter.** Feed age (Ch. 62) and recorded-vs-arrived reconciliation (Ch. 86 §86.2.4) belong on the network-health dashboard, or a lost membership will be "no network problem — all counters clean".
 
 ## 100.6 Exercises & checklist
@@ -384,7 +384,7 @@ Under kernel bypass (Ch. 70) layers 2b–5 of the table move into the user-space
 - Brendan Gregg, *Systems Performance* (2nd ed.), the networking chapter — the layer-by-layer methodology and the `netstat`/`ss`/`nstat`/tracing toolkit this chapter specialises; his *BPF Performance Tools* networking chapter for the eBPF versions.
 - Packagecloud's *Monitoring and Tuning the Linux Networking Stack: Receiving Data* — the long-form walk through NAPI, `softnet_stat` and the SNMP counters.
 - Arista and Cisco documentation on microburst detection and queue telemetry (LANZ, streaming telemetry), and the P4/INT literature — what the switch can tell you that the host cannot (§100.4.4).
-- Ch. 103 (*Case Study*) — the incident procedure that reads this chapter's table first; Ch. 62 (*Multicast Membership*) — the drop with no counter; Appendix M — the link and feed gates; **Appendix I.8** — the one-liners; **Appendix E** — the kernel-stack vs bypass RX floor under these counters; **Appendix F** — `time_squeeze` / `rx_missed` / FEC / PAUSE / drop-reason glossary.
+- Ch. 104 (*Case Study*) — the incident procedure that reads this chapter's table first; Ch. 62 (*Multicast Membership*) — the drop with no counter; Appendix M — the link and feed gates; **Appendix I.8** — the one-liners; **Appendix E** — the kernel-stack vs bypass RX floor under these counters; **Appendix F** — `time_squeeze` / `rx_missed` / FEC / PAUSE / drop-reason glossary.
 
 ---
 
