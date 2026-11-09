@@ -47,46 +47,99 @@ Build and run:
 
 ## L.2 Tail-latency capture with HdrHistogram (and avoiding coordinated omission)
 
-Google Benchmark reports the *loop's* mean; a trading system lives or dies on the **p99/p99.9 tail** (Ch. 1). For that, record **individual** sample latencies into a high-dynamic-range histogram — and correct for **coordinated omission** (Ch. 3), the trap that makes almost every naive latency benchmark optimistic.
+Google Benchmark reports the *loop's* mean; a trading system lives or dies on the **p99/p99.9 tail** (Ch. 1). For that, record **individual** sample latencies into a high-dynamic-range histogram — and decide, *before* you write the loop, which of Ch. 3 §3.2.2's two questions you are asking: **service time** (what one `apply` costs, back-to-back — what the closed loop of Ch. 3 §3.4.3 measures) or **response time under the feed's arrival rate** (what an event that arrives on schedule waits in total, queueing included). The second question is where **coordinated omission** (Ch. 3) bites: a loop that issues the next event only when the previous one returns never observes the events that queued behind a stall. The harness below answers both questions in one pass by keeping **two histograms** and pacing the loop to the *intended* schedule, so every operation is recorded **exactly once in each**.
 
 ```cpp
+   // tail.cpp — service time AND response time (CO-corrected by pacing): one pass, two histograms.
+   // Build: g++ -std=c++23 -O2 -march=native -DNDEBUG tail.cpp -lhdr_histogram -lbenchmark -lpthread -o tail
+   #include <benchmark/benchmark.h>   // DoNotOptimize only — this loop is hand-paced, not BENCHMARK()ed
    #include <hdr/hdr_histogram.h>
+   #include <immintrin.h>             // _mm_pause
    #include <cstdint>
+   #include <cstdio>
+   #include <span>
    #include <time.h>
+   #include "orderbook.hpp"           // OrderBook, Msg — the code under test, as in L.1
 
-   static inline uint64_t now_ns() {              // CLOCK_MONOTONIC; or rdtscp (Ch. 17)
+   static inline int64_t now_ns() {                 // CLOCK_MONOTONIC; or rdtscp (Ch. 17)
      timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-     return uint64_t(ts.tv_sec) * 1'000'000'000ull + ts.tv_nsec;
+     return int64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
    }
 
-   void measure(OrderBook& book, const std::vector<Msg>& msgs) {
-     hdr_histogram* h = nullptr;
-     hdr_init(/*min*/ 1, /*max_ns*/ 10'000'000, /*sig_digits*/ 3, &h);
+   static void summarize(const char* name, const hdr_histogram* h) {
+     std::printf("%-8s n=%-9lld p50 %7lld  p99 %8lld  p99.9 %9lld  max %10lld ns\n", name,
+                 (long long)h->total_count,
+                 (long long)hdr_value_at_percentile(h, 50.0),
+                 (long long)hdr_value_at_percentile(h, 99.0),
+                 (long long)hdr_value_at_percentile(h, 99.9),
+                 (long long)hdr_max(h));
+   }
 
-     // Open-loop: events are SUPPOSED to arrive every `interval_ns` (the real feed
-     // rate). If a slow op delays us, later events were "waiting" — record their FULL
-     // wait, not just service time. Skipping this is coordinated omission (Ch. 3):
-     // it hides exactly the stalls (a GC pause, a page fault, a lock) you care about.
-     const uint64_t interval_ns = 200;            // e.g. one event per 200 ns
-     uint64_t intended = now_ns();
+   // `warm` is applied untimed first (Ch. 46). `msgs` is the timed capture, applied ONCE — a
+   // bounded add/cancel sequence so book depth stays representative, not a cyclic replay of
+   // adds that grows the book without end. `interval_ns` is the real feed's inter-arrival
+   // time: the SCHEDULE the response-time question is asked against.
+   void measure(OrderBook& book, std::span<const Msg> warm, std::span<const Msg> msgs,
+                int64_t interval_ns) {
+     hdr_histogram* service  = nullptr;   // end - start   : what the op itself costs
+     hdr_histogram* response = nullptr;   // end - intended: what the event waited in total
+     // Range 1 ns .. 60 s at 3 significant figures. The ceiling must exceed the WORST stall you
+     // could see: hdr_record_value() returns false and records NOTHING above it, so a 10 ms
+     // ceiling would silently drop the 10 ms freeze this section exists to catch. Memory grows
+     // only with log2 of the range (tens of KB here).
+     hdr_init(1, INT64_C(60'000'000'000), 3, &service);
+     hdr_init(1, INT64_C(60'000'000'000), 3, &response);
+     int64_t dropped = 0;
+
+     for (const auto& m : warm) benchmark::DoNotOptimize(book.apply(m));   // untimed warm-up
+
+     // Open loop paced to the INTENDED schedule: event i is due at t0 + i*interval_ns. Never
+     // start early (spin until due). If the previous op stalled we arrive late, the spin falls
+     // through at once, and end - intended carries the whole wait. The events that were due
+     // during the stall are issued back-to-back afterwards — exactly as the queued packets would
+     // be — each recording its own, progressively shorter, wait. Nothing is synthesized.
+     int64_t intended = now_ns();
      for (const auto& m : msgs) {
-       uint64_t start = now_ns();
+       while (now_ns() < intended) _mm_pause();   // pace: spin, don't sleep (Ch. 32)
+       const int64_t start = now_ns();
        benchmark::DoNotOptimize(book.apply(m));
-       uint64_t end = now_ns();
-       hdr_record_value(h, end - start);                       // service latency
-       hdr_record_corrected_value(h, end - intended, interval_ns); // + omission fix
-       intended += interval_ns;
+       const int64_t end = now_ns();
+       if (!hdr_record_value(service,  end - start))    ++dropped;   // once per op
+       if (!hdr_record_value(response, end - intended)) ++dropped;   // once per op
+       intended += interval_ns;                   // fixed schedule — never re-anchor to now
      }
-     // Full percentile spectrum — NOT just the mean:
-     printf("p50   %10lld ns\n", hdr_value_at_percentile(h, 50.0));
-     printf("p99   %10lld ns\n", hdr_value_at_percentile(h, 99.0));
-     printf("p99.9 %10lld ns\n", hdr_value_at_percentile(h, 99.9));
-     printf("max   %10lld ns\n", hdr_max(h));
-     hdr_percentiles_print(h, stdout, 5, 1.0, CLASSIC);        // full distribution
+     summarize("service",  service);
+     summarize("response", response);
+     std::printf("dropped (out of range) %lld\n", (long long)dropped);  // must be 0
+     hdr_percentiles_print(response, stdout, 5, 1.0, CLASSIC);         // full distribution
+     hdr_close(service);
+     hdr_close(response);
    }
 ```
 
-**Why this and not a `for`-loop mean** (Ch. 1, 3): the mean of a latency loop is dominated by the common case and *erases* the tail — but the tail is the product. HdrHistogram records every sample cheaply across a huge dynamic range, so you get p99/p99.9/max, not an average that lies. **Coordinated omission** (Gil Tene) is the subtle killer: a closed-loop benchmark that sends the next request only after the previous returns *never observes* the requests that would have queued behind a stall — so a system that freezes for 10 ms looks fine. `hdr_record_corrected_value` with the expected interval models the open-loop arrival the real feed imposes (Ch. 54, J.4) and puts the stall back in the tail where it belongs. Timestamp with `rdtscp` (Ch. 17) if `clock_gettime` overhead is significant relative to the operation.
+**Why two histograms, and why no `hdr_record_corrected_value` here.** The two numbers answer different questions and must never share a histogram. `service` is the closed-loop measurement of Ch. 3 §3.4.3 — CO-immune by construction, blind to queueing. `response` is method 1 of Ch. 3 §3.2.2 (what `wrk2` does): because `intended` advances by a fixed `interval_ns` whether or not the loop kept up, every event that was due during a stall is still issued — late — and records `end − intended`, its real wait, so the queue behind a stall lands in the tail by *measurement*, not by correction. Each op contributes exactly one sample to each histogram, so both `total_count`s equal the op count. HdrHistogram_c's `hdr_record_corrected_value(h, v, interval)` is a different tool for a different situation: it records `v` **and then back-fills** synthetic samples `v − interval, v − 2·interval, …` (while they remain above `interval`) to *stand in for* events a closed loop never issued. Use it only when all you have is a back-to-back loop and want a CO-*corrected estimate* of response time at an assumed rate — into its own histogram:
+
+```cpp
+   // Closed-loop variant (no pacing, no `intended`): ESTIMATE response time at `interval_ns`
+   // from service times alone. Records end - start once and back-fills the events the loop
+   // never issued. Separate histogram; its total_count will EXCEED the op count — those are
+   // the synthetic samples, and that is the point.
+   if (!hdr_record_corrected_value(estimate, end - start, interval_ns)) ++dropped;
+```
+
+Doing both — pacing *and* back-filling — counts every queued event twice (once as its own late sample, once synthesized from the stall that delayed it); and recording `end − start` *and* a corrected value into one histogram mixes service time, response time and synthetic samples into percentiles that mean nothing. (An earlier draft of this listing did exactly that: after one op the histogram held two samples. The pre-trust checklist in L.4 now asks you to check `total_count` for that reason.)
+
+**Reading the result.** With no stall the two histograms nearly coincide: `response` ≈ `service` plus the pacing spin's overshoot, a few tens of nanoseconds of `clock_gettime` granularity. After a stall of *S*, `service` shows one sample of *S* at the max and a p99.9 that barely moves; `response` shows roughly *S* / `interval_ns` samples spread from *S* down toward zero, and its p99.9 jumps — the tail the real feed experiences. If `service` p50 exceeds `interval_ns`, the loop can never catch up and `response` grows without bound: the harness is telling you the handler cannot sustain that feed rate, which is the "can we keep up at 09:30" answer (Ch. 3), not a measurement error. Better than a constant interval is the capture's own arrival timestamps as the schedule (Ch. 75), which reproduces the feed's bursts. Timestamp with `rdtscp` (Ch. 17) if `clock_gettime` overhead or resolution is significant relative to the op or to the interval.
+
+**Self-test the bookkeeping before trusting it.** Stand a stub in for `book.apply` that sleeps for 2 ms once every 100,000th call, run 1,000,000 events at `interval_ns = 1000`, and check the arithmetic, not the hardware: both `n` must equal 1000000 and `dropped` must be 0; `service` must show the stall only at `max` (≈ 2 ms) with p99 and p99.9 at the no-stall level; `response` must show it in the tail — ten stalls × (2 ms / 1 µs) = 20,000 late samples, 2% of all events, spread evenly from 2 ms down to zero, so p99 lands near 1 ms and p99.9 near 2 ms. Run against HdrHistogram_c on a 4-vCPU Intel Xeon VM (not the reference machine — only the bookkeeping is being checked), g++ 13.3 `-std=c++23 -O2 -march=native`, kernel 6.18, pinned with `taskset -c 2`:
+
+```
+   service  n=1000000   p50      21  p99       32  p99.9        42  max    2140159 ns
+   response n=1000000   p50      60  p99  1162239  p99.9   1992703  max    2140159 ns
+   dropped (out of range) 0
+```
+
+A `response` max *above* the `service` max is not a bug either: it is a stall that hit the pacing spin rather than the op (a VM preemption did exactly that in another run of this test, 3.56 ms vs 2.08 ms), and a feed arriving on schedule would have felt it. Reverse the two histograms in the `if` lines, or add a `hdr_record_corrected_value` call to the paced loop, and the self-test fails (`n` ≠ op count, or `service` and `response` percentiles converge) — which is what it is for.
 
 ## L.3 Making a run repeatable (environment & isolation)
 
@@ -123,7 +176,8 @@ Before believing a benchmark number — the questions Ch. 3 says to ask, in orde
 - [ ] **Enough samples for the tail you claim?** p99.9 needs ≫1000 samples to be stable; don't quote a percentile the sample count can't support (Ch. 3).
 - [ ] **Measured against a baseline?** Report *relative* to a control, not an absolute you can't reproduce elsewhere (Ch. 3) — "1.8× faster than the `std::map` version on this box" beats "42 ns."
 - [ ] **Timing the hot path, not the setup?** Construction/allocation outside the timed loop (L.1); you're measuring steady state, not warm-up (CLAUDE.md).
-- [ ] **No coordinated omission?** For latency (not throughput), open-loop / corrected recording so stalls land in the tail (L.2, Ch. 3).
+- [ ] **Service time or response time — and no coordinated omission?** Decide which question you are asking (Ch. 3 §3.2.2) and keep the two in separate histograms. For response time, pace the loop to a fixed intended schedule and record `end − intended` so queued events land in the tail (L.2); use `hdr_record_corrected_value` *only* on a closed loop, into its own histogram — never both pacing and back-fill, never into the service-time histogram.
+- [ ] **Does the histogram bookkeeping add up?** `total_count` equals the op count in the service histogram and in a paced response histogram (it exceeds it only in a closed-loop back-filled estimate, by design); `dropped` is 0, i.e. the histogram's range covered the worst stall — a sample above `highest_trackable_value` is silently not recorded (L.2).
 - [ ] **Does the codegen match expectation?** Check the asm (Godbolt / `objdump` — Ch. 4, Appendix I.9): did it vectorize / inline / elide the branch you assumed? A benchmark of code the compiler transformed unexpectedly measures the wrong thing.
 - [ ] **Is the effect above noise?** The difference exceeds run-to-run stddev across `--benchmark_repetitions` (Ch. 3) — a 2% "win" inside 5% noise is not a win.
 - [ ] **Metadata recorded?** CPU, kernel, compiler, flags, date attached to the result (CLAUDE.md) — otherwise it isn't reproducible.
@@ -133,7 +187,7 @@ Passing this checklist is what turns "this is faster" into *evidence* — the st
 ## L.5 References
 
 - **Google Benchmark** documentation and User Guide — `benchmark::State`, `DoNotOptimize`/`ClobberMemory`, arguments/ranges, reporters and JSON output (L.1).
-- **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `hdr_histogram_c` libraries) — the basis of L.2.
+- **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `HdrHistogram_c` libraries) — the basis of L.2; `hdr_histogram.h` documents the record-and-back-fill semantics of `hdr_record_corrected_value` and the false-return-on-out-of-range behaviour of `hdr_record_value` that L.2 relies on.
 - Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 17 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 46 (warming) — the warm-vs-cold discipline in L.3.
 - The `perf`, `taskset`, `chrt`, `cpupower`, `numactl` man pages (Appendix I) — the environment controls of L.3.
 
