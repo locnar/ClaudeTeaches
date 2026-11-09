@@ -230,4 +230,4 @@ If the asm shows the few-stores-and-publish shape, the measurement of §73.3 (si
 
 ---
 
-*Next: Ch. 74 — In-Band Latency Tracing & Budget Attribution.*
+*Next: Ch. 74 — In-Band Latency Tracing & Budget Attribution, where the binary record this chapter writes gains a passenger: a fixed trace header — the venue sequence number or `ClOrdID` as correlation ID plus a vector of raw-TSC stage stamps — carried in every ring slot across the feed handler, strategy and gateway processes, so the tick-to-trade budget can be attributed per stage, per message, in production, and then split between you, the wire and the matching engine using the timestamps the venue itself puts on the wire.*

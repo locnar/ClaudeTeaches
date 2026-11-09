@@ -930,13 +930,23 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 73.7 Exercises & checklist
 
 ### [74. In-Band Latency Tracing & Budget Attribution](74-in-band-latency-tracing-budget-attribution.md)
-- 74.1 Why it matters: TODO
-- 74.2 Mental model: TODO
-- 74.3 Measure it: TODO
+- 74.1 Why it matters: the budget you cannot attribute
+- 74.2 Mental model
+  - 74.2.1 The trace header: a correlation ID and a vector of stage stamps
+  - 74.2.2 In-band vs out-of-band carriage
+  - 74.2.3 Causality across processes: tick → decision → order
+  - 74.2.4 Three clocks on one message
+- 74.3 Measure it: what the stamp and the header cost
 - 74.4 Techniques
-  - 74.4.1 TODO
-- 74.5 Pitfalls & anti-patterns: TODO
-- 74.6 Exercises & checklist
+  - 74.4.1 The trace header and the stamping points
+  - 74.4.2 Carrying the header through rings, Disruptor slots and shm segments
+  - 74.4.3 Contention-free correlation IDs and the tick → order link
+  - 74.4.4 Off-path aggregation: from stamps to per-stage histograms
+  - 74.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
+  - 74.4.6 The per-packet ledger: joining a tap capture to the host's stamps
+- 74.5 Verify the codegen: a stage boundary is a counter read and a store
+- 74.6 Pitfalls & anti-patterns
+- 74.7 Exercises & checklist
 
 ### [75. Zero-Overhead Application Telemetry](75-zero-overhead-application-telemetry.md)
 - 75.1 Why it matters: the counter that has to leave a busy-poll process

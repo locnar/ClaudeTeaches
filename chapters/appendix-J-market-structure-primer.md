@@ -74,6 +74,25 @@ The wire formats the decoder chapters parse (Ch. 54). Two axes: **market data vs
 - **SBE** (Simple Binary Encoding) — the FIX community's **binary** encoding: a schema (XML) generates fixed-layout message structs with explicit offsets, so decoding is a bounds-checked fixed-offset read (like ITCH) with none of FIX's string parsing. Every message starts with an 8-byte **message header** — `blockLength` u16, `templateId` u16, `schemaId` u16, `version` u16, all little-endian by default — followed by the fixed-size root block at the offsets the schema declares, then any repeating groups (each with a 4-byte group-size header: `blockLength` u16, `numInGroup` u16) and variable-length data fields last; a decoder dispatches on `templateId` and skips unknown fields by `blockLength`. The modern low-latency choice where FIX semantics are required (Ch. 54).
 - **FAST** (FIX Adapted for STreaming) — a **compression**-oriented FIX encoding (implicit fields, delta/copy operators, bit-mapped presence). Bandwidth-efficient for multicast but requires stateful, branchy decoding — a different trade-off from SBE's flat layout.
 
+**Venue timestamp fields (Ch. 74 §74.4.5).** The fields a feed handler or gateway decodes to attribute the tick-to-trade budget between you, the wire and the matching engine — all on the venue's PTP-disciplined UTC clock unless noted:
+
+| Venue / protocol | Field | Where | What it stamps |
+|---|---|---|---|
+| CME MDP 3.0 (market data) | `SendingTime` (u64 ns UTC) | binary packet header, offset 4 | the feed component handed this packet to its stack (egress) |
+| CME MDP 3.0 | `TransactTime` (u64 ns UTC) | every message | matching engine processed the event |
+| CME iLink 3 (orders) | `SendingTimeEpoch` (u64 ns) | message header | gateway sent the message to you |
+| CME iLink 3 | `RequestTime` (u64 ns) | your request, echoed on the response | *your* clock, round-trip anchor |
+| CME iLink 3 | `TransactTime` | `ExecutionReport*` | engine time of the ack/fill |
+| Eurex T7 EOBI (market data) | `TransactTime` (u64 ns UTC) | packet header and messages | engine time of the event |
+| Eurex T7 EOBI | `TrdRegTSTimePriority` (u64 ns) | `OrderAdd`/`OrderModify` | the order's time priority — queue position |
+| Eurex T7 ETI (orders) | `TrdRegTSTimeIn` / `TrdRegTSTimeOut` | response header (`ResponseHeaderME`) | gateway received your request / sent the response |
+| Eurex T7 ETI | `TrdRegTSEntryTime` / `TrdRegTSExecutionTime` | order responses | engine accepted / matched |
+| Nasdaq ITCH 5.0 (market data) | `Timestamp` (u48 ns since midnight ET) | every message, offset 5 | engine time of the event |
+| Nasdaq OUCH 5.0 (orders) | `Timestamp` (u64 ns since midnight) | `Accepted`/`Executed`/`Canceled` | engine time |
+| FIX (any) | `52 SendingTime`, `60 TransactTime` | header / body | ms or µs resolution, venue-dependent |
+
+Resolution is not accuracy (a nanosecond field from a software gateway is as good as that host's PTP), egress is not wire, and the venue's clock is guaranteed only within its regulatory tolerance (MiFID II RTS 25: 100 µs / 1 µs granularity for HFT-class activity) — Ch. 74 §74.4.5 gives the symmetry check that validates the comparison before any one-way number is trusted.
+
 **The through-line (Ch. 54):** fixed-layout binary (ITCH/OUCH/SBE) → parse by bounds-checked fixed-offset loads, mind endianness (`std::byteswap`, Appendix H.5) and packing (Ch. 9); tag-value/compressed (FIX/FAST) → branch-light scanning and careful number conversion. All of it treats the wire bytes as **untrusted input** (Ch. 76) — validate lengths before you read.
 
 ## J.6 Roles in a trading system
