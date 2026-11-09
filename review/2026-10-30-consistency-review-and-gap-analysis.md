@@ -463,6 +463,8 @@ What remains outside this review's reach:
 - The review did not attempt to fix anything; §3 gives the recipe for the one mechanical fix (the fenced-block renumber), and the gap analysis in §10 is a planning input, not a commitment.
 
 ---
+- **P2-2 part 2 (Ch. 27–52), 2026-11-09:** 241 fixed / 175 already fixed / 5 left — see the findings file header.
+
 
 ## 10. Gap analysis — missing topics
 
