@@ -81,7 +81,7 @@ Google Benchmark reports the *loop's* mean; a trading system lives or dies on th
                  (long long)hdr_max(h));
    }
 
-   // `warm` is applied untimed first (Ch. 46). `msgs` is the timed capture, applied ONCE — a
+   // `warm` is applied untimed first (Ch. 47). `msgs` is the timed capture, applied ONCE — a
    // bounded add/cancel sequence so book depth stays representative, not a cyclic replay of
    // adds that grows the book without end. `interval_ns` is the real feed's inter-arrival
    // time: the SCHEDULE the response-time question is asked against.
@@ -135,7 +135,7 @@ Google Benchmark reports the *loop's* mean; a trading system lives or dies on th
 
 Doing both — pacing *and* back-filling — counts every queued event twice (once as its own late sample, once synthesized from the stall that delayed it); and recording `end − start` *and* a corrected value into one histogram mixes service time, response time and synthetic samples into percentiles that mean nothing. (An earlier draft of this listing did exactly that: after one op the histogram held two samples. The pre-trust checklist in L.4 now asks you to check `total_count` for that reason.)
 
-**Reading the result.** With no stall the two histograms nearly coincide: `response` ≈ `service` plus the pacing spin's overshoot, a few tens of nanoseconds of `clock_gettime` granularity. After a stall of *S*, `service` shows one sample of *S* at the max and a p99.9 that barely moves; `response` shows roughly *S* / `interval_ns` samples spread from *S* down toward zero, and its p99.9 jumps — the tail the real feed experiences. If `service` p50 exceeds `interval_ns`, the loop can never catch up and `response` grows without bound: the harness is telling you the handler cannot sustain that feed rate, which is the "can we keep up at 09:30" answer (Ch. 3), not a measurement error. Better than a constant interval is the capture's own arrival timestamps as the schedule (Ch. 75), which reproduces the feed's bursts. Timestamp with `rdtscp` (Ch. 17) if `clock_gettime` overhead or resolution is significant relative to the op or to the interval.
+**Reading the result.** With no stall the two histograms nearly coincide: `response` ≈ `service` plus the pacing spin's overshoot, a few tens of nanoseconds of `clock_gettime` granularity. After a stall of *S*, `service` shows one sample of *S* at the max and a p99.9 that barely moves; `response` shows roughly *S* / `interval_ns` samples spread from *S* down toward zero, and its p99.9 jumps — the tail the real feed experiences. If `service` p50 exceeds `interval_ns`, the loop can never catch up and `response` grows without bound: the harness is telling you the handler cannot sustain that feed rate, which is the "can we keep up at 09:30" answer (Ch. 3), not a measurement error. Better than a constant interval is the capture's own arrival timestamps as the schedule (Ch. 78), which reproduces the feed's bursts. Timestamp with `rdtscp` (Ch. 17) if `clock_gettime` overhead or resolution is significant relative to the op or to the interval.
 
 **Self-test the bookkeeping before trusting it.** Stand a stub in for `book.apply` that sleeps for 2 ms once every 100,000th call, run 1,000,000 events at `interval_ns = 1000`, and check the arithmetic, not the hardware: both `n` must equal 1000000 and `dropped` must be 0; `service` must show the stall only at `max` (≈ 2 ms) with p99 and p99.9 at the no-stall level; `response` must show it in the tail — ten stalls × (2 ms / 1 µs) = 20,000 late samples, 2% of all events, spread evenly from 2 ms down to zero, so p99 lands near 1 ms and p99.9 near 2 ms. Run against HdrHistogram_c on a 4-vCPU Intel Xeon VM (not the reference machine — only the bookkeeping is being checked), g++ 13.3 `-std=c++23 -O2 -march=native`, kernel 6.18, pinned with `taskset -c 2`:
 
@@ -181,14 +181,14 @@ The Preface carries the one-paragraph version of this statement; this is the one
    #    CPU (lscpu), kernel (uname -r), compiler (g++ --version), flags, date.
 ```
 
-**What each buys** (Ch. 3, 6): pinning stops the scheduler migrating the thread mid-measurement (a migration is a cold cache and a new tail); `performance` governor + no-turbo stops the clock changing under you (a benchmark that warms up into turbo then thermally throttles is unrepeatable); NUMA binding stops a stray remote-DRAM allocation adding a fixed penalty (Ch. 16); and `perf stat` alongside gives you *why* — an IPC or cache-miss change explains a latency change (Appendix I.2). an **explicit** Google Benchmark warm-up — `--benchmark_min_warmup_time=1` or `->MinWarmUpTime(1.0)` (v1.7+; the default is 0 s, so by default *nothing* is discarded beyond the short calibration runs that size the iteration count, which is not a controlled warm-up) — plus an explicit cache/branch-predictor warm of your data structure (Ch. 46) put you in steady state before the first recorded sample. Always emit the **metadata block** — a number without its CPU/kernel/compiler/flags is not reproducible and, per the authoring conventions, not publishable.
+**What each buys** (Ch. 3, 6): pinning stops the scheduler migrating the thread mid-measurement (a migration is a cold cache and a new tail); `performance` governor + no-turbo stops the clock changing under you (a benchmark that warms up into turbo then thermally throttles is unrepeatable); NUMA binding stops a stray remote-DRAM allocation adding a fixed penalty (Ch. 16); and `perf stat` alongside gives you *why* — an IPC or cache-miss change explains a latency change (Appendix I.2). an **explicit** Google Benchmark warm-up — `--benchmark_min_warmup_time=1` or `->MinWarmUpTime(1.0)` (v1.7+; the default is 0 s, so by default *nothing* is discarded beyond the short calibration runs that size the iteration count, which is not a controlled warm-up) — plus an explicit cache/branch-predictor warm of your data structure (Ch. 47) put you in steady state before the first recorded sample. Always emit the **metadata block** — a number without its CPU/kernel/compiler/flags is not reproducible and, per the authoring conventions, not publishable.
 
 ## L.4 The pre-trust checklist
 
 Before believing a benchmark number — the questions Ch. 3 says to ask, in order:
 
 - [ ] **Is dead-code elimination defeated?** `DoNotOptimize`/`ClobberMemory` present; a suspiciously-fast result (sub-nanosecond, zero-cost) means the loop was optimized away (L.1, Ch. 3).
-- [ ] **Was it warmed up?** An explicit warm-up phase (`MinWarmUpTime` — Google Benchmark discards nothing by default), caches/TLB/branch predictor in steady state (Ch. 46). A cold first sample is a different measurement (Ch. 46 — warm vs. cold tail).
+- [ ] **Was it warmed up?** An explicit warm-up phase (`MinWarmUpTime` — Google Benchmark discards nothing by default), caches/TLB/branch predictor in steady state (Ch. 47). A cold first sample is a different measurement (Ch. 47 — warm vs. cold tail).
 - [ ] **Is frequency pinned?** `performance` governor, turbo decision made and documented (L.3, Ch. 6) — otherwise variance is clock, not code.
 - [ ] **Enough samples for the tail you claim?** p99.9 needs ≫1000 samples to be stable; don't quote a percentile the sample count can't support (Ch. 3).
 - [ ] **Measured against a baseline?** Report *relative* to a control, not an absolute you can't reproduce elsewhere (Ch. 3) — "1.8× faster than the `std::map` version on this box" beats "42 ns."
@@ -205,7 +205,7 @@ Passing this checklist is what turns "this is faster" into *evidence* — the st
 
 - **Google Benchmark** documentation and User Guide — `benchmark::State`, `DoNotOptimize`/`ClobberMemory`, arguments/ranges, reporters and JSON output (L.1).
 - **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `HdrHistogram_c` libraries) — the basis of L.2; `hdr_histogram.h` documents the record-and-back-fill semantics of `hdr_record_corrected_value` and the false-return-on-out-of-range behaviour of `hdr_record_value` that L.2 relies on.
-- Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 17 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 46 (warming) — the warm-vs-cold discipline in L.3.
+- Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 17 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 47 (warming) — the warm-vs-cold discipline in L.3.
 - The `perf`, `taskset`, `chrt`, `cpupower`, `numactl` man pages (Appendix I) — the environment controls of L.3.
 
 ## L.6 Additional Reading
@@ -217,4 +217,4 @@ Passing this checklist is what turns "this is faster" into *evidence* — the st
 
 ---
 
-*This completes Appendix L and the book. The chapters (Parts I–XII) and Appendices A–L together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 76), with the ARM port, the language survey, the tuning checklist, the flag reference, the latency numbers, the glossary, the bibliography, the feature-support matrix, the tooling cookbook, the market-structure primer, the connectivity guide, and this benchmark harness as the standing references that outlive any single chapter.*
+*Next: Appendix M — Pre-Open Readiness Gate & Market-Open Playbook, the operational companion to Appendix C: the cold → warming → syncing → reconciled → armed → trading → disarmed state machine every trading process publishes, the T-60/T-30/T-5 gates (host attestation, clock, feed, network, session, positions, warm-up, kill-switch) as commands with expected values, re-arming after an intraday restart, the host fingerprint micro-suite built on this appendix's harness, and the gate runner as a script.*

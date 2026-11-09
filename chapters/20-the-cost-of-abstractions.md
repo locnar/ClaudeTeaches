@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 19 (zero-cost abstractions — this chapter is its counterweight: the abstractions that *aren't* free), Ch. 12 (code layout / hot-cold splitting — the cold path is exactly where unwinding code belongs), Ch. 1 (tail latency — an exception throw is a tail event), Ch. 4 (reading asm — §20.5 reads unwinding tables and landing pads).
 >
-> **Leads into:** Ch. 21 (aliasing & type punning — more language-level codegen gates), Ch. 53 (zero-copy parsing — hot-path error handling on untrusted input), Ch. 72 (secure programming — UB and error handling as a vulnerability class). `std::expected` ties back to Ch. 19 (a zero-cost error channel) and forward to Ch. 25/27 (hot-path APIs).
+> **Leads into:** Ch. 21 (aliasing & type punning — more language-level codegen gates), Ch. 54 (zero-copy parsing — hot-path error handling on untrusted input), Ch. 75 (secure programming — UB and error handling as a vulnerability class). `std::expected` ties back to Ch. 19 (a zero-cost error channel) and forward to Ch. 25/27 (hot-path APIs).
 
 ---
 
@@ -158,7 +158,7 @@ The rule the data dictates: **match the mechanism to the error *frequency*.** Ge
 `std::expected<T, E>` (C++23 — libstdc++ 12 / GCC 12, libc++ 16 / Clang 16; `and_then`/`or_else`/`transform` from GCC 13 / Clang 17; gate on `__cpp_lib_expected >= 202202L`, see Appendix H; `tl::expected`/`std::optional`+code as the C++17/20 fallback) is the modern, zero-overhead, *type-safe* error channel for **expected** failures:
 
 - **It's a value, not a control-flow event.** `expected<T,E>` holds *either* a `T` or an error `E` inline (no allocation, no unwinding) — signaling failure is returning it, at error-code cost (§20.3), with no throw.
-- **The error is in the type, and it composes.** Unlike a bare error code, the failure is visible in the signature — but enforcement is not automatic: `std::expected` is not `[[nodiscard]]`, a returned value can be dropped, and `*e`/`e->` on an error-holding object is undefined behaviour (only `.value()` checks and throws `bad_expected_access`). Put `[[nodiscard]]` on the function (a warning unless `-Werror`) and test `has_value()` before dereferencing; `and_then`/`or_else`/`transform` chain fallible steps monadically without nested `if`s — readable *and* fast. A feed-handler decode pipeline (parse → validate → enqueue, Ch. 53) reads as a clean chain that compiles to branch-on-value.
+- **The error is in the type, and it composes.** Unlike a bare error code, the failure is visible in the signature — but enforcement is not automatic: `std::expected` is not `[[nodiscard]]`, a returned value can be dropped, and `*e`/`e->` on an error-holding object is undefined behaviour (only `.value()` checks and throws `bad_expected_access`). Put `[[nodiscard]]` on the function (a warning unless `-Werror`) and test `has_value()` before dereferencing; `and_then`/`or_else`/`transform` chain fallible steps monadically without nested `if`s — readable *and* fast. A feed-handler decode pipeline (parse → validate → enqueue, Ch. 54) reads as a clean chain that compiles to branch-on-value.
 - **Pick `E` to be cheap.** An `enum`/small struct error keeps `expected` small and trivially copyable (Ch. 9); a heavy error type bloats the return. For the hot path, `E` is usually a small enum + maybe a code.
 - **Use it for *expected* failures; keep exceptions for *exceptional* ones.** `expected` for malformed input, gaps, rejects, capacity limits — things that happen and that the hot path must handle in stride. A genuinely fatal, can't-continue condition can still throw (cold path). This is the deliberate two-channel design: values for expected errors, exceptions for fatal ones.
 
@@ -237,7 +237,7 @@ The verification habits:
 2. **Happy path is free.** At `bad_per_1000 = 0`, confirm all three mechanisms are within noise. Disassemble the `try` happy path (Ch. 4) and confirm it's straight-line with no error checks (§20.5).
 3. **The `noexcept` move trap.** Build a type with a *throwing* move ctor and a `noexcept` one; `push_back` past several reallocations into a `std::vector`. Count copy vs move ctor calls (instrument them). Show the non-`noexcept` version copies (§20.2, §20.4.1).
 4. **Size the tables.** Build the program with and without `-fno-exceptions` (and `-fno-rtti`); compare `size` and `readelf -S` (`.eh_frame`/`.gcc_except_table`). How much binary size do exceptions/RTTI cost here (§20.5)?
-5. **`expected` pipeline.** Rewrite a parse→validate→enqueue chain (Ch. 53) using `std::expected` + `and_then`/`or_else`. Confirm it compiles to branch-on-value (no throw) and that `[[nodiscard]]` turns a dropped result into a compiler warning (build with `-Werror`; note that it cannot catch an unchecked `*e`, which is UB on the error state).
+5. **`expected` pipeline.** Rewrite a parse→validate→enqueue chain (Ch. 54) using `std::expected` + `and_then`/`or_else`. Confirm it compiles to branch-on-value (no throw) and that `[[nodiscard]]` turns a dropped result into a compiler warning (build with `-Werror`; note that it cannot catch an unchecked `*e`, which is UB on the error state).
 
 **Checklist — the cost of abstractions**
 
@@ -261,7 +261,7 @@ The verification habits:
 ## 20.9 Additional Reading
 
 - CppCon talks on exception cost, `std::expected`, and "zero-overhead exceptions" — including asm-level walkthroughs of the throw path and unwinding tables.
-- Ch. 19 (*Zero-Cost Abstractions*) — the abstractions that *are* free, the counterweight to this chapter; Ch. 12 (*Code Layout*) — where landing pads / cold unwinding code belong; Ch. 53 (*Zero-Copy Parsing*) — hot-path error handling on untrusted input with `expected`; Ch. 72 (*Secure Programming*) — UB and error handling as a vulnerability class; Ch. 22 (*Build Toolchain*) — `-fno-exceptions`/`-fno-rtti` in context.
+- Ch. 19 (*Zero-Cost Abstractions*) — the abstractions that *are* free, the counterweight to this chapter; Ch. 12 (*Code Layout*) — where landing pads / cold unwinding code belong; Ch. 54 (*Zero-Copy Parsing*) — hot-path error handling on untrusted input with `expected`; Ch. 75 (*Secure Programming*) — UB and error handling as a vulnerability class; Ch. 22 (*Build Toolchain*) — `-fno-exceptions`/`-fno-rtti` in context.
 - **Appendix D** (Compiler Flag Reference) — `-fno-exceptions`/`-fno-rtti` and their costs; **Appendix B** (B.1–B.2) — error handling in Rust (`Result`/`?`) and Zig (error unions): the value-based model without exceptions.
 
 ---

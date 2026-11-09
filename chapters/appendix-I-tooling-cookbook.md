@@ -1,6 +1,6 @@
 # Appendix I — Tooling Command Cookbook
 
-> **Consolidates:** the commands used throughout the book, scattered across chapters — `perf` and the PMU (Ch. 2), micro-benchmarking (Ch. 3), reading asm / codegen (Ch. 4), debugging optimized builds (Ch. 5), `bpftrace`/eBPF (Ch. 61), plus the topology/pinning tools introduced operationally in Appendix C (`numactl`, `taskset`, `chrt`, `ethtool`, `cyclictest`) and `pahole` from Ch. 9. The *concepts* live in those chapters; this appendix is the **second-monitor cheat sheet** — the exact invocations, in one place.
+> **Consolidates:** the commands used throughout the book, scattered across chapters — `perf` and the PMU (Ch. 2), micro-benchmarking (Ch. 3), reading asm / codegen (Ch. 4), debugging optimized builds (Ch. 5), `bpftrace`/eBPF (Ch. 63), plus the topology/pinning tools introduced operationally in Appendix C (`numactl`, `taskset`, `chrt`, `ethtool`, `cyclictest`) and `pahole` from Ch. 9. The *concepts* live in those chapters; this appendix is the **second-monitor cheat sheet** — the exact invocations, in one place.
 
 **How to use this:** grouped by tool/purpose (I.1–I.9). Each entry is a command plus a one-line note on what it measures and which chapter derives the interpretation. Two rules from the methodology chapters govern all of it: **a number is only meaningful against a baseline** (Ch. 3) — always measure before/after, not once; and **profile, don't guess** (Ch. 2) — let the counters tell you where the time goes before you optimize. Commands assume a recent Linux `perf` (matching your kernel), GCC/Clang, and either root or the capabilities the PMU/eBPF need (`CAP_PERFMON`/`CAP_BPF`, or `sysctl kernel.perf_event_paranoid=-1` on a lab box — Ch. 2). Adapt core numbers (`2`, `2-7`) to your topology (I.6).
 
@@ -69,7 +69,7 @@ When you want the GUI top-down tree and memory-access modeling (Ch. 2).
 
 ## I.5 `bpftrace` / eBPF one-liners
 
-Low-overhead, production-safe tracing (Ch. 61) — attach to a running process without restarting it.
+Low-overhead, production-safe tracing (Ch. 63) — attach to a running process without restarting it.
 
 ```
    bpftrace -e 'tracepoint:syscalls:sys_enter_* { @[probe] = count(); }'   # which syscalls, by count
@@ -90,7 +90,7 @@ Low-overhead, production-safe tracing (Ch. 61) — attach to a running process w
    #   C++ symbols are mangled: use the `cpp` qualifier (or the mangled name, or `*on_message*`); the function must not be inlined
 ```
 
-**Interpreting (Ch. 61):** eBPF is the right tool for *production* latency questions the PMU can't answer directly — run-queue latency, off-CPU time, syscall counts under real load — at overhead low enough to leave running. Keep the probes off the hot core's critical section; measure the tracing overhead itself (Ch. 61) before trusting production numbers.
+**Interpreting (Ch. 63):** eBPF is the right tool for *production* latency questions the PMU can't answer directly — run-queue latency, off-CPU time, syscall counts under real load — at overhead low enough to leave running. Keep the probes off the hot core's critical section; measure the tracing overhead itself (Ch. 63) before trusting production numbers.
 
 ## I.6 Topology, pinning & scheduling
 
@@ -107,6 +107,19 @@ Discovering the machine and placing threads on it (Ch. 16, 42, 43; Appendix C).
    cpupower frequency-info                        # governor + current/available frequencies (Ch. 6)
    grep -E 'CPU|<if>' /proc/interrupts           # header + the NIC's IRQ rows: per-CPU counts show where IRQs land (Ch. 42)
    cyclictest -m -p 80 -a 2 -t 1 -i 200 -d 0 -D 1h   # wake-up latency on isolated core 2 — read the max, not the avg (Ch. 45, App C.5)
+   # --- hunting residual noise (Ch. 46): attribute what still lands on the isolated core
+   rtla osnoise top -c 2 -P f:80 -d 10m -T 1 -s 20 -t   # spin on cpu2, count noise >= 1 us, STOP + save trace on a 20 us gap; HW column = SMI/firmware
+   rtla timerlat top -c 2 -P f:95 -p 100 -a 20 -u        # timer latency split into IRQ vs thread; stop + trace above 20 us; -u = user thread too
+   rtla hwnoise -c 2 -d 2m -T 1                          # the firmware floor (hwlat); qualification only — it monopolises the core
+   echo 4 > /sys/kernel/tracing/tracing_cpumask          # hex mask: trace ONLY cpu2 (0x4); then set_event irq_vectors:* tlb:tlb_flush sched:sched_switch ...
+   echo x86-tsc > /sys/kernel/tracing/trace_clock        # TSC timestamps that line up with the app's rdtsc (Ch. 17)
+   trace-cmd record -M 4 -C x86-tsc -e irq -e sched -e irq_vectors -e tlb -e timer:tick_stop   # to a file; `trace-cmd report` / KernelShark
+   perf sched record -C 2 -- sleep 600 && perf sched timehist -C 2    # who ran on cpu2, when, for how long (thread intruders)
+   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 46 §46.4.1, Ch. 79)
+   grep -l -E '^Cpus_allowed_list:.*\b2\b' /proc/[0-9]*/task/*/status  # every thread ALLOWED on cpu2 (want: yours + the per-cpu kthreads)
+   cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 42)
+   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 79 §79.2.4)
+   turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
 ```
 
 **Interpreting:** `lstopo` is the map you tune against (Ch. 43) — it shows which logical CPUs are SMT siblings and which cores share an L2/L3, so you can leave siblings idle (Ch. 43) and keep a thread and its data on one NUMA node (Ch. 16). These are the runtime counterparts to the boot-time isolation in Appendix C.
@@ -129,26 +142,43 @@ Seeing struct layout and memory behavior (Ch. 9, 15).
 
 ## I.8 Network & NIC
 
-Inspecting and tuning the RX/TX path (Ch. 51, 53, 55, 56).
+Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
 
 ```
-   ethtool -g eth0                              # current vs max RX/TX ring sizes (Ch. 53, 55)
-   ethtool -G eth0 rx 4096                       # enlarge RX ring to absorb microbursts (Ch. 53)
-   ethtool -c eth0                              # interrupt coalescing settings (Ch. 55)
-   ethtool -C eth0 rx-usecs 0 adaptive-rx off    # disable coalescing for lowest latency (Ch. 55)
-   ethtool -S eth0 | grep -iE 'drop|miss|err|fifo'   # hardware drops — RX overruns at the open (Ch. 53)
-   ethtool -T eth0                              # hardware-timestamping capabilities (Ch. 58)
-   ss -tim                                       # per-socket TCP info: rtt, cwnd, retrans (Ch. 51)
+   ethtool -g eth0                              # current vs max RX/TX ring sizes (Ch. 54, 57)
+   ethtool -G eth0 rx 4096                       # enlarge RX ring to absorb microbursts (Ch. 54)
+   ethtool -c eth0                              # interrupt coalescing settings (Ch. 57)
+   ethtool -C eth0 rx-usecs 0 adaptive-rx off    # disable coalescing for lowest latency (Ch. 57)
+   ethtool -S eth0 | grep -iE 'drop|miss|err|fifo'   # hardware drops — RX overruns at the open (Ch. 54)
+   ethtool -T eth0                              # hardware-timestamping capabilities (Ch. 60)
+   ss -tim                                       # per-socket TCP info: rtt, cwnd, retrans (Ch. 52)
    tcpdump -i eth0 -nn -ttt 'udp port 12345'     # inter-packet deltas on a market-data feed
-   ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 58)
-   phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 58)
+   ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 60)
+   phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 60)
+   # --- multicast membership (Ch. 56): verify state, not traffic
+   cat /proc/net/igmp                           # kernel's view: (device, group) joins, little-endian hex groups; Querier column = IGMP version in use
+   ip maddr show dev eth0                       # the same, decoded
+   timeout 260 tcpdump -i eth0 -nn -c 1 'igmp and igmp[0]==0x11'   # a General Query within one interval, or the feed goes dark ~260 s after the last join
+   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 56, 80)
+   sysctl net.ipv4.igmp_max_memberships net.ipv4.conf.eth0.rp_filter   # 20 by default (the 21st join fails ENOBUFS); strict rp_filter drops the feed
+   # --- network health & drop forensics (Ch. 80): which LAYER dropped it
+   ethtool -S eth0 | grep -iE 'missed|out_of_buffer|nodesc'          # host ring full (poll too slow)        — layer 2b
+   ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 67)
+   ethtool -S eth0 | grep -iE 'crc|symbol|fec|pause'                 # link/PHY/FEC and pause frames         — layer 1 / fabric
+   awk '{print NR-1, strtonum("0x"$1), strtonum("0x"$2), strtonum("0x"$3)}' /proc/net/softnet_stat   # cpu processed dropped time_squeeze (NAPI, layer 3)
+   nstat -az TcpExt:TCPTimeouts Tcp:RetransSegs TcpExt:TCPSpuriousRTOs   # an RTO on the order session = a 200 ms+ stall (Ch. 53)
+   ss -tim dst <venue>                                                # per-socket rtt/cwnd/retrans/notsent — or getsockopt(TCP_INFO) at 1 Hz from the gateway
+   sudo dropwatch -l kas                                              # live histogram of kernel drops by function (then: start)
+   sudo bpftrace -e 'tracepoint:skb:kfree_skb { @[args->reason, ksym(args->location)] = count(); }'   # drop REASON + location; arm BEFORE the session (text_poke IPIs)
+   ethtool -m eth0 | grep -iE 'power|temperature'                     # optics DOM: rx/tx power vs the module's warning thresholds
+   cat /sys/class/net/eth0/carrier_changes                            # link flaps since boot
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 53) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 58, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 80 §80.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §80.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 
-Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 72).
+Verifying what the compiler produced, and catching bugs before production (Ch. 4, 22, 40, 75).
 
 ```
    objdump -d -M intel --no-show-raw-insn ./app          # disassemble (Intel syntax; Ch. 4)
@@ -164,10 +194,10 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
    # sanitizers — TEST/CI builds only, never production (App D.7):
    g++ -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined x.cpp && ./a.out
    g++ -O1 -g -fsanitize=thread x.cpp && ./a.out          # data races (Ch. 30-33, 40)
-   clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 72)
+   clang++ -fsanitize=fuzzer,address parse_fuzzer.cpp && ./a.out   # fuzz a decoder (Ch. 75)
 ```
 
-**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 72), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
+**Interpreting:** `objdump`/`-S` is the offline Godbolt (Ch. 4) — use it to confirm the optimizer did what you expected (vectorized the loop, elided the branch, inlined the accessor) before believing a micro-benchmark. The sanitizers are a *correctness* gate (Ch. 40, 75), not a performance tool — run them in CI at `-O1`, fix every finding, and never ship them (ASan ≈2× CPU/≈3× memory, UBSan a few %–2×, TSan 5–15× CPU and 5–10× memory — Ch. 40, Appendix D.7).
 
 ## I.10 References
 
@@ -181,7 +211,7 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
 - **Appendix C** (System Tuning Checklist) — where many of these commands are applied as *configuration* (IRQ pinning, ring sizing, governor) rather than one-off *observation*.
 - **Appendix D** (Compiler Flag Reference) — the build flags behind I.9 (`-fno-omit-frame-pointer`, LTO/PGO/BOLT, sanitizers).
 - **Appendix E** (Latency Numbers) — the reference costs these tools let you measure against; **Appendix L** (Benchmark Harness) — how to wrap a measurement so `perf stat` and the histogram agree.
-- Gregg, *Systems Performance* and *BPF Performance Tools* (Ch. 2, 61) — the book-length treatment of everything here.
+- Gregg, *Systems Performance* and *BPF Performance Tools* (Ch. 2, 63) — the book-length treatment of everything here.
 
 ---
 

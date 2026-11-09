@@ -12,7 +12,8 @@ import os, re, sys, collections
 D = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "chapters"
 ALL = "--all" in sys.argv
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
-def old2new(n):
+def phase3(n):
+    """The Phase-3 reorganisation map (original drafting order -> twelve-Part order)."""
     if n <= 4: return n
     if n <= 37: return n + 1
     if n <= 41: return n + 2
@@ -24,9 +25,28 @@ def old2new(n):
     if n <= 53: return n + 10
     if n <= 64: return n + 12
     return None
+# Renumbering history, applied in order. ("phase3", None) is the reorganisation above;
+# ("insert", N) means "a chapter was inserted after N, so every number > N moved up by one".
+# tools/review/insert_chapter.py appends a step here on every insertion — keep the marker line.
+STEPS = [
+    ("phase3", None),
+    ("insert", 45),  # Ch. 46 hunting-residual-noise-isolated-cores
+    ("insert", 55),  # Ch. 56 multicast-group-management-dark-feed
+    ("insert", 73),  # Ch. 74 zero-overhead-application-telemetry
+    ("insert", 78),  # Ch. 79 host-health-telemetry
+    ("insert", 79),  # Ch. 80 network-health-telemetry-drop-forensics
+    # INSERT_STEPS_END
+]
+def old2new(n):
+    for kind, arg in STEPS:
+        if n is None: return None
+        if kind == "phase3": n = phase3(n)
+        elif kind == "insert": n = n + 1 if n > arg else n
+    return n
 STOP = set("the and of for a an in on to vs with its it is from into at by your you how when what why not or as be this that are".split())
 def words(s): return set(w for w in re.findall(r"[a-z0-9_+]+", s.lower()) if w not in STOP and len(w) > 2)
 files = sorted(f for f in os.listdir(D) if f.endswith(".md") and f != "README.md")
+MAXCH = max(int(f[:2]) for f in files if re.match(r"^\d{2}-", f) and not f.startswith("00-"))
 kw, titles = {}, {}
 for f in files:
     m = re.match(r"^(\d{2})-", f)
@@ -45,7 +65,7 @@ for f in files:
         if FENCE.match(l): inf = not inf; continue
         for m in re.finditer(r"(?:\bCh(?:\.|apter)s?\s?|§\s?)(\d+)(?:\.\d+)?", l):
             n = int(m.group(1))
-            if n < 1 or n > 76: continue
+            if n < 1 or n > MAXCH: continue
             ctx = l[max(0, m.start() - 120):m.end() + 120]; cw = words(ctx)
             cur = bool(cw & kw.get(n, set())); mapped = old2new(n)
             if mapped == n: continue

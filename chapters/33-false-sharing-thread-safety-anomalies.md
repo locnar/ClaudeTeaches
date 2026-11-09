@@ -161,7 +161,7 @@ The structural cure (ties Ch. 31): give each thread/core its own data, laid out 
 - **False sharing across sockets (Ch. 16).** Cross-NUMA false sharing bounces the line over the interconnect (~150 ns) — far worse than within-socket. Per-node data placement (Ch. 16) plus padding.
 - **Hidden sharing you didn't write (the thread-safety anomalies).** Shared-nothing code still shares through its *libraries*: a `std::shared_ptr` copied on two threads bounces its control-block refcount line (Ch. 25 — use `unique_ptr`/intrusive single-owner handles on the hot path); `malloc`/`free` from several threads touch the allocator's arena locks and per-thread caches, and a block freed on a different thread than it was allocated on crosses arenas (Ch. 23–24 — per-thread pools); a function-local `static` is guarded by a once-flag every call reads (cheap, but a line every core reads); `std::vector<bool>` and C bit-fields pack several threads' flags into one *word*, so "independent" bits are a read-modify-write race *and* false sharing (Ch. 28 — a padded `uint64` per thread); `errno`, `std::locale`, and lazily-initialised `thread_local`s add TLS-init checks and a shared guard the first time each thread touches them. None of these appear in your source as sharing; all of them appear in `perf c2c`.
 - **Thread-safety anomalies mistaken for false sharing (and vice versa).** A *correctness* bug (a data race — Ch. 30, a missing atomic, a torn read — Ch. 35) is different from false sharing (a *performance* bug on correct code). Don't "fix" a race with padding (it's still a race — UB); don't chase a coherence-cost problem with locks. Diagnose which you have (TSan — Ch. 40 — for races; `perf c2c` for false sharing).
-- **Padding that breaks atomicity/alignment assumptions.** Adding padding can change a struct's size/layout in ways that affect `is_lock_free` (Ch. 30), ABI, or serialization (Ch. 53). Pad deliberately and re-check the constraints.
+- **Padding that breaks atomicity/alignment assumptions.** Adding padding can change a struct's size/layout in ways that affect `is_lock_free` (Ch. 30), ABI, or serialization (Ch. 54). Pad deliberately and re-check the constraints.
 
 ## 33.6 Exercises & checklist
 
@@ -182,7 +182,7 @@ The structural cure (ties Ch. 31): give each thread/core its own data, laid out 
 - [ ] I **padded only what actually false-shares** (hot + independently-written + measured) — no reflexive padding bloat that wastes memory or breaks within-thread locality (Ch. 7–9).
 - [ ] I accounted for **adjacent-line prefetch / 128-byte lines** (`hardware_destructive_interference_size` as the compile-time floor, the real penalty verified on the target) — not assumed 64 always suffices.
 - [ ] I distinguished **false sharing (a perf bug on correct code) from a data race (a correctness bug)** — padding for the former, atomics/synchronization (Ch. 30, TSan — Ch. 40) for the latter.
-- [ ] Padding didn't break **`is_lock_free`/ABI/serialization** assumptions (Ch. 30, 53).
+- [ ] Padding didn't break **`is_lock_free`/ABI/serialization** assumptions (Ch. 30, 54).
 
 ## 33.7 References
 
