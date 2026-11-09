@@ -63,10 +63,10 @@ def old2new(n):
 STOP = set("the and of for a an in on to vs with its it is from into at by your you how when what why not or as be this that are".split())
 def words(s): return set(w for w in re.findall(r"[a-z0-9_+]+", s.lower()) if w not in STOP and len(w) > 2)
 files = sorted(f for f in os.listdir(D) if f.endswith(".md") and f != "README.md")
-MAXCH = max(int(f[:2]) for f in files if re.match(r"^\d{2}-", f) and not f.startswith("00-"))
+MAXCH = max(int(f.split("-",1)[0]) for f in files if re.match(r"^\d{2,3}-", f) and not f.startswith("00-"))
 kw, titles = {}, {}
 for f in files:
-    m = re.match(r"^(\d{2})-", f)
+    m = re.match(r"^(\d{2,3})-", f)
     if not m: continue
     n = int(m.group(1)); k = set()
     for l in open(os.path.join(D, f), encoding="utf-8"):
@@ -77,7 +77,7 @@ for f in files:
     kw[n] = k
 out = collections.defaultdict(list)
 for f in files:
-    inf = False; own = int(f[:2]) if re.match(r"^\d{2}-", f) else None
+    inf = False; own = int(f.split("-",1)[0]) if re.match(r"^\d{2,3}-", f) else None
     for i, l in enumerate(open(os.path.join(D, f), encoding="utf-8"), 1):
         if FENCE.match(l): inf = not inf; continue
         for m in re.finditer(r"(?:\bCh(?:\.|apter)s?\s?|§\s?)(\d+)(?:\.\d+)?", l):
