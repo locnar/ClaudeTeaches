@@ -233,4 +233,4 @@ The convention, in one build line: `-O2 -g -march=<colo uarch> -fno-omit-frame-p
 
 ---
 
-*Next: Ch. 25 — Build Systems, Build-Time Hygiene & Hermetic Toolchains.*
+*Next: Ch. 25 — Build Systems, Build-Time Hygiene & Hermetic Toolchains, closing Part III: the build as a latency path (`-ftime-trace`, PCH, unity builds, `extern template` where it helps and where it hurts, C++20 modules where the toolchain can), and the build as a correctness boundary — one flag policy that cannot drift into an ODR violation, a pinned toolchain, and bit-for-bit reproducible binaries keyed by build ID.*

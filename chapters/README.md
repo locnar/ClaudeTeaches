@@ -356,12 +356,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 24.6 Exercises & checklist
 
 ### [25. Build Systems, Build-Time Hygiene & Hermetic Toolchains](25-build-systems-build-time-hygiene-hermetic-toolchains.md)
-- 25.1 Why it matters: TODO
-- 25.2 Mental model: TODO
-- 25.3 Measure it: TODO
+- 25.1 Why it matters: the build is a latency path, and a correctness boundary
+- 25.2 Mental model
+  - 25.2.1 Where the time goes: parse, instantiate, optimize, emit, link
+  - 25.2.2 The one-definition rule across flags: how builds drift
+  - 25.2.3 Hermeticity and reproducibility: controlling inputs, proving outputs
+  - 25.2.4 What a build system is for — CMake+Ninja and Bazel/Buck2 as policies
+- 25.3 Measure it: profiling the build like a latency path
 - 25.4 Techniques
-  - 25.4.1 TODO
-- 25.5 Pitfalls & anti-patterns: TODO
+  - 25.4.1 Profile the build: `-ftime-trace`, ClangBuildAnalyzer, `-ftime-report`
+  - 25.4.2 Explicit instantiation and `extern template` — when it pays, and when it costs
+  - 25.4.3 Precompiled headers and unity builds — and their ODR traps
+  - 25.4.4 C++20 modules today: what works, what does not
+  - 25.4.5 One flag policy without ODR/ABI drift
+  - 25.4.6 Hermetic, pinned toolchains and reproducible builds
+- 25.5 Pitfalls & anti-patterns: the build system is part of the type system
 - 25.6 Exercises & checklist
 
 ## Part IV — Memory Management
