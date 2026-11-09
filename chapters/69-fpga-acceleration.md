@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 66 (PCIe — the round-trip FPGAs avoid by going inline on the NIC), Ch. 53 (feed decoding — what an inline FPGA does in hardware), Ch. 55/62 (NIC / bypass — the FPGA sits on/replaces the NIC path), Ch. 1 (latency/determinism), Ch. 67–68 (GPU/MPI — the *throughput* accelerators; FPGA is the *latency* one).
 >
-> **Leads into:** Ch. 70 (SmartNICs/DPUs — programmable NICs, some FPGA-based), Ch. 53 (the feed handler, now partly in fabric), Ch. 76 (the wire-to-wire case study). Part XI's *latency*-tier accelerator — the one that *can* go on the tick-to-trade path.
+> **Leads into:** Ch. 70 (SmartNICs/DPUs — programmable NICs, some FPGA-based), Ch. 76 (the wire-to-wire case study). Part XI's *latency*-tier accelerator — the one that *can* go on the tick-to-trade path.
 
 ---
 
@@ -45,13 +45,15 @@ The model: **an FPGA is a configurable circuit (described in RTL — lowest late
 The FPGA's metric is **wire-to-wire latency** — from a packet arriving on the FPGA's input to the response leaving its output — measured with hardware timestamps (Ch. 55, 58). The headline: tens-to-hundreds of nanoseconds, *deterministic* (a flat distribution, the key property), an order of magnitude below software bypass (Ch. 62).
 
 ```
-   # Measure with hardware timestamps (Ch.55-58) at the FPGA's wire I/O, or an external timing tap:
-   #   t_out (order leaves) - t_in (feed packet arrives) = wire-to-wire latency
+   # Measure with hardware timestamps (Ch.55, 58) at the FPGA's wire I/O, or an external timing tap:
+   #   t_out (first bit of the order out) - t_in (LAST bit of the triggering field in) = wire-to-wire latency
+   #   (the STAC-T0 "actionable latency" convention; a first-bit-in convention adds the inbound serialization,
+   #    ~54 ns for a 68-byte frame at 10GbE, ~0.4 us for 507 bytes — comparable to the FPGA itself)
    # Compare: FPGA inline vs software kernel bypass (Ch.62) vs kernel stack (Ch.47).
    # The KEY metric is not just the median — it's the DISTRIBUTION (determinism / tail — Ch.1).
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — NIC-integrated FPGA inline path vs software (illustrative; the *tier* and the *determinism* are the point):
+Representative results (toolchain and machine: Appendix L.3 for the software rows) — a 10 GbE NIC-integrated FPGA (UltraScale+ class, ~300 MHz fabric clock) measured last-bit-in → first-bit-out at a PTP-timestamped tap (Ch. 58), vs software on the reference host (illustrative; the *tier* and the *determinism* are the point):
 
 ```
    tick-to-trade path                  wire-to-wire latency (p50)     p99 / tail        determinism
@@ -72,9 +74,10 @@ Read it: the FPGA inline path is **~10× lower latency than software kernel bypa
 
 The canonical HFT FPGA — the trading pipeline *in fabric on the NIC*:
 
-- **The FPGA *is* (part of) the NIC.** A NIC-integrated FPGA (or an FPGA SmartNIC — Ch. 70) puts the fabric *on the wire path* — packets arrive at the FPGA's MAC/PHY, flow through your circuit, and orders leave from the FPGA — *inline*, nanoseconds, no host (§69.2). Vendors: Exablaze/Cisco (ExaNIC + FPGA), AMD/Xilinx (Alveo, and the Solarflare X2/X3 with FPGA), Napatech, etc.
+- **The FPGA *is* (part of) the NIC.** A NIC-integrated FPGA (or an FPGA SmartNIC — Ch. 70) puts the fabric *on the wire path* — packets arrive at the FPGA's MAC/PHY, flow through your circuit, and orders leave from the FPGA — *inline*, nanoseconds, no host (§69.2). Vendors: AMD/Xilinx (the Alveo UL3524 trading accelerator; Alveo X3522/X3522PV — an UltraScale+ FPGA NIC with user logic via hybrid mode / the PV variant; note the Solarflare X2 series is an ASIC NIC with no FPGA), Cisco/Exablaze ExaNIC (FDK-programmable FPGA), Napatech, Intel/Altera-based cards.
 - **Feed handling in fabric (Ch. 53).** The market-data decode (Ch. 53 — parse the fixed-binary message, extract price/qty/symbol) is a *fixed-layout, deterministic* operation — ideal for hardware. The FPGA parses the feed at the wire (a hardware version of Ch. 53's overlay), maintains a (simple) book or top-of-book in block RAM, and detects the trigger conditions — all in nanoseconds.
 - **Pre-trade risk and order entry in fabric.** A **fast pre-trade risk check** (price/size limits, position checks — Ch. 27's integer math in hardware) and **order generation** (build the order message — Ch. 53's encoding in reverse) in fabric → the FPGA can decide and *emit an order* wire-to-wire without the CPU. Risk checks in hardware are also a *safety* mechanism (a hardware kill-switch — Ch. 74).
+- **Order-entry transport: who owns the TCP session?** Most venues take orders over **TCP** sessions (OUCH, FIX, binary gateways), and TCP in fabric means a **TCP offload engine** — hard, and a major vendor differentiator. The standard HFT hybrid avoids it: the **CPU keeps the session** (handshake, keep-alives, retransmission, sequence numbers) and **pre-arms** complete order frames — headers, sequence numbers and checksums precomputed — that the FPGA **fires** on a trigger, then hands back to the host to reconcile the stream. This "CPU arms / FPGA fires" split is why the partition of §69.4.3 puts the *decision* in fabric but the *session* in software.
 - **The CPU handles the complex/rare (§69.4.3).** The FPGA does the *simple, hot* path; complex strategy logic, the full book, rare cases, and reconfiguration are in *software* on the host (over PCIe — Ch. 66, off the hot path). The FPGA and CPU split the work by latency-criticality (§69.4.3). A common pattern: the FPGA handles the simplest "obvious" trades at nanosecond latency, and passes everything else to the software strategy.
 - **Hardware timestamping (Ch. 55, 58).** FPGA NICs provide extremely precise hardware timestamps (Ch. 55, 58) — the FPGA stamps packets at the wire with sub-nanosecond precision — for measurement (Ch. 76) and sequencing. Often the *best* timestamps available.
 

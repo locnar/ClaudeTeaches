@@ -891,7 +891,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 71.3 Measure it: log-call cost on the hot path
 - 71.4 Techniques
   - 71.4.1 Async/lock-free loggers
-  - 71.4.2 Binary logging with off-line formatting
+  - 71.4.2 Binary logging with offline formatting
   - 71.4.3 `std::print`/`std::println` for off-hot-path output
 - 71.5 Verify the codegen: the hot-path log call is a few stores
 - 71.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O

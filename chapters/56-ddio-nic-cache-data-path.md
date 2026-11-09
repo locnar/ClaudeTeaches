@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 7 (the cache hierarchy — DDIO targets L3), Ch. 66 (PCIe and DMA — how the NIC writes to the host), Ch. 55 (NIC features — descriptors, RX rings), Ch. 16 (NUMA — DDIO is socket-local), Ch. 44 (CAT — the tool for keeping DDIO and the hot working set apart), Ch. 62 (kernel bypass — the path DDIO most helps).
 >
-> **Leads into:** Ch. 60 (the fabric that delivers the packets DDIO catches), Appendix E (add the DDIO-hit vs DRAM RX numbers). The NIC-to-cache deep-dive behind the receive path: where a received packet physically lands, and why that decides the first few nanoseconds of tick-to-trade — building on the cache partitioning of Ch. 44 and the NIC of Ch. 55.
+> **Leads into:** Ch. 57 (flow steering — landing the packet on the core, and in the socket's L3, that owns it), Ch. 60 (the fabric that delivers the packets DDIO catches), Appendix E (the L3 vs local-DRAM vs NUMA-remote numbers that set the RX floor). The NIC-to-cache deep-dive behind the receive path: where a received packet physically lands, and why that decides the first few nanoseconds of tick-to-trade — building on the cache partitioning of Ch. 44 and the NIC of Ch. 55.
 
 ---
 
@@ -29,9 +29,9 @@ Normally a device DMA writes to **DRAM**, and the CPU later pulls the data into 
 
 The mechanics that matter:
 
-- **DDIO writes land in a limited portion of L3.** DDIO does not get the whole cache; it uses a bounded number of L3 ways (historically ~2 ways on many Xeons) for **write-allocate** of inbound DMA. Think of it as a small, fixed window through which *all* inbound I/O streams. This bound is deliberate — it stops I/O from evicting the entire cache — but it means high packet rates churn that small window fast (the "leaky bucket").
+- **DDIO writes land in a limited portion of L3.** DDIO does not get the whole cache; it uses a bounded number of L3 ways (historically ~2 ways on many Xeons) for **write-allocate** of inbound DMA. Strictly, the way limit applies only to write-allocate (a DMA write that *misses* L3); a DMA write that hits a line already in L3 updates it in place wherever it lives — which is why recycling a small RX buffer pool keeps packets hot while a huge ring streams through the window (§56.4.1, §56.5). Think of it as a small, fixed window through which *new* inbound I/O lines stream. This bound is deliberate — it stops I/O from evicting the entire cache — but it means high packet rates churn that small window fast (the "leaky bucket").
 - **Allocating vs non-allocating writes.** DDIO does a **write-allocate** into L3 for inbound data (so the CPU finds it hot). Outbound DMA (TX — the NIC *reading* your descriptors/buffers) is served from L3 if present. The read of a device register is still a full PCIe round-trip (Ch. 66); DDIO is about the *bulk data* path.
-- **It's socket-local (NUMA — Ch. 16).** DDIO targets the L3 of the socket the **NIC is attached to** (via its PCIe root complex). If your hot thread runs on a *different* socket than the NIC, the packet lands in the *wrong* socket's L3 and your read is a cross-socket access (~130–180 ns, Ch. 16) — worse than local DRAM. NIC-to-core NUMA locality (Ch. 16, 42) is a *precondition* for DDIO to help.
+- **It's socket-local (NUMA — Ch. 16).** DDIO targets the L3 of the socket the **NIC is attached to** (via its PCIe root complex). If your hot thread runs on a *different* socket than the NIC, the packet lands in the *wrong* socket's L3 and your read is a remote-L3 hit served over UPI — above local DRAM and bounded by the NUMA-remote DRAM figure (~130–180 ns, Ch. 16 / Appendix E) — worse than local DRAM. NIC-to-core NUMA locality (Ch. 16, 42) is a *precondition* for DDIO to help.
 - **Descriptors and buffers both flow through it.** The NIC writes RX descriptors and packet buffers (Ch. 55) via DMA; with DDIO both can be L3-resident, so the poll loop's descriptor check *and* the packet read are hits — provided the working set of RX buffers fits the DDIO window.
 
 The mental model: **DDIO is a small, always-on cache region that inbound I/O streams through.** Used well (RX buffers sized to the window, NIC-local socket, region kept disjoint from hot data), it makes received packets hot for free. Used blindly, it's a firehose pointed at a corner of your L3 that can wash out whatever hot data shares those ways.
@@ -42,13 +42,13 @@ The mental model: **DDIO is a small, always-on cache region that inbound I/O str
 
 Two things to measure: the **RX latency benefit** (does the packet arrive hot?) and the **pollution cost** (does RX evict the hot working set, or vice versa?).
 
-**RX latency** — time from "packet DMA'd" to "decoder's first read completes," for DDIO-hit vs DRAM. Measure the decode's first-access latency (Ch. 3) and confirm with `perf` L3-vs-DRAM counters (Ch. 2). Representative (Xeon Gold 6326, NIC on the local socket, kernel bypass — Ch. 62; figures pending real runs):
+**RX latency** — time from "packet DMA'd" to "decoder's first read completes," for DDIO-hit vs DRAM. Measure the decode's first-access latency (Ch. 3) and confirm it two ways (Ch. 2): the consumer side with `perf stat -e mem_load_retired.l3_hit,mem_load_retired.l3_miss -C <poll-core>`, and the inbound DMA itself with Intel PCM's `pcm-pcie -B`, which prints PCIe write/read LLC hit vs miss counts (the uncore CHA TOR events filtered on I/O opcodes — core-side counters alone cannot tell whether the DMA allocated in L3). Representative (dual-socket 2× Xeon Gold 6326 as in Ch. 16 — the cross-socket row needs the second socket — Linux 6.x, 25 GbE NIC under kernel bypass — Ch. 62; figures pending real runs):
 
 | Condition | First-read of packet | Notes |
 |---|---|---|
 | **DDIO hit** (packet in L3, NIC-local) | ~15–20 ns | the intended path — decode starts on a warm packet (Ch. 53) |
 | **DDIO disabled / evicted** (packet in DRAM) | ~80–100 ns | cold miss to main memory on the first byte |
-| **Cross-socket** (NIC on other socket, Ch. 16) | ~130–180 ns | packet landed in the *wrong* L3 — worse than local DRAM |
+| **Remote-L3 hit** (NIC on other socket, Ch. 16) | ~100–180 ns | packet landed in the *wrong* socket's L3, served over UPI — worse than local DRAM, bounded by remote DRAM (Appendix E) |
 
 **DDIO pollution** — the reverse effect: does heavy RX evict hot data? Run the hot lookup loop (working set in L3, Ch. 44) while driving high packet rates, and measure the hot path's L3 miss rate and tail (Ch. 3) as packet rate climbs:
 
@@ -82,8 +82,8 @@ The key combined technique (with Ch. 44): stop the NIC's DMA and the strategy's 
 
 - **Give the DDIO region and the hot data disjoint L3 ways.** By default the DDIO ways and your hot working set share the same L3 pool and can evict each other (§56.3). Using CAT (Ch. 44), reserve a CLOS for the hot core's data with ways that **do not overlap** the ways DDIO writes into. On parts that expose DDIO way control (`IIO LLC WAYS` MSR / BIOS knob), you can set the DDIO region explicitly; combined with a complementary CAT mask for the hot path, RX streams through *its* ways and the strategy lives in *its* ways — neither evicts the other.
 - **Tune the DDIO way count if the platform allows.** Some platforms let you widen or narrow the DDIO region (via MSR or BIOS). Widen it if you have many RX queues / high packet rates and packets are spilling to DRAM before you read them; keep it narrow (and CAT-isolated) if RX is modest and you want to protect hot data. Measure both the RX first-read latency (§56.3) *and* the hot-path tail — you're balancing DDIO residency against hot-data protection.
-- **Monitor with CMT (Ch. 44).** Watch the occupancy of the DDIO/RX region vs the hot region. If the hot region's occupancy dips under RX load, the regions are still fighting — the masks overlap or the DDIO region is too wide. CMT makes the fight visible (Ch. 76).
-- **This is the resolution of §56.3's pollution.** Separation gives you *both* halves: DDIO keeps packets hot (fast decode) *and* CAT keeps the strategy hot (no eviction). It's why Ch. 44 and Ch. 56 are adjacent — cache partitioning is what makes DDIO safe on a busy hot path.
+- **Monitor with CMT (Ch. 44) and the uncore.** Watch the *hot thread's* L3 occupancy with CMT: if it dips under RX load, the regions are still fighting — the masks overlap or the DDIO region is too wide. CMT cannot see the DDIO side directly (on Ice Lake-SP inbound DMA carries no RMID; per-I/O RMID/CLOS tagging is the later I/O RDT feature), so observe DDIO itself with Intel PCM's `pcm-pcie` (PCIe write/read LLC hit vs miss — §56.3). Together they make the fight visible (Ch. 76).
+- **This is the resolution of §56.3's pollution.** Separation gives you *both* halves: DDIO keeps packets hot (fast decode) *and* CAT keeps the strategy hot (no eviction). It's why Ch. 56 builds directly on Ch. 44 — cache partitioning is what makes DDIO safe on a busy hot path.
 
 ### 56.4.3 When to disable DDIO, and cross-socket/peer-to-peer cases
 
@@ -95,7 +95,7 @@ The edge cases:
 
 ## 56.5 Pitfalls & anti-patterns: DDIO thrashing and the cross-socket trap
 
-- **The cross-socket trap (the cardinal DDIO error).** Running the hot RX thread on a different socket than the NIC — DDIO lands the packet in the NIC's socket's L3, and your read is a cross-socket access (~130–180 ns, Ch. 16), *worse* than if DDIO were off. Always pin the RX consumer (and its buffers) to the NIC's NUMA node (§56.4.1). This silently negates every other optimization.
+- **The cross-socket trap (the cardinal DDIO error).** Running the hot RX thread on a different socket than the NIC — DDIO lands the packet in the NIC's socket's L3, and your read is a remote-L3 hit over UPI (~100–180 ns, bounded by remote DRAM — Ch. 16, §56.3), *worse* than if DDIO were off. Always pin the RX consumer (and its buffers) to the NIC's NUMA node (§56.4.1). This silently negates every other optimization.
 - **DDIO thrashing under load (the leaky bucket).** Blindly trusting DDIO's default small region under a market-open packet flood (Ch. 53) — the region churns, packets spill to DRAM before you read them, *and* the spillover evicts hot data. The symptom is a tail that climbs with packet rate (§56.3). Fix by separating regions (CAT, §56.4.2) and sizing RX buffers to the window (§56.4.1).
 - **Huge RX rings defeating DDIO.** Oversizing RX rings for microburst absorption (Ch. 53) without regard for the DDIO window — the NIC cycles through more buffers than the DDIO region holds, so packets are evicted to DRAM before the poll loop reaches them. Balance ring size against DDIO residency; measure RX first-read latency (§56.3), not just drop rate.
 - **Disabling DDIO to "fix" pollution.** Turning DDIO off removes the pollution but also the RX win — now *every* packet read is a DRAM miss (§56.3). The right fix is *separation* (CAT), not disabling; disable only for traffic you don't read promptly (§56.4.3).

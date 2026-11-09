@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 66 (PCIe — the host-device round-trip that keeps GPUs off the order path), Ch. 29 (SIMD — GPUs are SIMD taken to the extreme), Ch. 1 (latency vs throughput — GPUs are a throughput device), Ch. 23 (pinned memory — for fast transfers), Ch. 7–8 (memory/data layout — GPU memory coalescing).
 >
-> **Leads into:** Ch. 68 (MPI — multi-GPU/multi-node scaling), Ch. 66 (the PCIe boundary), Ch. 70 (SmartNICs/GPUDirect). Part XI's first concrete accelerator — the throughput offload for the *off-hot-path* compute (risk, pricing, ML), explicitly *not* the tick-to-trade path.
+> **Leads into:** Ch. 68 (MPI — multi-GPU/multi-node scaling), Ch. 70 (SmartNICs/GPUDirect), Ch. 76 (the batch-tier analytics in the case study). Part XI's first concrete accelerator — the throughput offload for the *off-hot-path* compute (risk, pricing, ML), explicitly *not* the tick-to-trade path.
 
 ---
 
@@ -12,7 +12,7 @@
 
 A GPU is a **throughput** machine of staggering scale: thousands of cores executing the same operation across thousands of data elements in parallel — SIMD (Ch. 29) taken to an extreme, with terabytes-per-second of memory bandwidth. For **data-parallel** work — the same computation applied independently across a huge dataset — a GPU can be 10-100× a CPU. In trading, that work *exists*, in abundance, just **not on the tick-to-trade hot path**: **risk** calculation across a whole portfolio, **options pricing** and Greeks across thousands of instruments, **Monte-Carlo** simulation (millions of paths), **backtesting** across years of history and parameter sweeps, and **ML inference/training** for signal models. These are big, parallel, latency-*insensitive* (they run periodically/in batch, with budgets in milliseconds-to-seconds, not nanoseconds) — the perfect GPU workload. So GPUs are a real and valuable tool in a trading firm — for the **analytical/research/risk** tier, run off the latency-critical path.
 
-The "why **not** the order path" is the chapter's other half, and it follows directly from Ch. 66: the GPU is a **PCIe device**, so using it costs a **PCIe round-trip** (Ch. 66) — you must transfer data *to* the GPU, launch a kernel, and transfer the result *back*, and that round-trip is **microseconds** (the PCIe floor — Ch. 66) *plus* kernel-launch overhead *plus* the transfer time for the data. On a tick-to-trade path budgeted in *hundreds of nanoseconds*, a microsecond-plus PCIe round-trip is disqualifying — the GPU could compute the answer infinitely fast and you'd *still* lose on the transfer. GPUs are **throughput-optimized, latency-pessimal** for small operations: their strength (massive parallelism) requires *large* batches to fill, and feeding/draining them crosses PCIe. So the tick-to-trade decision (one message, latency-bound) is *never* a GPU; the GPU is for the *batch* analytics around it. This is the Ch. 1 latency-vs-throughput dichotomy and the Ch. 66 PCIe floor, made concrete in the first accelerator.
+The "why **not** the order path" is the chapter's other half, and it follows directly from Ch. 66: the GPU is a **PCIe device**, so using it costs a **PCIe round-trip** (Ch. 66) — you must transfer data *to* the GPU, launch a kernel, and transfer the result *back*, and that costs a PCIe round-trip (~0.3–1 µs — Ch. 66) *plus* ~2–5 µs of kernel-launch overhead *plus* the transfer time for the data — **several microseconds** in total. On a tick-to-trade path budgeted in *hundreds of nanoseconds*, a microsecond-plus PCIe round-trip is disqualifying — the GPU could compute the answer infinitely fast and you'd *still* lose on the transfer. GPUs are **throughput-optimized, latency-pessimal** for small operations: their strength (massive parallelism) requires *large* batches to fill, and feeding/draining them crosses PCIe. So the tick-to-trade decision (one message, latency-bound) is *never* a GPU; the GPU is for the *batch* analytics around it. This is the Ch. 1 latency-vs-throughput dichotomy and the Ch. 66 PCIe floor, made concrete in the first accelerator.
 
 The discipline that makes GPU use *correct* — and the chapter's measurement theme — is to **measure end-to-end, including the transfer, not just the kernel time.** The classic mistake is to benchmark the GPU *kernel* (the compute) in isolation, see a 50× speedup, and conclude the GPU "wins" — while ignoring that the host↔device transfer (Ch. 66's bandwidth) and the PCIe round-trip dominate the *actual* end-to-end time. A computation that's 50× faster on the GPU kernel but spends 90% of its wall-clock transferring data may be *slower* than the CPU overall. The real win requires the work to be **big enough to amortize the transfer** (compute-bound, not transfer-bound) and ideally to **overlap transfer with compute** (§67.4.2) and keep data resident on the GPU across operations. This chapter explains the CUDA execution/memory model (§67.2), measures the end-to-end-vs-kernel-only gap (§67.3), details transfers/pinned-memory/streams/overlap and where GPUs pay off (§67.4), and warns about putting a GPU on the tick-to-trade path (§67.5). It's the throughput accelerator for the off-hot-path tier.
 
@@ -57,19 +57,35 @@ The decisive measurement — the one the classic mistake skips: **end-to-end tim
 
 ```cpp
 // gpu_e2e.cu (CUDA) — measure kernel-only vs end-to-end (with transfer) for a vector op.
+#include <cstdio>
+#include <cuda_runtime.h>
 // Build: nvcc -std=c++20 -O3 -arch=sm_80 gpu_e2e.cu -o gpu_e2e   (CUDA 12.x; a .cpp input would be
 //        treated as host-only C++ -- keep the .cu extension or pass -x cu)
 __global__ void saxpy(float* y, const float* x, float a, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) y[i] = a * x[i] + y[i];           // data-parallel: one thread per element
 }
-// host: cudaMemcpy h2d (TIME IT), launch kernel (TIME IT), cudaMemcpy d2h (TIME IT)
+// Host side: launches and cudaMemcpyAsync return BEFORE the work is done, so a std::chrono clock around
+// kernel<<<>>> measures only the enqueue. Time each phase with events on the same stream (or cudaDeviceSynchronize first):
+void run(float* hx, float* hy, float* dx, float* dy, int n) {
+    cudaEvent_t e[4]; for (auto& ev : e) cudaEventCreate(&ev);
+    cudaEventRecord(e[0]);
+    cudaMemcpy(dx, hx, n * sizeof(float), cudaMemcpyHostToDevice);      // h2d (pinned host memory: §67.4.1)
+    cudaMemcpy(dy, hy, n * sizeof(float), cudaMemcpyHostToDevice);
+    cudaEventRecord(e[1]);
+    saxpy<<<(n + 255) / 256, 256>>>(dy, dx, 2.0f, n);                      // launch + kernel
+    cudaEventRecord(e[2]);
+    cudaMemcpy(hy, dy, n * sizeof(float), cudaMemcpyDeviceToHost);      // d2h
+    cudaEventRecord(e[3]); cudaEventSynchronize(e[3]);
+    float h2d, kern, d2h; cudaEventElapsedTime(&h2d, e[0], e[1]); cudaEventElapsedTime(&kern, e[1], e[2]); cudaEventElapsedTime(&d2h, e[2], e[3]);
+    std::printf("n=%d  kernel-only %.1f us   end-to-end %.1f us\n", n, kern * 1e3f, (h2d + kern + d2h) * 1e3f);
+}
 //   end_to_end = h2d + launch + kernel + d2h     ← the real cost
 //   kernel_only = kernel                          ← the flattering, misleading number
-//   compare to a CPU SIMD version (Ch.29) for the same work.
+//   compare to a CPU SIMD version (Ch.29) for the same work; CUDA Graphs amortize the ~µs launch cost of repeated small kernels.
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — a mid-range GPU over PCIe Gen4 x16, vector op (illustrative; the *gap* is the point):
+Representative results (toolchain and machine: Appendix L.3 for the host) — an NVIDIA A10-class GPU (Ampere, `sm_86`) on a PCIe Gen4 x16 link negotiated at full width (`lspci -vv`), CUDA 12.x with host GCC 13 (`nvcc -std=c++20 -O3 -arch=sm_86`; nvcc 12 accepts `-std=c++20` for host *and* device code, with the host compiler versions the CUDA release notes list), vector op (illustrative; the *gap* is the point):
 
 ```
    problem size      CPU (SIMD, Ch.29)   GPU kernel-only   GPU end-to-end (w/ transfer)   verdict
@@ -78,10 +94,10 @@ Representative results (toolchain and machine: Appendix L.3) — a mid-range GPU
    large (100M)      ~30 ms              ~2 ms             ~50 ms (1.2 GB over PCIe)       CPU wins (transfer-bound)
    large, DATA RESIDENT on GPU (no transfer per op)        ~2 ms                           GPU wins big
 
-   the trap: GPU "kernel-only" is 15-50x faster — but END-TO-END, transfer dominates until the data is RESIDENT.
+   the trap: GPU "kernel-only" is ~15x faster here (far more for compute-bound kernels) — but END-TO-END, transfer dominates until the data is RESIDENT.
 ```
 
-Read it: the **kernel-only number is 15-50× faster and *misleading*** — the **end-to-end** number (including the PCIe transfer — Ch. 66) tells the real story. For **small** work, the GPU *loses badly*: the kernel-launch overhead (~µs) and PCIe round-trip (Ch. 66) dwarf the tiny compute — a 1K-element op is ~10 µs end-to-end on the GPU vs ~0.5 µs on the CPU. For **medium** work, the transfer dominates (transfer-bound — the data movement, not the compute) — often a tie or CPU win. Even **large** work does not rescue a memory-bound op like saxpy: 100M floats means 1.2 GB over the bus (x and y in, y out), ~50 ms at the ~25 GB/s a Gen4 x16 link delivers in practice (Ch. 66) — against ~30 ms on the CPU. Only **compute-bound** work (many FLOPs per byte moved — pricing, Monte-Carlo) can amortize the transfer — and the GPU wins *hugely* when **data stays resident on the GPU** across many operations (no per-op transfer — the last row). The lessons that govern GPU use: **(1) measure end-to-end, never kernel-only** (the classic mistake); **(2) the work must be compute-dense enough (FLOPs per byte moved) to amortize the PCIe transfer** (Ch. 66) — small or memory-bound ops belong on the CPU; **(3) keep data resident on the GPU** across operations to avoid repeated transfers (the biggest practical win); **(4) the latency-bound order path — small, single, nanosecond — is *never* a GPU** (§67.5). The GPU is for large batch analytics where the throughput swamps the transfer.
+Read it: the **kernel-only number is ~15× faster in this table (far more for compute-bound kernels) and *misleading*** — the **end-to-end** number (including the PCIe transfer — Ch. 66) tells the real story. For **small** work, the GPU *loses badly*: the kernel-launch overhead (~µs) and PCIe round-trip (Ch. 66) dwarf the tiny compute — a 1K-element op is ~10 µs end-to-end on the GPU vs ~0.5 µs on the CPU. For **medium** work, the transfer dominates (transfer-bound — the data movement, not the compute) — often a tie or CPU win. Even **large** work does not rescue a memory-bound op like saxpy: 100M floats means 1.2 GB over the bus (x and y in, y out), ~50 ms at the ~25 GB/s a Gen4 x16 link delivers in practice (Ch. 66) — against ~30 ms on the CPU. Only **compute-bound** work (many FLOPs per byte moved — pricing, Monte-Carlo) can amortize the transfer — and the GPU wins *hugely* when **data stays resident on the GPU** across many operations (no per-op transfer — the last row). The lessons that govern GPU use: **(1) measure end-to-end, never kernel-only** (the classic mistake); **(2) the work must be compute-dense enough (FLOPs per byte moved) to amortize the PCIe transfer** (Ch. 66) — small or memory-bound ops belong on the CPU; **(3) keep data resident on the GPU** across operations to avoid repeated transfers (the biggest practical win); **(4) the latency-bound order path — small, single, nanosecond — is *never* a GPU** (§67.5). The GPU is for large batch analytics where the throughput swamps the transfer.
 
 ## 67.4 Techniques
 
@@ -92,7 +108,7 @@ Minimizing and accelerating the transfer that dominates (§67.3, Ch. 66):
 - **Pinned (page-locked) host memory (Ch. 23).** `cudaMemcpy` from *pageable* host memory is slow — the driver must stage it through a pinned bounce buffer. **Pinned memory** (`cudaHostAlloc`/`cudaMallocHost`) — page-locked (Ch. 23, like RDMA registration — Ch. 63) — DMA's directly, ~2× the transfer bandwidth, and enables *async* transfer (§67.4.2). Use pinned host buffers for all host↔device transfer. (Pinning is the Ch. 23 discipline; pin a bounded pool, reuse it.)
 - **Minimize transfers — keep data resident.** The biggest win (§67.3): transfer data to the GPU *once* and run *many* operations on it without copying back, copying results back only at the end. Restructure pipelines so data stays GPU-resident across kernels — avoid the per-operation round-trip (Ch. 66). A sequence of GPU operations on resident data amortizes one transfer over all of them.
 - **Unified memory (`cudaMallocManaged`).** A *single* pointer accessible from both host and device, with the driver migrating pages on demand — *convenient* (no explicit copies). But the migration is *implicit* (page faults move data — Ch. 23, at GPU scale) and can be *slower/less predictable* than explicit transfers if you don't prefetch/hint (`cudaMemPrefetchAsync`). Good for productivity/complex access patterns; for performance-critical transfers, explicit pinned transfers give control. Know which you're using.
-- **GPUDirect (Ch. 66).** For network-fed GPU work (Ch. 68), **GPUDirect RDMA** (Ch. 66.4.3) DMA's network data *directly* into GPU memory — bypassing the host-memory bounce. Relevant for distributed/streaming GPU pipelines.
+- **GPUDirect (Ch. 66).** For network-fed GPU work (Ch. 68), **GPUDirect RDMA** (§66.4.3) DMA's network data *directly* into GPU memory — bypassing the host-memory bounce. Relevant for distributed/streaming GPU pipelines.
 - **Right-size the transfer.** Many small transfers pay per-transfer overhead; **batch** into fewer large transfers (Ch. 37's batching, at the PCIe level). Transfer the whole batch, not element-by-element.
 
 ### 67.4.2 Streams and compute/transfer overlap
@@ -100,7 +116,7 @@ Minimizing and accelerating the transfer that dominates (§67.3, Ch. 66):
 Hiding the transfer cost by overlapping it with compute (the key throughput technique):
 
 - **CUDA streams — concurrent operation queues.** A **stream** is a queue of GPU operations (transfers, kernels) that execute in order; *different* streams can execute **concurrently**. By splitting work across streams, you overlap operations that would otherwise serialize.
-- **Overlap transfer with compute.** The classic pattern: while the GPU *computes* on chunk N (kernel), simultaneously *transfer* chunk N+1 (h2d) and chunk N-1's result (d2h) — using multiple streams and **async** transfers (`cudaMemcpyAsync`, which requires *pinned* memory — §67.4.1). This **hides the transfer behind the compute** — so the end-to-end time approaches the compute time (instead of compute + transfer), closing the §67.3 gap. The GPU pipelines transfer and compute like the Disruptor pipelines stages (Ch. 37).
+- **Overlap transfer with compute.** The classic pattern: while the GPU *computes* on chunk N (kernel), simultaneously *transfer* chunk N+1 (h2d) and chunk N-1's result (d2h) — using multiple streams and **async** transfers (`cudaMemcpyAsync`, which is only truly asynchronous — and overlappable — with *pinned* host memory; with pageable memory it silently degrades to a host-synchronous staged copy — §67.4.1). This **hides the transfer behind the compute** — so the end-to-end time approaches the compute time (instead of compute + transfer), closing the §67.3 gap. The GPU pipelines transfer and compute like the Disruptor pipelines stages (Ch. 37).
 - **Overlap with the CPU.** Async kernel launches don't block the CPU — the CPU can do other work (or queue more GPU work) while the GPU computes. Keep both busy.
 - **Multiple kernels concurrently.** Independent kernels in different streams can run concurrently on the GPU (if resources allow) — more parallelism. 
 - **The result.** With overlap, a transfer-bound workload (§67.3) can become compute-bound — the transfer is hidden, so end-to-end ≈ kernel time. This is how you *get* the GPU's throughput on a streaming workload, and a key reason to keep enough work in flight to fill the pipeline.
@@ -119,9 +135,9 @@ The trading workloads that fit the GPU (big, parallel, latency-insensitive — o
 ## 67.5 Pitfalls & anti-patterns: PCIe latency on the tick-to-trade path
 
 - **A GPU on the tick-to-trade path (the cardinal sin).** The latency-critical path (one message, hundreds of ns) **cannot** use a GPU — the PCIe round-trip (Ch. 66) + kernel launch + transfer is *microseconds*, disqualifying regardless of how fast the kernel is (§67.1, §67.3). The order path's compute stays on the CPU (or FPGA inline — Ch. 69). GPUs are for the *batch* tier only.
-- **Measuring kernel-only, not end-to-end (the classic mistake).** Benchmarking the GPU kernel in isolation shows a flattering 15-50× speedup while hiding that the transfer (Ch. 66) dominates the *actual* time (§67.3). **Always measure end-to-end** (transfer + launch + kernel + transfer); the kernel-only number is misleading.
+- **Measuring kernel-only, not end-to-end (the classic mistake).** Benchmarking the GPU kernel in isolation shows a flattering 15× (or far larger) speedup while hiding that the transfer (Ch. 66) dominates the *actual* time (§67.3). **Always measure end-to-end** (transfer + launch + kernel + transfer); the kernel-only number is misleading.
 - **Too-small work / per-operation transfer.** Offloading work too small to amortize the transfer (§67.3) — or transferring data per operation instead of keeping it GPU-resident — makes the GPU *slower* than the CPU. Keep data resident, batch operations, only offload big work.
-- **Pageable (un-pinned) host memory (Ch. 23).** Transferring from pageable memory is ~2× slower (staged through a bounce buffer) and can't be async. Use **pinned** memory (§67.4.1) for all transfers.
+- **Pageable (un-pinned) host memory (Ch. 23).** Transferring from pageable memory is ~2× slower (staged through a bounce buffer) and `cudaMemcpyAsync` silently becomes host-synchronous. Use **pinned** memory (§67.4.1) for all transfers.
 - **Warp divergence (Ch. 13).** Data-dependent branches within a warp serialize both paths (§67.2) — the GPU branch cost. Structure data-parallel code so threads in a warp take the same path (sort/partition data — Ch. 13, minimize divergence).
 - **Uncoalesced global-memory access (Ch. 7–8).** Threads in a warp accessing scattered/strided global memory waste bandwidth (the GPU's cache-layout problem — Ch. 8, amplified). Lay out data so warp accesses are **coalesced** (contiguous) — SoA (Ch. 8) for the GPU.
 - **Low occupancy.** Too few resident warps (high register/shared-memory use per thread) means the SM can't hide memory latency — low utilization. Tune occupancy (block size, register usage) — the GPU's latency-hiding (Ch. 11's ILP analog).
@@ -154,8 +170,8 @@ The trading workloads that fit the GPU (big, parallel, latency-insensitive — o
 
 - The NVIDIA **CUDA C++ Programming Guide** and **Best Practices Guide** — the execution/memory model, warps/occupancy, coalescing, streams, pinned/unified memory (the basis of §67.2, §67.4).
 - M. Harris / NVIDIA developer blog posts on overlapping transfer and compute, pinned memory, and end-to-end vs kernel timing (§67.3, §67.4.2).
-- The CUDA samples and `nvprof`/Nsight profiling tools — measuring end-to-end vs kernel time, occupancy, and transfer (§67.3).
-- Quantitative-finance-on-GPU literature (Monte-Carlo option pricing, risk on GPUs) — the workloads of §67.4.3 (e.g. the QuantLib-GPU / cuQuant ecosystems).
+- The CUDA samples and Nsight Systems (`nsys`, end-to-end timelines) / Nsight Compute (`ncu`, kernel internals) — measuring end-to-end vs kernel time, occupancy, and transfer (§67.3); `nvprof` is legacy, pre-Ampere only.
+- Quantitative-finance-on-GPU literature (Monte-Carlo option pricing, risk on GPUs) — the workloads of §67.4.3 (the NVIDIA cuRAND Monte-Carlo samples; Grauer-Gray et al., "Accelerating Financial Applications on the GPU", GPGPU-6 2013 — the QuantLib-on-GPU study; vendor quant-finance material from NVIDIA Financial Services and Xcelerit).
 - Ch. 66 references (PCIe, GPUDirect) — the host-device boundary that governs §67.1, §67.3.
 
 ## 67.8 Additional Reading
@@ -163,7 +179,7 @@ The trading workloads that fit the GPU (big, parallel, latency-insensitive — o
 - The NVIDIA Nsight Systems/Compute documentation — profiling GPU end-to-end and kernel internals.
 - Talks on GPUs in quant finance and risk — where GPUs pay off and the batch-vs-latency framing (§67.4.3, §67.5).
 - Ch. 66 (*PCIe*) — the round-trip floor that keeps GPUs off the order path; Ch. 29 (*SIMD*) — the CPU data-parallelism GPUs extend; Ch. 68 (*MPI*) — multi-GPU/multi-node scaling; Ch. 69 (*FPGA*) — the *latency*-tier accelerator (inline, no PCIe round-trip) for the order path; Ch. 1 (*Latency vs Throughput*) — the framing; Ch. 8/13 (*Layout/Branches*) — coalescing/divergence analogs.
-- **Appendix E** — PCIe transfer and GPU offload end-to-end numbers; **Appendix F** — CUDA/warp/occupancy/coalescing glossary.
+- **Appendix E** — the PCIe round-trip row (the floor under the end-to-end numbers of §67.3); **Appendix F** — CUDA/warp/occupancy/coalescing glossary.
 
 ---
 

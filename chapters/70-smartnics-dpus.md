@@ -28,8 +28,8 @@ A DPU is **a computer between the wire and the host**. Picture the data path:
 
 The DPU has its own NIC silicon (the actual Ethernet MAC/PHY and the fixed offloads of Ch. 55), **plus** a programmable compute complex:
 
-- **ARM-core DPUs (NVIDIA BlueField-2/3, AMD Pensando, Intel IPU):** a cluster of ARM cores (8-16, ~2-3 GHz) running a full Linux, with their own DRAM. You write *software* (C/C++, eBPF, P4, DOCA) that runs on those cores. Flexible, familiar, software-paced — but the cores are slower than host x86 and *software on the DPU still has the software costs* (cache misses, branch mispredicts, jitter — Ch. 7/13/41), just on a smaller, more isolated machine.
-- **FPGA DPUs / FPGA-NICs (Napatech, AMD/Xilinx Alveo, some BlueField variants with FPGA):** programmable *fabric* (Ch. 69) on the NIC. You describe a *circuit*; packets flow through it in fixed nanosecond cycles. This is the Ch. 69 inline path, packaged as a NIC. Deterministic, lowest latency — but the Ch. 69 development cost.
+- **ARM-core DPUs (NVIDIA BlueField-2/3, AMD Pensando, Intel IPU):** a cluster of ARM cores (8-16, ~2-3 GHz) running a full Linux, with their own DRAM. You write *software* (C/C++, DPDK/DOCA, eBPF) that runs on those cores, and P4/DOCA Flow rules that program the NIC's hardware match/action pipeline. Flexible, familiar, software-paced — but the cores are slower than host x86 and *software on the DPU still has the software costs* (cache misses, branch mispredicts, jitter — Ch. 7/13/41), just on a smaller, more isolated machine.
+- **FPGA DPUs / FPGA-NICs (Napatech, AMD/Xilinx Alveo, NVIDIA Innova-2 Flex — ConnectX-5 + Xilinx KU15P FPGA — and the Intel IPU F2000X-PL on Agilex):** programmable *fabric* (Ch. 69) on the NIC. You describe a *circuit*; packets flow through it in fixed nanosecond cycles. This is the Ch. 69 inline path, packaged as a NIC. Deterministic, lowest latency — but the Ch. 69 development cost.
 - **Hybrid:** both — ARM cores for control/complex, FPGA for the inline hot pipeline.
 
 The defining architectural choice is **inline vs lookaside** — the same axis as Ch. 69:
@@ -58,14 +58,15 @@ The whole game is keeping hot-path work at **boundary 1, terminal**, and using *
 
 The measurement that matters is **does the DPU shorten or lengthen the path** for the work you're considering — and it must be **end-to-end wire-to-wire** (Ch. 58's PTP hardware timestamps), never "time on the DPU" in isolation, for the same reason GPU kernel-only timing lies (Ch. 67).
 
-Three scenarios, representative numbers (Bluen-class ARM DPU + 100 GbE, wire-to-wire via PTP-timestamped tap; FPGA-DPU row for contrast; reference figures pending real runs):
+Three scenarios, representative numbers (BlueField-2/3-class ARM DPU + 100 GbE, DOCA 2.x, the reference host of Appendix L.3 on Linux 6.x; wire-to-wire via PTP-timestamped tap; the "forward to host" row is given for both host paths; FPGA-DPU row for contrast; reference figures pending real runs):
 
 | Path | What happens | Wire-to-wire latency | Verdict |
 |---|---|---|---|
 | **Host kernel stack** (Ch. 47) | wire → NIC → PCIe → kernel → app | ~5-15 µs | baseline |
 | **Host kernel bypass** (Ch. 62) | wire → NIC → PCIe → userspace poll | ~0.5-1 µs | the software floor |
 | **DPU ARM-core inline filter, terminal** (drop/redirect on NIC) | wire → DPU ARM → reply/drop, host never sees it | **~2-5 µs** | wins *vs host* for the dropped/redirected packets (host work eliminated), but ARM software is slower than host bypass per-packet |
-| **DPU ARM-core, then forward to host** | wire → DPU ARM → **PCIe** → host app | ~6-16 µs | **added a hop** — slower than host bypass; the DPU is a detour |
+| **eSwitch hardware match/action** (rules installed from the ARM cores) | wire → eSwitch → host or drop, ARM cores untouched | **+~100s of ns** | the ASIC does it — the right way to "filter on the DPU" |
+| **DPU ARM-core, then forward to host** | wire → DPU ARM → **PCIe** → host app | ~3-7 µs (host bypass) / ~7-20 µs (host kernel stack) | **added a hop** — slower than host bypass alone; the DPU is a detour |
 | **FPGA-DPU inline pipeline, terminal** (Ch. 69) | wire → fabric → emit, wire-to-wire | **~tens-to-low-hundreds of ns** | the latency tier — same as Ch. 69 |
 
 Read the table the way Ch. 1 demands — and notice the **two distinct wins and one loss**:
@@ -85,8 +86,9 @@ The DPU is a *placement* tool: the technique is choosing **what to offload, wher
 You program a DPU through one (or more) of several models, trading flexibility for latency:
 
 - **DOCA (NVIDIA):** the BlueField SDK — libraries and frameworks (DPDK, flow steering, RDMA, regex, crypto, storage) for writing DPU applications in C/C++ on the ARM cores. The full-software model: most flexible, familiar, but ARM-core-paced and software-jittery. Use it for control-plane, telemetry, capture, and *terminal* slow-path work — not for chasing the FPGA latency tier.
+- **Hardware flow steering (the eSwitch).** In DPU/embedded mode the ARM cores *program* the ConnectX embedded switch — flow tables via DOCA Flow, `rte_flow`, or `tc flower` offload (ASAP²), including connection tracking — and the ASIC then executes the match/action at line rate: packets the rules forward or drop **never touch the ARM cores** (the §70.3 eSwitch row). Steering, drop and header rewrite belong here; the ARM software path is for the exceptions the rules miss.
 - **P4:** a domain-specific language for *packet processing* — describe match/action pipelines (parse headers, match fields, act: forward/drop/modify) that compile onto the NIC's switching/flow hardware. Declarative, runs in fast fixed-function or fabric, much lower latency than ARM software for the *filtering/steering* it can express. Good for inline filtering, steering, header rewrite — terminal boundary-1 work.
-- **eBPF/XDP offload (Ch. 61):** the *same* XDP program you'd run in the host driver (Ch. 61), but **offloaded to run on the NIC** — drop/redirect/filter at the earliest possible hook, now *on the DPU before the host*. The natural HFT use: drop the feed you don't subscribe to, redirect the A/B feeds (Ch. 53), filter hostile/malformed packets (Ch. 72) — *terminally, on the NIC*, so the host's hot core only ever sees the packets it must process. This is the cleanest "DPU shortens the path" win for an ARM/SmartNIC: less crosses boundary 2.
+- **eBPF/XDP on the DPU (Ch. 61):** true *hardware* XDP offload (`XDP_FLAGS_HW_MODE`, `xdpoffload`) exists only on Netronome/Corigine NFP NICs. On an ARM DPU the *same* XDP program runs natively in the DPU's own Linux on its ARM cores — software, with the §70.3 ARM-row latency and tail — *in front of* the host; the hardware path is the eSwitch above. The natural HFT use is still the same: drop the feed you don't subscribe to, redirect the A/B feeds (Ch. 53), filter hostile/malformed packets (Ch. 72) — *terminally, on the NIC*, so the host's hot core only ever sees the packets it must process. This is the cleanest "DPU shortens the path" win for an ARM/SmartNIC: less crosses boundary 2.
 - **FPGA fabric (Ch. 69):** for the FPGA-DPU, the Ch. 69 RTL/HLS model — the inline-pipeline latency tier. Everything from Ch. 69 applies.
 
 The selection rule mirrors §70.2's inline/lookaside axis: **filtering/steering/dropping** → P4 or XDP-offload, inline, terminal, low-latency; **complex/control/slow-path** → DOCA software on ARM, off the hot path; **the order pipeline in hardware** → FPGA fabric (Ch. 69). Reach for the *most declarative, most inline* model the work allows — software on the ARM cores is the fallback for what can't be expressed in fixed-function/fabric, not the default.
@@ -95,7 +97,7 @@ The selection rule mirrors §70.2's inline/lookaside axis: **filtering/steering/
 
 The strongest *non-order-path* DPU wins are the offloads that are **terminal on the NIC by construction** — they complete at boundary 1 and never burden a host hot core:
 
-- **On-NIC RDMA (Ch. 63):** the DPU terminates RDMA — a remote `READ`/`WRITE` lands in (or is served from) DPU or host memory **handled entirely by the NIC**, host CPU uninvolved (Ch. 63's one-sided semantics). DPUs are excellent RDMA engines; for intra-datacenter state replication, market-data fan-out, or the capture pipeline (Ch. 75), on-NIC RDMA moves bytes with *zero host-core cost*. This is a genuine win that doesn't touch the order path.
+- **On-NIC RDMA (Ch. 63):** a plain RDMA NIC already terminates one-sided `READ`/`WRITE` without the host CPU (Ch. 63's one-sided semantics — that is not the DPU's contribution). What the DPU adds is an on-NIC *initiator/consumer*: its ARM cores can run the RDMA-driven capture/replication or market-data fan-out pipeline (Ch. 75) themselves — issuing the WRITEs, reaping the completions, managing the buffers — so the host is not merely uninvolved in the data movement but in the *orchestration* too. A genuine win that doesn't touch the order path.
 - **Storage offload:** NVMe-oF, compression, and the capture/journal write path (Ch. 75) can run on the DPU — getting captured ticks/orders to storage **entirely off the host** (the Ch. 75 "off the hot path" goal, taken one chip further: off the host *machine*). The host's isolated cores never see the storage I/O.
 - **Security/isolation offload (Ch. 72):** inline encryption/decryption (TLS/IPsec), firewalling, and DDoS/malformed-packet filtering at boundary 1 — hostile traffic is dropped *on the NIC* before it reaches the host stack (Ch. 72's "treat the wire as untrusted," now enforced before the host). The DPU as an isolated security perimeter is one of its strongest production cases, and it's *off* the hot path by design.
 
@@ -140,7 +142,7 @@ The discipline, stated once: **offload what terminates on the NIC or was never h
 
 ## 70.6 Exercises & checklist
 
-**Exercises:**
+**Exercises**
 
 1. **Expose the added hop.** Build two paths for the same filter-then-process work: (a) host kernel bypass (Ch. 62) doing everything on host; (b) ARM-core DPU that filters then *forwards survivors to the host*. Measure both wire-to-wire (Ch. 58 PTP tap). Confirm (b) is *slower* for the forwarded packets (added boundary-2 crossing + slower cores) and quantify the penalty. Then make the DPU *terminal* for the dropped packets and show the host-work elimination win for those.
 2. **XDP-offload feed filter.** Take an XDP drop/redirect program (Ch. 61) and run it (a) in the host driver vs (b) offloaded onto the DPU. Measure how much *less* crosses PCIe to the host in case (b) and the host-core cycles freed. This is the clean "DPU shortens the path" win.
@@ -148,7 +150,7 @@ The discipline, stated once: **offload what terminates on the NIC or was never h
 4. **On-NIC RDMA capture.** Move the capture/journal write path (Ch. 75) onto the DPU via on-NIC RDMA/storage offload. Confirm host hot-core cost drops to ~zero for capture and that the order path's tail is unaffected. This is a terminal, off-hot-path DPU win.
 5. **Partition decision.** For your tick-to-trade path, write the §70.4.3 partition explicitly: list each piece of work and classify it *terminal-on-NIC* / *off-hot-path* / *keep-on-host* / *trap*. Justify each with the boundary it crosses.
 
-**Checklist:**
+**Checklist — SmartNICs & DPUs**
 
 - [ ] Every candidate offload is classified **inline-terminal** / **lookaside** / **off-hot-path** — and no *hot-path* work is in a lookaside (round-trip) model (§70.2, §70.5).
 - [ ] No hot-path packet goes wire → DPU(ARM) → **PCIe** → host (the added hop) — hot-path work is either terminal on the NIC or stays on host bypass (§70.5).
