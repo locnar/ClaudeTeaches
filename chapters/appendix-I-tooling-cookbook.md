@@ -115,10 +115,10 @@ Discovering the machine and placing threads on it (Ch. 16, 42, 43; Appendix C).
    echo x86-tsc > /sys/kernel/tracing/trace_clock        # TSC timestamps that line up with the app's rdtsc (Ch. 17)
    trace-cmd record -M 4 -C x86-tsc -e irq -e sched -e irq_vectors -e tlb -e timer:tick_stop   # to a file; `trace-cmd report` / KernelShark
    perf sched record -C 2 -- sleep 600 && perf sched timehist -C 2    # who ran on cpu2, when, for how long (thread intruders)
-   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 46 §46.4.1, Ch. 80)
+   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 46 §46.4.1, Ch. 81)
    grep -l -E '^Cpus_allowed_list:.*\b2\b' /proc/[0-9]*/task/*/status  # every thread ALLOWED on cpu2 (want: yours + the per-cpu kthreads)
    cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 42)
-   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 80 §80.2.4)
+   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 81 §81.2.4)
    turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
 ```
 
@@ -159,9 +159,9 @@ Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
    cat /proc/net/igmp                           # kernel's view: (device, group) joins, little-endian hex groups; Querier column = IGMP version in use
    ip maddr show dev eth0                       # the same, decoded
    timeout 260 tcpdump -i eth0 -nn -c 1 'igmp and igmp[0]==0x11'   # a General Query within one interval, or the feed goes dark ~260 s after the last join
-   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 56, 81)
+   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 56, 82)
    sysctl net.ipv4.igmp_max_memberships net.ipv4.conf.eth0.rp_filter   # 20 by default (the 21st join fails ENOBUFS); strict rp_filter drops the feed
-   # --- network health & drop forensics (Ch. 81): which LAYER dropped it
+   # --- network health & drop forensics (Ch. 82): which LAYER dropped it
    ethtool -S eth0 | grep -iE 'missed|out_of_buffer|nodesc'          # host ring full (poll too slow)        — layer 2b
    ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 67)
    ethtool -S eth0 | grep -iE 'crc|symbol|fec|pause'                 # link/PHY/FEC and pause frames         — layer 1 / fabric
@@ -174,7 +174,7 @@ Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
    cat /sys/class/net/eth0/carrier_changes                            # link flaps since boot
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 81 §81.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §81.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 82 §82.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §82.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 

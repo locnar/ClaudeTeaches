@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 26 (mmap / shared memory — the substrate), Ch. 34 and 37 (the lock-free SPSC ring and the Disruptor — the structures that go *in* shared memory), Ch. 35 (seqlock publication), Ch. 33 (false sharing — cross-process head/tail), Ch. 30 (memory ordering across processes), Ch. 31 (shared-nothing — IPC is the channel between shared-nothing processes).
 >
-> **Leads into:** Ch. 78 (process topology — *why* you split into processes; the data planes between them), Ch. 76 (the untrusted-input discipline, applied here to shared segments), Ch. 79 (capture across processes). This is the on-host complement to the network I/O of Ch. 48–49.
+> **Leads into:** Ch. 78 (process topology — *why* you split into processes; the data planes between them), Ch. 76 (the untrusted-input discipline, applied here to shared segments), Ch. 80 (capture across processes). This is the on-host complement to the network I/O of Ch. 48–49.
 
 ---
 

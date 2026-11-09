@@ -154,7 +154,7 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
   ```
 
 - **Orders at a level: an intrusive FIFO from a pool, not `std::list`.** Each price level is a **FIFO queue of resting orders** (price-time priority). Implement it as an **intrusive doubly-linked list** of `Order` objects drawn from an **object pool** (Ch. 24): adding an order is pop-from-pool + link-at-tail (a few instructions, no allocation); cancelling is unlink-given-the-order (O(1), no search — keep an `orderID → Order*`/index map, itself a *flat* hash map, §25.4.1); a fill walks from the head. Zero allocation on the hot path, O(1) add/cancel/match, and each order's neighbors are pool-contiguous (locality).
-- **BBO vs deep-book asymmetry (the hot/cold split).** The overwhelming majority of activity is at or near the touch — BBO updates, adds/cancels in the top few levels — which the flat-array-near-the-top design makes O(1) and cache-hot. Deep-book modifications are rarer and can afford a slower path (the sparse secondary store). Optimize the structure for the *common* operation (top-of-book), not the worst case (arbitrary-depth insert) — and measure against captured data (Ch. 79) where the real distribution of touched levels lives.
+- **BBO vs deep-book asymmetry (the hot/cold split).** The overwhelming majority of activity is at or near the touch — BBO updates, adds/cancels in the top few levels — which the flat-array-near-the-top design makes O(1) and cache-hot. Deep-book modifications are rarer and can afford a slower path (the sparse secondary store). Optimize the structure for the *common* operation (top-of-book), not the worst case (arbitrary-depth insert) — and measure against captured data (Ch. 80) where the real distribution of touched levels lives.
 - **Consolidating disparate feeds.** A consolidated book merges multiple venues'/feeds' updates (Ch. 54's A/B arbitration and multi-feed handling). Keep each feed's contribution attributable (so a feed drop/gap — Ch. 54 — can be backed out) while presenting one merged view; per-venue level arrays summed into a consolidated array, or per-order venue tags, with the same flat/intrusive/pool discipline so the merge stays allocation-free and cache-friendly.
 - **What this buys.** The flat-array + intrusive-pool LOB turns per-message book updates from a parade of cache misses and `malloc`s (the `map<Price,list>` version) into a handful of contiguous, allocation-free operations — the difference between ~hundreds of ns and ~tens of ns per update, and a *flat* tail (Ch. 1) because there's no allocation or tree-rebalance to spike. It's the synthesis of the whole book so far: data-oriented layout (Ch. 8), no hot-path allocation (Ch. 23–24), flat containers (this chapter), cache/TLB locality (Ch. 7, 15).
 
@@ -168,7 +168,7 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 - **Intrusive without lifetime discipline.** Intrusive containers + pools mean *you* own lifetimes; an order freed to the pool while still linked, or linked into two lists with conflicting lifetimes, is UAF/corruption (Ch. 24, 76). Keep the ownership rules simple and explicit.
 - **Choosing `flat_map` for insert-heavy data.** `flat_map`'s middle-insert is O(n) shifts (§25.4.2); for insert/erase-heavy *ordered* data it can lose to a tree. Match it to lookup/scan-heavy, mutation-light use — and measure.
 - **Benchmarking with everything in L1.** A container comparison on a tiny dataset hides the cache-miss difference that *is* the point (§25.3). Test at the real working-set size (and with realistic, cache-cold access — Ch. 3), or you'll conclude node containers are "fine."
-- **Ignoring the order book's access distribution.** Optimizing the LOB for worst-case arbitrary-depth ops instead of the real, top-of-book-dominated distribution (§25.4.4) wastes effort and may pessimize the common path. Profile against captured market data (Ch. 79).
+- **Ignoring the order book's access distribution.** Optimizing the LOB for worst-case arbitrary-depth ops instead of the real, top-of-book-dominated distribution (§25.4.4) wastes effort and may pessimize the common path. Profile against captured market data (Ch. 80).
 
 ## 25.6 Exercises & checklist
 
@@ -189,7 +189,7 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 - [ ] The **order book** uses flat tick-indexed level arrays + intrusive pool-backed FIFOs + a flat ID map, optimized for the **top-of-book-dominated** access distribution, with deep book as a cold secondary store (§25.4.4).
 - [ ] **No `vector<std::function>`** / containers of type-erased callables on the hot path (Ch. 14).
 - [ ] Intrusive/pool designs have **explicit, simple lifetime rules** (no linked-while-freed — Ch. 24, 76).
-- [ ] Container choices are validated by **cache/TLB counters and the latency distribution** at the **real working-set size** against **captured data** (Ch. 3, 7, 79) — not a tiny in-L1 microbench.
+- [ ] Container choices are validated by **cache/TLB counters and the latency distribution** at the **real working-set size** against **captured data** (Ch. 3, 7, 80) — not a tiny in-L1 microbench.
 
 ## 25.7 References
 

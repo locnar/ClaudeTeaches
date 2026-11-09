@@ -10,7 +10,7 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 
 - **★ Ulrich Drepper, *What Every Programmer Should Know About Memory* (2007).** The definitive long-form treatment of caches, memory hierarchy, NUMA, and access patterns — dated in specifics, timeless in fundamentals. The intellectual backbone of **Part II** (Ch. 7–10) and the NUMA chapter (Ch. 16). If you read one thing from this list, read this.
 - **★ Jeff Dean, "Numbers Everyone Should Know" / Peter Norvig's latency table.** The orders-of-magnitude latency intuition the whole book trades on; refreshed and trading-annotated in **Appendix E**. Underlies Ch. 1's "reason about the ratios."
-- **★ Jeff Dean & Luiz André Barroso, "The Tail at Scale" (CACM 56(2), 2013).** The canonical argument that tail latency, not the mean, governs latency-critical systems, and why fan-out multiplies rare slowness — the distribution-first framing of **Ch. 1** and the p99/p99.9 discipline of Ch. 3 and 82.
+- **★ Jeff Dean & Luiz André Barroso, "The Tail at Scale" (CACM 56(2), 2013).** The canonical argument that tail latency, not the mean, governs latency-critical systems, and why fan-out multiplies rare slowness — the distribution-first framing of **Ch. 1** and the p99/p99.9 discipline of Ch. 3 and 83.
 - **★ The LMAX *Disruptor* technical paper (Thompson, Farley, Barker, Gee, Stewart, 2011).** The ring-buffer + sequence-barrier mechanical-sympathy design that anchors **Ch. 37**, and whose ideas recur in the lock-free queues (Ch. 34), logging (Ch. 73), the shared-memory IPC rings (Ch. 51), and the Aeron lineage (Ch. 67). Essential HFT-adjacent reading.
 - **Paul McKenney, *Is Parallel Programming Hard, And, If So, What Can You Do About It?* and his RCU papers.** The authoritative source on RCU and safe memory reclamation — **Ch. 36**, with ties to seqlocks (Ch. 35) and hot reload (Ch. 77). Deep, rigorous, free online.
 - **Leslie Lamport, "Time, Clocks, and the Ordering of Events in a Distributed System" (CACM 1978) and TLA+.** The happens-before idea beneath every memory-model argument in the book, and the TLA+ / model-checking resources that **Ch. 40** (§40.4.3) cites for checking lock-free designs — the one place a chapter leans on him directly.
@@ -44,9 +44,9 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **The FPGA toolchain documentation** — AMD/Xilinx Vivado and Vitis HLS, Intel/Altera Quartus. RTL vs HLS development, synthesis, place-and-route, partial reconfiguration — **Ch. 71** (§71.2, §71.4.2).
 - **NVIDIA BlueField / DOCA SDK documentation and the P4 language specification (p4.org).** DPU architecture and the two programming models — C/C++ on the ARM cores vs declarative match/action pipelines — of **Ch. 72** (§72.2, §72.4.1).
 - **Intel Resource Director Technology (RDT) documentation and the kernel's `resctrl` interface** (`Documentation/arch/x86/resctrl.rst`), with the `intel-cmt-cat` / `pqos` toolkit and the AMD64 QoS Extensions. CAT/MBA/CMT/MBM, CLOS and capacity masks — **Ch. 44** (§44.2, §44.4).
-- **The market-access and timestamping rules** — SEC Rule 15c3-5 ("market access": pre-trade risk controls and the kill-switch) and MiFID II RTS 25 (clock synchronization traceable to UTC), with the Reg NMS / CAT record-keeping requirements. The compliance drivers behind the kill-switch of **Ch. 78** (§78.4.4), the PTP accuracy targets of Ch. 60 and the complete, timestamped capture of Ch. 79.
+- **The market-access and timestamping rules** — SEC Rule 15c3-5 ("market access": pre-trade risk controls and the kill-switch) and MiFID II RTS 25 (clock synchronization traceable to UTC), with the Reg NMS / CAT record-keeping requirements. The compliance drivers behind the kill-switch of **Ch. 78** (§78.4.4), the PTP accuracy targets of Ch. 60 and the complete, timestamped capture of Ch. 80.
 - **RFC 2236 / 3376 (IGMPv2/v3), RFC 4541 (IGMP/MLD snooping switches), RFC 3678 (multicast source-filter socket API), RFC 7761 (PIM-SM).** The membership protocol, the querier requirement and the SSM socket API behind every market-data join — **Ch. 56**.
-- **Linux kernel documentation: `kernel-per-CPU-kthreads.rst`, `osnoise-tracer.rst`/`timerlat-tracer.rst`/`hwlat_detector.rst`, `tools/rtla/`, `ftrace.rst`; `snmp_counter.rst`, `statistics.rst`, `scaling.rst`, `dropreason-core.h`; `proc.rst`, `psi.rst`, `ras.rst`, `pcieaer-howto.rst`.** The noise catalog and tracers of **Ch. 46**, the network counter semantics of **Ch. 81**, and the host-health signals of **Ch. 80**.
+- **Linux kernel documentation: `kernel-per-CPU-kthreads.rst`, `osnoise-tracer.rst`/`timerlat-tracer.rst`/`hwlat_detector.rst`, `tools/rtla/`, `ftrace.rst`; `snmp_counter.rst`, `statistics.rst`, `scaling.rst`, `dropreason-core.h`; `proc.rst`, `psi.rst`, `ras.rst`, `pcieaer-howto.rst`.** The noise catalog and tracers of **Ch. 46**, the network counter semantics of **Ch. 82**, and the host-health signals of **Ch. 81**.
 - **Prometheus documentation (histograms, exposition format, `histogram_quantile`, native histograms) and the OpenTelemetry exponential-histogram specification.** Why the unit of export is bucket counts and never a percentile — **Ch. 75 §75.4.3**.
 - **SEC Rule 15c3-5 (Market Access) and ESMA MiFID II RTS 6.** Pre-trade controls, kill functionality, real-time monitoring and the annual self-assessment that a readiness gate and kill-switch test satisfy — **Appendix M**, Appendix K.4.
 
@@ -59,7 +59,7 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Vandevoorde, Josuttis & Gregor, *C++ Templates: The Complete Guide* (2nd ed.)** and **Andrei Alexandrescu, *Modern C++ Design*.** The template instantiation/cost model, CRTP, expression templates and policy-based design of **Ch. 18–19**, and the small-object (Loki) allocator behind the pools of Ch. 24 (§24.4.2).
 - **Fedor Pikus, *The Art of Writing Efficient Programs* (Packt, 2021) and *Hands-On Design Patterns with C++* (2nd ed., Packt, 2023).** Modern, practical performance-oriented C++ — measurement, memory, concurrency and the design patterns beneath zero-cost abstractions. A general companion to Ch. 3, 23–25 and 30–33 rather than a chapter-cited source.
 - **Scott Meyers, *Effective Modern C++*** and **the C++ Core Guidelines.** Idiomatic modern C++ underpinning the language-mechanics Parts (Ch. 18–21) and the safety discipline of Ch. 76.
-- **Brendan Gregg, *Systems Performance* (2nd ed.)** and ***BPF Performance Tools*.** The methodology of production performance analysis — the USE method, flame graphs, and the eBPF tooling of **Ch. 63** and the production-monitoring stance of **Ch. 82**.
+- **Brendan Gregg, *Systems Performance* (2nd ed.)** and ***BPF Performance Tools*.** The methodology of production performance analysis — the USE method, flame graphs, and the eBPF tooling of **Ch. 63** and the production-monitoring stance of **Ch. 83**.
 - **Robert Love, *Linux System Programming*** and **Michael Kerrisk, *The Linux Programming Interface*.** The syscall-level reference behind **Part VIII** (Ch. 48, 49, 51, 52) and the memory/process chapters (Ch. 23, 26, 78).
 - **Daniel Lemire's work and *Hacker's Delight* (Warren).** Bit-manipulation and branch-free integer tricks — **Ch. 28** (and the SWAR/SIMD parsing of Ch. 54).
 - **Larry Harris, *Trading and Exchanges: Market Microstructure for Practitioners*.** The standard market-structure text — matching, order types, maker/taker, the participants' roles — behind **Appendix J** (J.1–J.3) and the trading framing of Ch. 25, 54 and the case studies; the FIX Trading Community specifications (G.2) cover the wire side.
@@ -68,34 +68,34 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 
 ## G.4 Influential talks & blogs
 
-- **★ Carl Cook, "When a Microsecond Is an Eternity" (CppCon 2017).** The canonical HFT-C++ talk — keeping the hot path warm, branch-free, allocation-free, and measured. Touches Ch. 1, 13, 23–24, 47, and the end-to-end mindset of **Ch. 82**.
+- **★ Carl Cook, "When a Microsecond Is an Eternity" (CppCon 2017).** The canonical HFT-C++ talk — keeping the hot path warm, branch-free, allocation-free, and measured. Touches Ch. 1, 13, 23–24, 47, and the end-to-end mindset of **Ch. 83**.
 - **The Mechanical Sympathy blog and mailing list (Martin Thompson et al.).** The community that articulated "mechanical sympathy" — cache-friendliness, the Disruptor, false sharing, and lock-free design. Underlies **Ch. 7–8, 33, 37**.
 - **CppCon / C++Now performance talks** — e.g. Chandler Carruth on optimization and codegen ("Tuning C++," "There Are No Zero-Cost Abstractions"), Fedor Pikus on lock-free, Ben Deane & Jason Turner ("constexpr ALL the Things!", C++Now/CppCon 2017) and Hana Dusíková (compile-time regex) on `constexpr`, Timur Doumler on hardware-aware real-time C++. Spread across **Parts III-VI**.
 - **Matt Godbolt and the Compiler Explorer ecosystem.** Godbolt's talks and the **Compiler Explorer** tool itself are the workflow of **Ch. 4** (reading codegen) and recur wherever the book says "verify the asm."
-- **Trading-tech engineering blogs** (Jane Street Tech, Optiver, Jump, and various HFT-practitioner write-ups) and the **Cloudflare / kernel-bypass blogs.** Real-world latency engineering, feed handling, and kernel-bypass experience — Ch. 54, 57, 60, 63, 64, 78–82.
+- **Trading-tech engineering blogs** (Jane Street Tech, Optiver, Jump, and various HFT-practitioner write-ups) and the **Cloudflare / kernel-bypass blogs.** Real-world latency engineering, feed handling, and kernel-bypass experience — Ch. 54, 57, 60, 63, 64, 78–83.
 - **Paul McKenney's LWN articles on RCU and the kernel memory model.** Accessible companions to his papers (G.1) — **Ch. 36** and Ch. 30.
 - **Herb Sutter, "atomic<> Weapons" (C++ and Beyond 2012).** The definitive practical talk on the C++ memory model — acquire/release, `seq_cst`, and the x86-vs-weak-ordering distinction — **Ch. 30**, and the happens-before semantics TSan checks against (Ch. 40).
 - **Jeff Preshing, *Preshing on Programming*.** Lucid, example-driven posts on acquire/release, memory ordering, the ABA problem and lock-free patterns — the companion blog to **Ch. 30**, Ch. 34 and Ch. 35 (getting the seqlock fences right).
 - **Dmitry Vyukov, *1024cores.net* (and the Relacy Race Detector).** Bounded MPMC queues, SPSC rings and lock-free design patterns — the practical source behind **Ch. 34** (§34.4.1), the ring foundations of Ch. 37 and the shared-memory rings of Ch. 51; Relacy is the model checker of Ch. 40 (§40.4.3).
 - **Scott Meyers, "CPU Caches and Why You Care" (talk).** An accessible bridge from the cache hierarchy (Ch. 7) to layout decisions — **Ch. 8**.
 - **Cliff Click (and others) on JVM internals, JIT and GC behaviour.** Why managed runtimes' tails look the way they do and what HFT Java shops do about it — **Appendix B** (B.3–B.4); cited there, not by a C++ chapter.
-- **Brendan Gregg's blog** (flame graphs, eBPF, latency heatmaps) — the practical companion to his books (G.3) for **Ch. 2, 63, 82**.
+- **Brendan Gregg's blog** (flame graphs, eBPF, latency heatmaps) — the practical companion to his books (G.3) for **Ch. 2, 63, 83**.
 
 ## G.5 Tooling documentation
 
 - **Google Benchmark.** The microbenchmark harness of **Ch. 3** — fixtures, statistical reporting, and the dead-code-elimination/`DoNotOptimize` pitfalls.
-- **HdrHistogram.** Recording latency *distributions* without coordinated omission — the measurement substrate of **Ch. 1, 3, 82**.
-- **Intel VTune Profiler** (and `perf`, in G.2). Microarchitecture and top-down analysis — **Ch. 2**, with the offline-on-replay workflow of Ch. 82.
-- **`liburing` / io_uring documentation.** The async-I/O interface of **Ch. 49** and the off-hot-path capture writer of Ch. 79.
+- **HdrHistogram.** Recording latency *distributions* without coordinated omission — the measurement substrate of **Ch. 1, 3, 83**.
+- **Intel VTune Profiler** (and `perf`, in G.2). Microarchitecture and top-down analysis — **Ch. 2**, with the offline-on-replay workflow of Ch. 83.
+- **`liburing` / io_uring documentation.** The async-I/O interface of **Ch. 49** and the off-hot-path capture writer of Ch. 80.
 - **DPDK** (and poll-mode-driver docs) and the **Solarflare/Onload, ef_vi, ExaNIC/libexanic** SDKs. Kernel bypass and userspace networking — **Ch. 57, 64**.
-- **bpftrace / BCC.** Low-overhead production tracing — the eBPF one-liners and tooling of **Ch. 63** and the continuous observability of Ch. 82.
-- **The sanitizer documentation (ASan/UBSan/TSan/MSan)** and **libFuzzer / AFL++.** The correctness/security bench of **Ch. 40** and **Ch. 76** (and the CI gates of Ch. 82).
+- **bpftrace / BCC.** Low-overhead production tracing — the eBPF one-liners and tooling of **Ch. 63** and the continuous observability of Ch. 83.
+- **The sanitizer documentation (ASan/UBSan/TSan/MSan)** and **libFuzzer / AFL++.** The correctness/security bench of **Ch. 40** and **Ch. 76** (and the CI gates of Ch. 83).
 - **The LLVM/GCC documentation, ThinLTO, and BOLT.** The build-toolchain references behind **Ch. 22** and **Appendix D**.
 - **`pahole` / `dwarves`.** Struct-layout inspection — the object-layout work of **Ch. 9**.
 - **`linuxptp` (`ptp4l`, `phc2sys`, `pmc`) and the kernel timestamping docs** (`Documentation/networking/timestamping.rst`, `PTP_SYS_OFFSET`). Disciplining the NIC PHC to the grandmaster and bridging it to the TSC — the toolchain of **Ch. 60** (§60.4), with hardware timestamping on the NIC (Ch. 57).
 - **`cyclictest` / `rt-tests` and the `hwlat` detector.** Jitter measurement and the verification pass of **Ch. 45** and **Appendix C.5**.
 - **`rtla` (`osnoise`, `timerlat`, `hwnoise`), `trace-cmd` and KernelShark (Steven Rostedt), `perf sched`.** The stop-on-threshold noise hunt of **Ch. 46** and the one-liners of Appendix I.6.
-- **`turbostat`, `numastat`, `rasdaemon`/`ras-mc-ctl`, `dmidecode`; `ethtool` (`-S`, `-m`, `--show-fec`), `nstat`, `ss -ti`, `dropwatch`; the driver statistics sources (`ixgbe`/`ice`/`mlx5`/`sfc` `*ethtool*.c`).** The host- and network-health samplers of **Ch. 80–81** and the readiness attestation of **Appendix M**.
+- **`turbostat`, `numastat`, `rasdaemon`/`ras-mc-ctl`, `dmidecode`; `ethtool` (`-S`, `-m`, `--show-fec`), `nstat`, `ss -ti`, `dropwatch`; the driver statistics sources (`ixgbe`/`ice`/`mlx5`/`sfc` `*ethtool*.c`).** The host- and network-health samplers of **Ch. 81–82** and the readiness attestation of **Appendix M**.
 
 ## G.6 How this maps to the Parts
 
@@ -112,7 +112,7 @@ For quick navigation, the heaviest sources per Part:
 - **Part IX (Market Data, NIC & Fabric):** the exchange protocol specs, NIC-vendor and DDIO material, `rte_flow`/flow-steering docs, the PTP/IEEE-1588 references, the IGMP/snooping/SSM RFCs, and low-latency switch/fabric guides (Ch. 54–62).
 - **Part X (Kernel Bypass, RDMA & Transport):** bpftrace/XDP, DPDK, the Solarflare/ef_vi SDKs, the InfiniBand/RoCE and DCQCN references, and Aeron/eRPC/Homa (Ch. 63–67).
 - **Part XI (Heterogeneous/Accelerators):** the PCIe spec, CUDA/MPI docs, the FPGA toolchain and HFT-FPGA literature, the BlueField/DOCA/P4 docs (Ch. 68–72).
-- **Part XII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, Tene/HdrHistogram and the Prometheus histogram docs, the SRE books (SLOs and alerting), the kernel's counter and tracer documentation, the regulatory record-keeping and market-access rules (Ch. 73–82, Appendix M).
+- **Part XII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, Tene/HdrHistogram and the Prometheus histogram docs, the SRE books (SLOs and alerting), the kernel's counter and tracer documentation, the regulatory record-keeping and market-access rules (Ch. 73–83, Appendix M).
 - **Appendices:** the Arm ARM and Graviton guides (A), the Rust/Zig/JVM references (B), the kernel/vendor tuning guides (C), the GCC/Clang/BOLT docs (D), the latency-measurement tools (E), cppreference/the protocol specs (F), the libstdc++/libc++ status tables and cppreference compiler-support pages (H), the `perf`/`bpftrace`/`ethtool` man pages and tool docs (I), Harris and the exchange specs (J), exchange colocation/connectivity documentation (K), and the Google Benchmark / HdrHistogram docs (L).
 
 ## G.7 A short shelf

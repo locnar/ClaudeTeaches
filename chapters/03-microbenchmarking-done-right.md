@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution and care about p99/p99.9, not the mean. Ch. 2 (*Measure First*) — you can read PMU counters and know whether a workload is memory- or compute-bound. For the hands-on parts: a Linux box, a C++20 compiler, [Google Benchmark](https://github.com/google/benchmark) and [HdrHistogram_c](https://github.com/HdrHistogram/HdrHistogram_c) (or the C++ port).
 >
-> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 82. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
+> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 83. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
 
 ---
 
@@ -269,7 +269,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - **Enough samples for the percentile you quote.** You cannot honestly state p99.9 from 1,000 samples — that's *one* event in the tail (Ch. 1). For p99.9 you want ≫ 10⁵ samples; for p99.99, ≫ 10⁶. State your sample count alongside the percentile.
 - **Compare, don't just measure.** The question is almost always "is B faster than A?", which is a *difference of distributions*, not of means. Tools like Google Benchmark's `compare.py` apply a U-test (Mann–Whitney) to tell you whether the difference is statistically significant or noise. A 2% "improvement" inside 5% run-to-run noise is nothing.
 - **Watch for multimodality.** A bimodal histogram (two humps) usually means two regimes — e.g. cache-hit vs cache-miss, or turbo vs non-turbo — and a single percentile summary hides it. Look at the histogram shape (Ch. 1's picture), not just the quantiles.
-- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 82.
+- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 83.
 
 ---
 
@@ -306,7 +306,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - [ ] I have **enough samples** for the percentile I quote (≫10⁵ for p99.9).
 - [ ] I ran **repetitions**, report the **spread**, and used a **significance test** before claiming a win.
 - [ ] I can **explain *why*** the winner won via PMU counters (Ch. 2) — the result generalizes only if I understand it.
-- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 82).
+- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 83).
 
 ---
 

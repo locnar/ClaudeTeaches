@@ -30,7 +30,7 @@ A recurring cast of tools appears throughout: `perf` and the Linux PMU, Intel VT
 
 ## How the book is organized
 
-The eighty-two chapters are grouped into twelve Parts that build from the foundations upward, roughly following the path a packet takes and the stack it traverses:
+The eighty-three chapters are grouped into twelve Parts that build from the foundations upward, roughly following the path a packet takes and the stack it traverses:
 
 - **Part I — Foundations & Methodology** (Ch. 1–6): the latency mindset, profiling, micro-benchmarking, reading assembly, debugging optimized code, and building a quiet machine. Start here; everything later assumes you can measure.
 - **Part II — CPU Microarchitecture** (Ch. 7–17): caches, data-oriented design, object layout, prefetching, pipelines, the front-end, branch prediction, virtual dispatch, the TLB, NUMA, and timekeeping. The hardware reality under all the code.
@@ -43,7 +43,7 @@ The eighty-two chapters are grouped into twelve Parts that build from the founda
 - **Part IX — Market Data, NIC & Fabric** (Ch. 54–62): zero-copy market-data decoding, reliable multicast and feed recovery, multicast membership and dark-feed detection, NIC offloads, DDIO, flow steering, PTP, precise transmission, and the network fabric.
 - **Part X — Kernel Bypass, RDMA & Transport** (Ch. 63–67): eBPF/XDP, kernel bypass, RDMA, lossless Ethernet, and transports beyond TCP.
 - **Part XI — Heterogeneous Computing & Hardware Acceleration** (Ch. 68–72): the PCIe boundary, GPUs, MPI, FPGAs, and SmartNICs/DPUs — and where each does (and does not) belong on the order path.
-- **Part XII — Observability & Operations in Production** (Ch. 73–82): zero-overhead logging and application telemetry, secure programming, hot reload, process topology and the deterministic state machine, capture/replay, host and network health telemetry, and a full end-to-end case study that ties the book together.
+- **Part XII — Observability & Operations in Production** (Ch. 73–83): zero-overhead logging and application telemetry, secure programming, hot reload, process topology and the deterministic state machine, capture/replay, host and network health telemetry, and a full end-to-end case study that ties the book together.
 
 Thirteen appendices (**A–M**) are standing references that outlive any single chapter: the ARM port, the alternative-languages survey, a copy-paste system-tuning checklist, a compiler-flag reference, the latency-numbers table, a glossary, an annotated bibliography, a C++23/26 feature-availability matrix, a tooling command cookbook, an HFT market-structure & protocol primer, a survey of exchange connectivity & the physical layer, the reproducible benchmark & measurement harness behind every number in the book, and the pre-open readiness gate & market-open playbook. The detailed, searchable topic index — every chapter expanded into its sub-topics — is in [`README.md`](README.md).
 
@@ -60,7 +60,7 @@ Every chapter follows the same rhythm, so you always know where to look:
 7. **Exercises & checklist** — practical takeaways to apply on your own system.
 8. **References** and **9. Additional Reading** — where to go deeper.
 
-Each chapter opens with a short blockquote naming its **prerequisites** and what it **leads into**, and closes with a one-line teaser for the next — so the book reads as a path, but any chapter can also be entered directly via the index. Cross-references are dense and by number ("Ch. 33", "§54.4.1") because the techniques genuinely interlock: false sharing (Ch. 33) shows up in your lock-free queue (Ch. 34), which feeds your logger (Ch. 73) and your capture journal (Ch. 79); the tick-to-trade budget of the final chapter (Ch. 82) is the sum of nearly every Part. Follow the references when a chapter leans on one — they are the connective tissue of the whole, and the index in [`README.md`](README.md) links every chapter file.
+Each chapter opens with a short blockquote naming its **prerequisites** and what it **leads into**, and closes with a one-line teaser for the next — so the book reads as a path, but any chapter can also be entered directly via the index. Cross-references are dense and by number ("Ch. 33", "§54.4.1") because the techniques genuinely interlock: false sharing (Ch. 33) shows up in your lock-free queue (Ch. 34), which feeds your logger (Ch. 73) and your capture journal (Ch. 80); the tick-to-trade budget of the final chapter (Ch. 83) is the sum of nearly every Part. Follow the references when a chapter leans on one — they are the connective tissue of the whole, and the index in [`README.md`](README.md) links every chapter file.
 
 ## A note on trade-offs
 
