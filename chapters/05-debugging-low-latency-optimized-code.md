@@ -2,7 +2,7 @@
 
 # Chapter 5 — Debugging Low-Latency & Optimized Code
 
-> **Prerequisites:** Ch. 2 (perf/PMU — production observation) and Ch. 4 (reading asm — debugging optimized code means reading its codegen). This chapter establishes debugging *methodology* as part of the foundations; the specific machinery it leans on is developed later and forward-referenced here — you don't need it first.
+> **Prerequisites:** Ch. 2 (perf/PMU — production observation) and Ch. 4 (reading asm — debugging optimized code means reading its codegen). The chapter is self-contained: its worked example (§5.3) needs only `g++ -O2 -g`, gdb and `rr`, and the build flags it discusses are Ch. 22's (forward-referenced, not needed first). The production machinery it leans on later — capture/replay, lock-free logging, eBPF — is developed in Parts X–XII and is forward-referenced here.
 >
 > **Leads into:** the reproduce-then-debug approach draws on tools built later — the build/debug-info flags (Ch. 22, Appendix D), the sanitizers (Ch. 40), zero-overhead logging as a debug channel (Ch. 71), and — the single best debugging tool — the deterministic state machine and capture/replay (Ch. 74–75). Every "verify the codegen" and async pipeline in the book (e.g. Ch. 39) eventually needs what this chapter teaches. It's the methodology Part I implied: how to *debug* a low-latency system when you can't attach a debugger to the hot path and the optimizer has erased your variables.
 
@@ -16,7 +16,7 @@ First, **the code is optimized past recognition.** You ship `-O2`/`-O3` with LTO
 
 Second, **you cannot perturb the hot path to observe it.** The classic debugging moves — add a `printf`, set a breakpoint, single-step, attach a debugger — all *stop or slow the thread*, and a low-latency thread that's stopped isn't doing the thing you're trying to debug. Worse, they change the timing: the bug is often a *race* or a *timing-dependent* condition (Ch. 30, 40), and the moment you add a `printf` (which takes hundreds of ns and a syscall — Ch. 71) or a breakpoint, the timing shifts and the bug vanishes — a **heisenbug**. Attaching `gdb` to a live hot process stalls it for milliseconds (blowing every latency guarantee) and, if it holds a lock or a NIC ring, can take the whole system down. You cannot debug the hot path *while it's hot*.
 
-The resolution is a different toolkit, built on the same architecture the book already established: **make the system deterministic and captured (Ch. 74–75), then debug the *replay*, not the live system.** Because a deterministic state machine (Ch. 74) fed a captured input stream (Ch. 75) reproduces the exact bug offline, bit-for-bit, you can attach every heavy tool — debugger, sanitizer, record/replay — to the reproduction *without* touching production. This chapter covers debugging optimized code (§5.2 the mental model), reproducing and capturing bugs (§5.3), the techniques — record/replay, core dumps, replay-debugging, production tracing (§5.4), and the pitfalls, chiefly the observer effect (§5.5). It's how you find the bug the profiler can't see and the debugger can't safely touch.
+The resolution is a different toolkit, built on the same architecture the book already established: **make the system deterministic and captured (Ch. 74–75), then debug the *replay*, not the live system.** Because a deterministic state machine (Ch. 74) fed a captured input stream (Ch. 75) reproduces the exact bug offline, bit-for-bit, you can attach every heavy tool — debugger, sanitizer, record/replay — to the reproduction *without* touching production. This chapter covers debugging optimized code (§5.2 the mental model), a worked gdb/`rr`/split-DWARF session on an `-O2` binary with the measured cost of debug info (§5.3), the techniques — record/replay, core dumps, replay-debugging, production tracing (§5.4), and the pitfalls, chiefly the observer effect (§5.5). It's how you find the bug the profiler can't see and the debugger can't safely touch.
 
 ## 5.2 Mental model: optimized code, the observer effect, and reproduce-then-debug
 
@@ -28,31 +28,122 @@ Three ideas frame low-latency debugging:
 
 The mental model: **you don't debug the live hot path — you capture enough to reproduce the bug, then debug the reproduction with heavy tools, reading the code at the level it actually runs (asm/registers) because the optimizer erased the source-level view.**
 
-## 5.3 Measure it: reproducing and capturing the bug
+## 5.3 Measure it: debugging an `-O2` binary with gdb and `rr`, and what debug info costs
 
-*Toolchain and machine: Appendix L.3.*
+*Toolchain and machine: Appendix L.3 (the listing, the gdb session and the size/identity measurements below were last rebuilt and run with GCC 13.3 and gdb 15 on Linux 6.18; `rr` 5.8).*
 
-Debugging's "measure it" is *reproduction* — turning a one-off into something you can study. The techniques for capturing enough to reproduce:
+Debugging's "measure it" has two halves: *see* what the optimizer did to the code you are debugging, and *know* what the debug information you keep around costs. Both can be measured on a small program. `snap_notional` snaps a price to the tick grid and returns the notional; it has a real bug (`/` truncates toward zero, so a negative price offset snaps *up* a tick) and, more to the point here, two intermediates that the optimizer will not keep anywhere:
 
-- **Capture-driven reproduction (Ch. 75).** If the system captures its input stream (Ch. 75) and the core is deterministic (Ch. 74), a production bug is reproduced by replaying the captured session through the core offline — bit-for-bit (Ch. 74.2.2). This is the highest-value reproduction: it needs no special effort at bug time (the capture already exists for compliance/replay), and it reproduces the *exact* production conditions. Measure your ability to do this by regularly replaying captures and asserting output matches (Ch. 76's regression gate is the same machinery).
-- **`rr` record/replay for the reproducible-but-elusive.** For bugs you can trigger in a test or a replay harness but that are timing-dependent, record the execution once with **`rr`** (Mozilla's record-and-replay debugger); `rr` captures enough of the execution (via a low-overhead single-core recording) that it can *replay it deterministically* under `gdb`, including **reverse execution** (step *backwards* from the crash to the cause). This converts "it crashed but I don't know why" into "step back from the crash and watch it happen." `rr` records at some slowdown, so you record in a test/replay environment, not production hot path.
-- **Core dumps for the crash you can't reproduce (Ch. 74).** When a production process crashes, a **core dump** captures its final memory state for post-mortem analysis. Capture cores *without stalling survivors* (Ch. 74.4.5 — async/bounded/off-path core handling), symbolize them offline (with the matching debug info — §5.4), and analyze in `gdb`. A core is a single snapshot (not a replay), but for a crash it often shows the smoking gun (a corrupted pointer, a bad index — Ch. 72). Pair with the capture (Ch. 75) to *replay up to* the crash.
-- **Deterministic stress to force rare bugs.** Race and timing bugs (Ch. 40) may not appear in one replay; force them with deterministic stress — run the core against adversarial captured inputs (the microburst, the gap, the malformed packet — Ch. 53/72/54), under sanitizers (§5.4), many times. The goal is to make a rare production bug reproduce reliably offline so you can then debug it once.
+```cpp
+// optbug.cpp — a tick-rounding bug whose intermediates are <optimized out> at -O2.
+// Build: g++ -O2 -g -std=c++20 optbug.cpp -o optbug          (debug info, production codegen)
+//        g++ -O0 -g -std=c++20 optbug.cpp -o optbug.O0       (the "easy" build — same bug, see below)
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
-The lesson: **debugging effort goes into reproduction first.** A bug you can reproduce offline (via capture-replay or `rr`) is a bug you *will* solve with the tools below; a bug you can't reproduce is a guessing game. The book's capture/replay architecture (Ch. 74–75) is what makes most production bugs reproducible — the single biggest debugging investment you can make.
+struct Order { std::int64_t price; std::int32_t qty; std::int32_t tick; };   // price in 1e-4 units
+
+// Snap a price to the tick grid and return the notional. Bug: `/` truncates toward zero, so a
+// negative price offset (a short leg quoted below the reference) snaps UP a tick, not down.
+[[gnu::noinline]] std::int64_t snap_notional(const Order& o) {
+    std::int64_t ticks   = o.price / o.tick;      // <- the suspect intermediate
+    std::int64_t snapped = ticks * o.tick;        // <- and this one
+    return snapped * o.qty;
+}
+
+int main(int argc, char** argv) {
+    Order o{ argc > 1 ? std::atoll(argv[1]) : -100'005, 7, 10 };
+    std::printf("notional=%lld\n", static_cast<long long>(snap_notional(o)));
+    return 0;
+}
+```
+
+**1. gdb on the `-O2` binary: `<optimized out>` means "read the location list".** Break on the function, ask for the locals, then ask gdb *where* they are:
+
+```
+   $ g++ -O2 -g -std=c++20 optbug.cpp -o optbug && gdb -q ./optbug
+   (gdb) break snap_notional
+   (gdb) run
+   Breakpoint 1, snap_notional (o=...) at optbug.cpp:12
+   (gdb) info locals
+   ticks = <optimized out>
+   snapped = <optimized out>
+   (gdb) info address ticks
+   Symbol "ticks" is multi-location:
+     Range 0x...21b-0x...223: a complex DWARF expression:  DW_OP_breg2 0 [$rcx]; DW_OP_breg4 0 [$rsi]; DW_OP_div; DW_OP_stack_value
+     Range 0x...223-0x...227: a variable in $rax
+     Range 0x...227-0x...22a: a complex DWARF expression:  DW_OP_breg2 0 [$rcx]; DW_OP_breg4 0 [$rsi]; DW_OP_div; DW_OP_stack_value
+   (gdb) info address snapped
+   Symbol "snapped" is multi-location:
+     Range 0x...21b-0x...22a: a complex DWARF expression:  [$rcx] [$rsi] DW_OP_div [$rsi] DW_OP_mul DW_OP_stack_value
+   (gdb) disassemble
+      mov    (%rdi),%rcx            # rcx = o.price
+      movslq 0xc(%rdi),%rsi         # rsi = o.tick
+      mov    %rcx,%rax
+      cqto
+      idiv   %rsi                   # rax = price / tick  (ticks lives in rax for exactly 4 bytes of code)
+      movslq 0x8(%rdi),%rax         # rax = o.qty          <- ticks is gone again
+      sub    %rdx,%rcx              # rcx = price - price % tick   <- "snapped", computed WITHOUT ticks
+      imul   %rcx,%rax
+      ret
+```
+
+Read it the Ch. 4 way. `ticks` exists as a register value for a four-byte window after the `idiv`; everywhere else DWARF describes it as a *recipe* (`DW_OP_div` of two registers — "if you want it, compute it from `rcx` and `rsi`"), and gdb's `info locals` prints the recipe's result only when the current PC is inside a range it can evaluate. `snapped` **never exists**: the compiler rewrote `(price / tick) * tick` as `price - price % tick` and reused the remainder `idiv` left in `rdx`, so the variable you'd most like to inspect was optimized into a different expression. That is what `<optimized out>` means on an `-O2` binary — not "lost" but "not materialized here" — and the location list plus the disassembly recover the value: at the `sub`, `rdx` holds `-5` (the remainder) and `rcx` becomes `-100000`, which is the bug made visible (`-100005` should have snapped to `-100010`). An `-O0` build shows both variables plainly — and prints the same wrong `-700000`, so this is a logic bug that *survives* `-O0` and can be debugged there; §5.4.1 is about telling that kind from the kind that doesn't.
+
+**2. `rr`: record once, replay deterministically, step backwards.** `rr` records the process (syscall results, signals, the few non-deterministic instructions) so that `rr replay` re-executes it *identically* under gdb, as many times as you like, in both directions:
+
+```
+   $ rr record ./optbug -100005            # the recording is a few MB; the run is ~1.5-2x slower
+   $ rr replay                             # gdb attached to the deterministic replay
+   (rr) break optbug.cpp:20
+   (rr) continue
+   (rr) finish                             # run snap_notional to its return
+   Value returned is $1 = -700000          # wrong: expected -700070
+   (rr) reverse-step                       # back INTO the callee, at its last statement
+   15        return snapped * o.qty;
+   (rr) p o.price % o.tick                 # the remainder the optimizer kept in rdx
+   $2 = -5
+   (rr) p $rdx
+   $3 = -5                                 # identical on every replay — no heisenbug
+   (rr) watch -l o.price                   # a hardware watchpoint ...
+   (rr) reverse-continue                   # ... run BACKWARDS to the write that set it
+```
+
+Two limits matter for this book's systems. `rr` needs hardware performance counters (it counts retired conditional branches to place events — `kernel.perf_event_paranoid ≤ 1`, and most virtual machines don't expose the counter), and it serializes all threads onto **one core**, so a multi-threaded hot path records at a fraction of its real speed and with different interleavings (`rr record -h`, "chaos mode", randomizes scheduling to shake out races). And `rr` cannot record memory written by *another process* — a shared-memory ring (Ch. 50) or a DMA'd NIC ring (Ch. 62) changes under the recorded process without a syscall, so you record the replay *harness* that feeds the core from a capture (Ch. 74–75), never the live consumer of a shared segment.
+
+**3. What debug info costs — measured.** The reason to keep `-g` on production builds is that it is free at run time; the reason people strip it is size. Both are measurable:
+
+```
+   build (GCC 13.3, -O2 -std=c++20)            binary      debug payload      .text identical to no -g?    compile+link
+   optbug.cpp (the listing above)
+     no -g                                      16,128 B    —                  (reference)                  —
+     -g                                         24,760 B    +8.6 KB in-binary  YES (byte-for-byte)          —
+     -g -gsplit-dwarf                           19,608 B    + 9,336 B .dwo     YES                          —
+     -g, then objcopy --only-keep-debug/strip   16,080 B    13,400 B .debug    YES                          —
+   a 20-line TU that instantiates std::map, std::unordered_map<std::string, std::vector<…>> and std::to_chars
+     no -g                                      22,952 B    —                  (reference)                  0.96 s
+     -g                                        335,832 B    320 KB (14x the code)  YES                      1.08 s
+     -g -gsplit-dwarf                          220,072 B    + 538 KB .dwo      YES                          1.15 s
+     -g -fno-omit-frame-pointer                336,040 B    (same DWARF)       NO: .text 8,325 -> 8,340 B   1.08 s
+```
+
+How it was measured: `objcopy -O binary --only-section=.text a.out a.text` on each pair and `cmp` the dumps (identical means the optimizer made the same decisions — `-g` only adds `.debug_*` sections and never changes codegen); `ls -l`/`size` for the sizes; `objcopy --only-keep-debug optbug optbug.debug && strip --strip-debug optbug && objcopy --add-gnu-debuglink=optbug.debug optbug` for the archive-and-strip workflow (`gdb` and `perf` find `optbug.debug` through the link, or through `debuginfod`); `-gsplit-dwarf` puts the bulk of the DWARF in a per-object `.dwo` that the linker never reads (`dwp` packs the `.dwo`s for shipping). Read it: **`-g` is codegen-neutral** — the `.text` bytes are identical, so there is no run-time argument against it, only a size one, and a stripped binary plus an archived `.debug` file is the same size as a never-`-g` build. The debug payload is **large relative to the code** (14× here; template-heavy TUs are the worst case), which is why you archive it rather than ship it. **Split DWARF is not a size optimization for one TU** (the `.dwo` carries its own string tables, so the total grew); its payoff is on a large binary, where it takes megabytes of DWARF out of every link and relink. The one flag in the table that *does* change code is **`-fno-omit-frame-pointer`**: +15 bytes of `.text` here (a `push %rbp; mov %rsp,%rbp; leave` per non-leaf function), and a run-time cost usually quoted at 0–2 % — representative; measure it on your hot loop with the Ch. 3 harness — in exchange for stacks that `perf` can unwind without DWARF or LBR (Ch. 2). The convention this book follows: `-O2 -g` (or `-O3 -g`) everywhere, `-fno-omit-frame-pointer` wherever you profile, strip at package time, archive the debug info keyed by build ID.
+
+**Beyond one process: reproduce first.** Everything above assumes you can *run the bug*. In a trading system the bug usually happened once, in production, at 09:31:42, and the measurement that matters is your ability to reproduce it: if the system captures its input stream (Ch. 75) and the core is deterministic (Ch. 74), the production incident is reproduced by replaying the captured session offline, bit-for-bit (Ch. 74.2.2) — and *that* replay is what you point gdb and `rr` at. A crash leaves a **core dump** (symbolized with the archived `.debug` above — Ch. 74.4.5 on capturing it without stalling survivors); a race or timing bug (Ch. 40) that doesn't recur in one replay is forced with deterministic stress — adversarial captured inputs (the microburst, the gap, the malformed packet — Ch. 53/54/72), under sanitizers (§5.4.1), many times. **Debugging effort goes into reproduction first**; a bug you can reproduce offline is a bug the tools above will solve.
 
 ## 5.4 Techniques
 
 ### 5.4.1 Debugging optimized and LTO builds
 
-- **Keep debug info in optimized builds.** Compile the production build with `-g` (and consider `-g` + `-fno-omit-frame-pointer` — Ch. 2/22 — for usable stacks); `-g` does **not** change codegen, it only adds a `.debug_*` section the debugger/profiler reads. Ship or archive the debug info (split debug info: `-gsplit-dwarf`, or a separate `.debug` file via `objcopy --only-keep-debug`) so you can symbolize a stripped production binary's cores and profiles offline. A stripped binary with no archived debug info is a binary you can't debug (§5.5).
-- **Read `<optimized out>` as "read the asm" (Ch. 4).** When a variable is optimized out, its value is in a register or was eliminated; use `info registers`, `disassemble`, and the source↔asm mapping (Ch. 4) to recover it. `gdb`'s `info scope` / `info address` and reading the DWARF location expressions tell you where a variable *is* at a given PC. This is Ch. 4's skill applied live.
+- **Keep debug info in optimized builds.** Compile the production build with `-g` (and consider `-g` + `-fno-omit-frame-pointer` — Ch. 2/22 — for usable stacks); `-g` does **not** change codegen, it only adds a `.debug_*` section the debugger/profiler reads. Ship or archive the debug info (split debug info: `-gsplit-dwarf`, or a separate `.debug` file via `objcopy --only-keep-debug` + `--add-gnu-debuglink` — the commands, and the measured sizes and the byte-identical `.text`, are §5.3) so you can symbolize a stripped production binary's cores and profiles offline. A stripped binary with no archived debug info is a binary you can't debug (§5.5).
+- **Read `<optimized out>` as "read the location list" (Ch. 4).** When a variable is optimized out, its value is in a register for part of the function, is a DWARF *expression* over other registers, or was rewritten into a different computation altogether (§5.3's `snapped`); `info address`/`info scope` show which, and `disassemble` + `info registers` recover the value at the PC you care about. This is Ch. 4's skill applied live.
 - **Build a debug reproduction — carefully.** A `-Og` or `-O0` build is easier to debug *if the bug survives the optimization change*. Many logic bugs do (debug them at `-Og`); but timing/UB/race bugs often *don't* (§5.2) — they exist *because* of the optimization. Know which kind you have: if the bug vanishes at `-O0`, it's likely a UB or race the optimizer exposed (Ch. 21/30/40) — debug it *as optimized* with sanitizers (below) rather than chasing it at `-O0` where it hides.
 - **Sanitizers to catch the optimizer-exposed bugs (Ch. 40, 72).** UBSan/ASan/TSan (Ch. 40) find the UB, memory errors, and races that manifest as mysterious optimized-code behavior — run the reproduction under them. A bug that only appears at `-O2` and vanishes at `-O0` is very often a sanitizer finding (Ch. 72.2.2). The sanitizers are a *debugging* tool, not just a CI gate.
 
 ### 5.4.2 Record/replay, reverse debugging, and core-dump analysis
 
-- **`rr` for reverse debugging.** Record the reproduction with `rr record`, then `rr replay` under `gdb`: set a breakpoint at the crash/symptom and **`reverse-continue` / `reverse-step`** backwards to the cause. This is transformative for "how did this pointer become null?" — you run time backwards from the null deref to the write that nulled it. `rr`'s replay is deterministic, so watchpoints and repeated runs behave identically (no heisenbug — §5.5). The gold-standard technique for elusive logic bugs once you can reproduce them.
+- **`rr` for reverse debugging.** Record the reproduction with `rr record`, then `rr replay` under `gdb`: set a breakpoint at the crash/symptom and **`reverse-continue` / `reverse-step`** backwards to the cause (the session, and the PMU/single-core/shared-memory limits, are §5.3). This is transformative for "how did this pointer become null?" — you run time backwards from the null deref to the write that nulled it. `rr`'s replay is deterministic, so watchpoints and repeated runs behave identically (no heisenbug — §5.5). The gold-standard technique for elusive logic bugs once you can reproduce them.
 - **Deterministic replay through the core (Ch. 74–75) under a debugger.** Replay the captured production session (Ch. 75) through the deterministic core (Ch. 74) *under `gdb`* (or `rr`), reproducing the exact production behavior offline to inspect. Because the core is deterministic, the replay hits the same bug at the same input every time — you can breakpoint the exact message that triggered it. This is `rr`'s benefit at the *application* level, using the architecture you already built.
 - **Core-dump post-mortem.** For a production crash, analyze the core (Ch. 74.4.5) in `gdb` with matching debug info: `bt` (backtrace), inspect the corrupted state, correlate the faulting address with your data structures (Ch. 25). Combine with the capture (Ch. 75): the core shows the *end state*, the replay shows *how it got there*. Minidumps / partial cores (Ch. 74) keep the capture cheap enough not to stall survivors.
 - **Hardware watchpoints and conditional breakpoints.** In a replay/test (never the live hot path), hardware watchpoints (`watch`) catch *when* a memory location changes — invaluable for "who corrupted this?" (a use-after-free or buffer overflow — Ch. 72). Deterministic under `rr`; use them to pinpoint the write.
@@ -82,15 +173,15 @@ Sometimes you must observe *production* (the bug won't reproduce offline yet). D
 
 **Exercises:**
 
-1. **Debug optimized code.** Take a bug in an `-O2` function where the key variable is `<optimized out>`; recover its value via `info registers` + `disassemble` (Ch. 4). Then confirm the bug is or isn't present at `-O0` — and classify it (logic vs UB/race) from whether it survives (§5.4.1).
-2. **Reverse-debug with `rr`.** Record a reproduction of a null-deref / corruption bug with `rr`, then `reverse-continue` from the crash to the write that caused it (§5.4.2). Contrast with forward-only `gdb`.
+1. **Debug optimized code.** Build `optbug.cpp` (§5.3) at `-O2 -g`, break in `snap_notional`, and recover `ticks` and `snapped` from the location lists, registers and disassembly; then change `tick` to `int64_t` and `qty` to `int16_t` and see how the location lists move. Fix the bug (floor division) and confirm with both builds. Then take a real `-O2`-only bug of your own and classify it (logic vs UB/race) from whether it survives `-O0` (§5.4.1).
+2. **Reverse-debug with `rr`.** Replay §5.3's `rr` session; then record a null-deref / corruption bug of your own, set a hardware watchpoint on the corrupted location and `reverse-continue` from the crash to the write that caused it (§5.4.2). Contrast with forward-only `gdb`, and check `rr record` works at all on your box (`perf_event_paranoid`, VM counters).
 3. **Capture-replay reproduction.** Reproduce a "production" bug by replaying a captured session (Ch. 75) through the deterministic core (Ch. 74) under `gdb` — breakpoint the exact triggering message (§5.4.2). Verify determinism (same bug every replay).
 4. **Heisenbug.** Create a timing-dependent bug that vanishes when you add a `printf` but persists with a lock-free log record (Ch. 71) — demonstrate the observer effect and the low-overhead workaround (§5.5, §5.4.3).
 5. **Production trace → offline fix.** Use bpftrace (Ch. 61) to capture the arguments/state of a suspect path in a running system without stopping it, reproduce the bug offline from the captured data, fix it, and verify with the regression gate (Ch. 76) (§5.4.3).
 
 **Checklist:**
 
-- [ ] Production builds carry **`-g` debug info** (codegen-neutral), and the debug info is **archived per release** (split-dwarf / separate `.debug`) for offline symbolization (§5.4.1, §5.5).
+- [ ] Production builds carry **`-g` debug info** (codegen-neutral — the `.text` is byte-identical, §5.3), and the debug info is **archived per release** (split-dwarf / separate `.debug` + debuglink or build ID) for offline symbolization (§5.3, §5.4.1, §5.5).
 - [ ] Debugging **reproduces offline first** — via **capture-replay** (Ch. 74–75) or **`rr`** — rather than chasing the bug live (§5.3, §5.5).
 - [ ] The **live hot path is never** attached-to, `printf`'d, or breakpointed; observation uses **lock-free logging** (Ch. 71), **eBPF/bpftrace** (Ch. 61), or **hardware counters** (Ch. 2) (§5.4.3, §5.5).
 - [ ] **Optimized-code bugs** are debugged **as optimized** (asm/registers — Ch. 4, sanitizers — Ch. 40) when they don't survive `-O0`; the `-O0` disappearance is read as a **UB/race clue** (§5.4.1).

@@ -73,7 +73,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 ### [5. Debugging Low-Latency & Optimized Code](05-debugging-low-latency-optimized-code.md)
 - 5.1 Why it matters: you can't `printf` your way out of a nanosecond bug
 - 5.2 Mental model: optimized code, the observer effect, and reproduce-then-debug
-- 5.3 Measure it: reproducing and capturing the bug
+- 5.3 Measure it: debugging an `-O2` binary with gdb and `rr`, and what debug info costs
 - 5.4 Techniques
   - 5.4.1 Debugging optimized and LTO builds
   - 5.4.2 Record/replay, reverse debugging, and core-dump analysis
