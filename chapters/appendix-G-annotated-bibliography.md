@@ -24,6 +24,7 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Yang, Park & Ousterhout, "NanoLog: A Nanosecond Scale Logging System" (USENIX ATC 2018).** Compile-time format extraction, binary records and an offline decoder — the deferred/binary-logging design that **Ch. 73** builds (§73.2, §73.4.2).
 - **The low-latency transport and congestion papers** — Zhu et al., "Congestion Control for Large-Scale RDMA Deployments" (**DCQCN**, SIGCOMM 2015); Kalia, Kaminsky & Andersen, "Datacenter RPCs can be General and Fast" (**eRPC**, NSDI 2019); Montazeri, Li, Alizadeh & Ousterhout, "Homa: A Receiver-Driven Low-Latency Transport Protocol Using Network Priorities" (SIGCOMM 2018). Why RoCEv2 needs ECN-driven rate control — **Ch. 66** (§66.2) — and what a µs-scale, head-of-line-free transport looks like beyond TCP — **Ch. 67** (§67.4.2–§67.4.3).
 - **Gil Tene, "How NOT to Measure Latency" (and the coordinated-omission material).** Why naive latency measurement lies and how HdrHistogram fixes it — the measurement rigor of **Ch. 3** and the tail-latency framing of Ch. 1.
+- **Daniel Bristot de Oliveira et al., "Demystifying the Real-Time Linux Scheduling Latency" (ECRTS 2020), and the osnoise/timerlat write-ups (Linux Plumbers 2021; LWN).** Latency as a sum of attributable intervals — the model the `osnoise` and `timerlat` tracers implement and that **Ch. 46** uses to name the source of the last spike on an isolated core.
 
 ## G.2 Vendor & reference manuals
 
@@ -44,6 +45,10 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **NVIDIA BlueField / DOCA SDK documentation and the P4 language specification (p4.org).** DPU architecture and the two programming models — C/C++ on the ARM cores vs declarative match/action pipelines — of **Ch. 72** (§72.2, §72.4.1).
 - **Intel Resource Director Technology (RDT) documentation and the kernel's `resctrl` interface** (`Documentation/arch/x86/resctrl.rst`), with the `intel-cmt-cat` / `pqos` toolkit and the AMD64 QoS Extensions. CAT/MBA/CMT/MBM, CLOS and capacity masks — **Ch. 44** (§44.2, §44.4).
 - **The market-access and timestamping rules** — SEC Rule 15c3-5 ("market access": pre-trade risk controls and the kill-switch) and MiFID II RTS 25 (clock synchronization traceable to UTC), with the Reg NMS / CAT record-keeping requirements. The compliance drivers behind the kill-switch of **Ch. 77** (§77.4.4), the PTP accuracy targets of Ch. 60 and the complete, timestamped capture of Ch. 78.
+- **RFC 2236 / 3376 (IGMPv2/v3), RFC 4541 (IGMP/MLD snooping switches), RFC 3678 (multicast source-filter socket API), RFC 7761 (PIM-SM).** The membership protocol, the querier requirement and the SSM socket API behind every market-data join — **Ch. 56**.
+- **Linux kernel documentation: `kernel-per-CPU-kthreads.rst`, `osnoise-tracer.rst`/`timerlat-tracer.rst`/`hwlat_detector.rst`, `tools/rtla/`, `ftrace.rst`; `snmp_counter.rst`, `statistics.rst`, `scaling.rst`, `dropreason-core.h`; `proc.rst`, `psi.rst`, `ras.rst`, `pcieaer-howto.rst`.** The noise catalog and tracers of **Ch. 46**, the network counter semantics of **Ch. 80**, and the host-health signals of **Ch. 79**.
+- **Prometheus documentation (histograms, exposition format, `histogram_quantile`, native histograms) and the OpenTelemetry exponential-histogram specification.** Why the unit of export is bucket counts and never a percentile — **Ch. 74 §74.4.3**.
+- **SEC Rule 15c3-5 (Market Access) and ESMA MiFID II RTS 6.** Pre-trade controls, kill functionality, real-time monitoring and the annual self-assessment that a readiness gate and kill-switch test satisfy — **Appendix M**, Appendix K.4.
 
 ## G.3 Books
 
@@ -58,6 +63,8 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Robert Love, *Linux System Programming*** and **Michael Kerrisk, *The Linux Programming Interface*.** The syscall-level reference behind **Part VIII** (Ch. 48, 49, 51, 52) and the memory/process chapters (Ch. 23, 26, 77).
 - **Daniel Lemire's work and *Hacker's Delight* (Warren).** Bit-manipulation and branch-free integer tricks — **Ch. 28** (and the SWAR/SIMD parsing of Ch. 54).
 - **Larry Harris, *Trading and Exchanges: Market Microstructure for Practitioners*.** The standard market-structure text — matching, order types, maker/taker, the participants' roles — behind **Appendix J** (J.1–J.3) and the trading framing of Ch. 25, 54 and the case studies; the FIX Trading Community specifications (G.2) cover the wire side.
+- **Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering* (2016) and *The Site Reliability Workbook* (2018).** SLOs, error budgets and multi-window burn-rate alerting — adapted to session phases in **Ch. 74 §74.4.4**; the production-readiness-review idea behind **Appendix M**.
+- **Beau Williamson, *Developing IP Multicast Networks* (Cisco Press).** PIM, RPF and rendezvous points — the routed-multicast background of the venue distribution tree in **Ch. 56 §56.2.3**.
 
 ## G.4 Influential talks & blogs
 
@@ -87,6 +94,8 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **`pahole` / `dwarves`.** Struct-layout inspection — the object-layout work of **Ch. 9**.
 - **`linuxptp` (`ptp4l`, `phc2sys`, `pmc`) and the kernel timestamping docs** (`Documentation/networking/timestamping.rst`, `PTP_SYS_OFFSET`). Disciplining the NIC PHC to the grandmaster and bridging it to the TSC — the toolchain of **Ch. 60** (§60.4), with hardware timestamping on the NIC (Ch. 57).
 - **`cyclictest` / `rt-tests` and the `hwlat` detector.** Jitter measurement and the verification pass of **Ch. 45** and **Appendix C.5**.
+- **`rtla` (`osnoise`, `timerlat`, `hwnoise`), `trace-cmd` and KernelShark (Steven Rostedt), `perf sched`.** The stop-on-threshold noise hunt of **Ch. 46** and the one-liners of Appendix I.6.
+- **`turbostat`, `numastat`, `rasdaemon`/`ras-mc-ctl`, `dmidecode`; `ethtool` (`-S`, `-m`, `--show-fec`), `nstat`, `ss -ti`, `dropwatch`; the driver statistics sources (`ixgbe`/`ice`/`mlx5`/`sfc` `*ethtool*.c`).** The host- and network-health samplers of **Ch. 79–80** and the readiness attestation of **Appendix M**.
 
 ## G.6 How this maps to the Parts
 
@@ -98,12 +107,12 @@ For quick navigation, the heaviest sources per Part:
 - **Part IV (Memory):** Drepper, Kerrisk/Love, `std::pmr` and allocator literature (Ch. 23–26).
 - **Part V (Numerics/SIMD):** *Hacker's Delight*, Lemire, Agner Fog's tables, the Intel intrinsics guide (Ch. 27–29).
 - **Part VI (Concurrency):** ★ Williams, ★ McKenney, the Disruptor paper, Michael & Scott, the C++ memory-model references, and the `std::execution`/P2300 material (Ch. 30–40).
-- **Part VII (OS/Scheduling):** the kernel RT docs, Intel RDT/`resctrl` docs, `cyclictest`, Gregg's *Systems Performance* (Ch. 41–47, Appendix C).
+- **Part VII (OS/Scheduling):** the kernel RT docs, Intel RDT/`resctrl` docs, `cyclictest`, `rtla`/`osnoise`/`timerlat` and the per-CPU-kthreads documentation, Gregg's *Systems Performance* (Ch. 41–47, Appendix C).
 - **Part VIII (Kernel I/O, Sockets & Zero-Copy):** `liburing`, the kernel zero-copy docs, the socket/TCP references (Ch. 48–53).
-- **Part IX (Market Data, NIC & Fabric):** the exchange protocol specs, NIC-vendor and DDIO material, `rte_flow`/flow-steering docs, the PTP/IEEE-1588 references, and low-latency switch/fabric guides (Ch. 54–62).
+- **Part IX (Market Data, NIC & Fabric):** the exchange protocol specs, NIC-vendor and DDIO material, `rte_flow`/flow-steering docs, the PTP/IEEE-1588 references, the IGMP/snooping/SSM RFCs, and low-latency switch/fabric guides (Ch. 54–62).
 - **Part X (Kernel Bypass, RDMA & Transport):** bpftrace/XDP, DPDK, the Solarflare/ef_vi SDKs, the InfiniBand/RoCE and DCQCN references, and Aeron/eRPC/Homa (Ch. 63–67).
 - **Part XI (Heterogeneous/Accelerators):** the PCIe spec, CUDA/MPI docs, the FPGA toolchain and HFT-FPGA literature, the BlueField/DOCA/P4 docs (Ch. 68–72).
-- **Part XII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, the regulatory record-keeping rules (Ch. 73–81).
+- **Part XII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, Tene/HdrHistogram and the Prometheus histogram docs, the SRE books (SLOs and alerting), the kernel's counter and tracer documentation, the regulatory record-keeping and market-access rules (Ch. 73–81, Appendix M).
 - **Appendices:** the Arm ARM and Graviton guides (A), the Rust/Zig/JVM references (B), the kernel/vendor tuning guides (C), the GCC/Clang/BOLT docs (D), the latency-measurement tools (E), cppreference/the protocol specs (F), the libstdc++/libc++ status tables and cppreference compiler-support pages (H), the `perf`/`bpftrace`/`ethtool` man pages and tool docs (I), Harris and the exchange specs (J), exchange colocation/connectivity documentation (K), and the Google Benchmark / HdrHistogram docs (L).
 
 ## G.7 A short shelf

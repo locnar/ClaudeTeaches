@@ -217,4 +217,4 @@ Passing this checklist is what turns "this is faster" into *evidence* — the st
 
 ---
 
-*This completes Appendix L and the book. The chapters (Parts I–XII) and Appendices A–L together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 81), with the ARM port, the language survey, the tuning checklist, the flag reference, the latency numbers, the glossary, the bibliography, the feature-support matrix, the tooling cookbook, the market-structure primer, the connectivity guide, and this benchmark harness as the standing references that outlive any single chapter.*
+*Next: Appendix M — Pre-Open Readiness Gate & Market-Open Playbook, the operational companion to Appendix C: the cold → warming → syncing → reconciled → armed → trading → disarmed state machine every trading process publishes, the T-60/T-30/T-5 gates (host attestation, clock, feed, network, session, positions, warm-up, kill-switch) as commands with expected values, re-arming after an intraday restart, the host fingerprint micro-suite built on this appendix's harness, and the gate runner as a script.*

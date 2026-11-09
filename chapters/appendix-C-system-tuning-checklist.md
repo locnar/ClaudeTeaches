@@ -73,7 +73,19 @@ Applied when launching the trading process(es) (Ch. 42, 45, 16). **Why:** pin th
 - [ ] **Measure the application's own tail** (Ch. 3, 81): `cyclictest` proves the *box* is quiet; the real test is the *application's* tick-to-trade distribution (Ch. 81) under a microburst (Ch. 54) — run the §81.3 decomposition and confirm the per-stage tails are flat. The box being quiet is necessary, not sufficient.
 - [ ] **Re-verify after every change** (Ch. 81): a kernel update, a BIOS update, a config drift, a new background agent can silently re-introduce jitter. Bake this verification into a continuous sampler (Ch. 79 — the isolation counters diffed every second from a housekeeping core) and into the pre-trading-day readiness gate (Appendix M) — tuning is defended continuously, not set once.
 
-## C.6 References
+## C.6 Configuration as code and drift detection
+
+**Everything above is a declaration, not a memory.** A box tuned by hand decays (Ch. 79 §79.2.3): package updates re-enable `irqbalance`, a shared Ansible role flips `numa_balancing`, a BIOS update resets the C-state policy, an agent attaches a perf event to every CPU. The defence is to make the checklist an *artefact* — versioned with the release, applied by tooling, and audited against itself — and to let the sampler of Ch. 79 and the gate of Appendix M catch what the tooling cannot prevent.
+
+- [ ] **Declare C.1–C.4 as code.** The kernel cmdline (a GRUB drop-in), the runtime knobs (a `sysctl.d` file, a `tuned` profile *you* own or none, a systemd unit tree for IRQ affinity / `ethtool` / `resctrl` / cgroups), the per-process launch (unit files with `CPUAffinity=`, `AllowedCPUs=`, `chrt`/`numactl` wrappers) — as an Ansible/Salt role (or equivalent) checked into the same repository as the trading system and **tagged with the same release**. Per-host differences (hot CPU list, NIC names, NUMA node, BDFs) live in one variables file per host; nothing else differs between siblings.
+- [ ] **Inventory firmware too.** BIOS/BMC versions and their settings export (vendor `racadm`/`ilorest`/`redfish` dump), microcode revision, NIC firmware and driver versions, switch-port configuration for your ports (Ch. 62, Appendix K) — recorded in the release alongside the role, because C.1 is firmware and firmware is updated.
+- [ ] **Generate the baseline fingerprint from the declaration** (Appendix M.2, Ch. 79 §79.4.4): the expected values of every check are derived from the role and the inventory, not typed by hand, so the gate compares the live box against *what the release says* and a mismatch has exactly two resolutions — re-apply the role (the box drifted) or change the role through a release (the intent changed, with a fresh Ch. 46 sign-off and baseline).
+- [ ] **Audit continuously and at the gate.** The cheap subset — `effective_affinity_list` map, service states (`irqbalance`, `tuned`), the sysctl set, THP/governor/clocksource — is diffed against the declaration once a minute by the Ch. 79 sampler; the full attestation (cmdline/kernel/microcode/BIOS/firmware/NIC/PCIe/RDT) runs at boot and at T-60 (Appendix M.2). Any diff is a ticket with the knob named; a diff at T-60 blocks go-live.
+- [ ] **Change the declaration, never the box.** No `sysctl -w`, no `ethtool -G`, no BIOS change outside a release — and when one is unavoidable in an incident, it is a *recorded* deviation that the next release either adopts or reverts. The baseline's history is the fleet's configuration log.
+- [ ] **Re-sign-off after every declared change.** A new kernel, microcode or driver is a new box until Ch. 45's `cyclictest`, Ch. 46's `osnoise` run and the Appendix M.6 micro-suite say otherwise; the new baseline is recorded then, and only then.
+- [ ] **The gate is the enforcement.** Appendix M turns this section and C.5 into a timed, scripted procedure with pass/fail criteria, run every trading day before the first order.
+
+## C.7 References
 
 - The Linux kernel real-time and `nohz_full`/`isolcpus`/`rcu_nocbs` documentation (`Documentation/admin-guide/kernel-parameters.txt`, the NO_HZ and RT docs) — the cmdline knobs of C.2 (Ch. 45).
 - The Red Hat / SUSE **low-latency tuning guides** and `tuned` profile documentation — a vendor-blessed consolidation of C.1-C.3.
@@ -82,7 +94,7 @@ Applied when launching the trading process(es) (Ch. 42, 45, 16). **Why:** pin th
 - Intel/AMD BIOS low-latency tuning guides and your server vendor's (Dell/HPE/Supermicro) "low latency" BIOS whitepapers — C.1.
 - The chapters this consolidates: Ch. 6 (setup/mitigations), Ch. 15 (huge pages), Ch. 16 (NUMA), Ch. 41–47 (context-switch/pinning/SMT/cache-allocation/RT/warming), Ch. 52 (TCP), Ch. 57 (NIC), Ch. 59 (flow steering).
 
-## C.7 Additional Reading
+## C.8 Additional Reading
 
 - The Red Hat *Low Latency Performance Tuning* and *Realtime* guides, and the CERN/CMS and trading-community tuning write-ups — real deployed checklists (C.1-C.5).
 - Talks on building deterministic Linux boxes for trading (e.g. the Carl Cook / Mechanical Sympathy material — Ch. 81) — the *why* behind the knobs.

@@ -107,6 +107,19 @@ Discovering the machine and placing threads on it (Ch. 16, 42, 43; Appendix C).
    cpupower frequency-info                        # governor + current/available frequencies (Ch. 6)
    grep -E 'CPU|<if>' /proc/interrupts           # header + the NIC's IRQ rows: per-CPU counts show where IRQs land (Ch. 42)
    cyclictest -m -p 80 -a 2 -t 1 -i 200 -d 0 -D 1h   # wake-up latency on isolated core 2 — read the max, not the avg (Ch. 45, App C.5)
+   # --- hunting residual noise (Ch. 46): attribute what still lands on the isolated core
+   rtla osnoise top -c 2 -P f:80 -d 10m -T 1 -s 20 -t   # spin on cpu2, count noise >= 1 us, STOP + save trace on a 20 us gap; HW column = SMI/firmware
+   rtla timerlat top -c 2 -P f:95 -p 100 -a 20 -u        # timer latency split into IRQ vs thread; stop + trace above 20 us; -u = user thread too
+   rtla hwnoise -c 2 -d 2m -T 1                          # the firmware floor (hwlat); qualification only — it monopolises the core
+   echo 4 > /sys/kernel/tracing/tracing_cpumask          # hex mask: trace ONLY cpu2 (0x4); then set_event irq_vectors:* tlb:tlb_flush sched:sched_switch ...
+   echo x86-tsc > /sys/kernel/tracing/trace_clock        # TSC timestamps that line up with the app's rdtsc (Ch. 17)
+   trace-cmd record -M 4 -C x86-tsc -e irq -e sched -e irq_vectors -e tlb -e timer:tick_stop   # to a file; `trace-cmd report` / KernelShark
+   perf sched record -C 2 -- sleep 600 && perf sched timehist -C 2    # who ran on cpu2, when, for how long (thread intruders)
+   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 46 §46.4.1, Ch. 79)
+   grep -l -E '^Cpus_allowed_list:.*\b2\b' /proc/[0-9]*/task/*/status  # every thread ALLOWED on cpu2 (want: yours + the per-cpu kthreads)
+   cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 42)
+   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 79 §79.2.4)
+   turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
 ```
 
 **Interpreting:** `lstopo` is the map you tune against (Ch. 43) — it shows which logical CPUs are SMT siblings and which cores share an L2/L3, so you can leave siblings idle (Ch. 43) and keep a thread and its data on one NUMA node (Ch. 16). These are the runtime counterparts to the boot-time isolation in Appendix C.
@@ -142,6 +155,23 @@ Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
    tcpdump -i eth0 -nn -ttt 'udp port 12345'     # inter-packet deltas on a market-data feed
    ptp4l -i eth0 -m                             # PTP daemon, verbose (Ch. 60)
    phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 60)
+   # --- multicast membership (Ch. 56): verify state, not traffic
+   cat /proc/net/igmp                           # kernel's view: (device, group) joins, little-endian hex groups; Querier column = IGMP version in use
+   ip maddr show dev eth0                       # the same, decoded
+   timeout 260 tcpdump -i eth0 -nn -c 1 'igmp and igmp[0]==0x11'   # a General Query within one interval, or the feed goes dark ~260 s after the last join
+   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 56, 80)
+   sysctl net.ipv4.igmp_max_memberships net.ipv4.conf.eth0.rp_filter   # 20 by default (the 21st join fails ENOBUFS); strict rp_filter drops the feed
+   # --- network health & drop forensics (Ch. 80): which LAYER dropped it
+   ethtool -S eth0 | grep -iE 'missed|out_of_buffer|nodesc'          # host ring full (poll too slow)        — layer 2b
+   ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 67)
+   ethtool -S eth0 | grep -iE 'crc|symbol|fec|pause'                 # link/PHY/FEC and pause frames         — layer 1 / fabric
+   awk '{print NR-1, strtonum("0x"$1), strtonum("0x"$2), strtonum("0x"$3)}' /proc/net/softnet_stat   # cpu processed dropped time_squeeze (NAPI, layer 3)
+   nstat -az TcpExt:TCPTimeouts Tcp:RetransSegs TcpExt:TCPSpuriousRTOs   # an RTO on the order session = a 200 ms+ stall (Ch. 53)
+   ss -tim dst <venue>                                                # per-socket rtt/cwnd/retrans/notsent — or getsockopt(TCP_INFO) at 1 Hz from the gateway
+   sudo dropwatch -l kas                                              # live histogram of kernel drops by function (then: start)
+   sudo bpftrace -e 'tracepoint:skb:kfree_skb { @[args->reason, ksym(args->location)] = count(); }'   # drop REASON + location; arm BEFORE the session (text_poke IPIs)
+   ethtool -m eth0 | grep -iE 'power|temperature'                     # optics DOM: rx/tx power vs the module's warning thresholds
+   cat /sys/class/net/eth0/carrier_changes                            # link flaps since boot
 ```
 
 **Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 80 §80.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §80.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).

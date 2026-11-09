@@ -59,8 +59,8 @@ Code & content guidelines:
 
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into twelve Parts with 76 chapters and twelve
-> appendices (A–L); **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–L)
+> appendices (A–L), and on 2026-11-09 extended to 81 chapters and thirteen appendices (A–M); **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
+> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–M)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
 
@@ -416,18 +416,29 @@ Code & content guidelines:
   (HdrHistogram) variant that avoids coordinated omission, the pinning/warm-up/frequency
   environment setup that makes runs repeatable, and a pre-trust checklist. Implements Ch. 3's
   method as copy-paste code (consolidates Ch. 1, 3, 4, 17, 46 and Appendices C, E, I).
+- **Appendix M — Pre-Open Readiness Gate & Market-Open Playbook** — the operational
+  companion to Appendix C: the cold → warming → syncing → reconciled → armed → trading → disarmed
+  readiness state machine published in the telemetry segment and read by the order path with one
+  predicted branch; the T-60 (host attestation against a release-generated fingerprint), T-30 (PTP
+  servo/offset, multicast membership and querier, both lines live, snapshot rebuilt, zero drops,
+  samplers quiet) and T-5 (session logon and sequence reconciliation, positions/limits, warm-up,
+  kill-switch dry-run) gates as commands with expected values; T-0 arming, continuous
+  re-verification, time-boxed re-arm after an intraday restart, disarm; the host fingerprint
+  micro-suite; configuration as code and drift detection (with Appendix C.6); and the gate runner
+  as a script (current numbering: Ch. 46, 47, 55, 56, 60, 74, 77, 79, 80; Appendices C, E, J, K, L).
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 76
-  chapters and appendices A–L — see Phases 2–3).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 81
+  chapters and appendices A–M — see Phases 2–3 and the 2026-11-09 monitoring insertion below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 76 chapters + 12 appendices (A–L);
-  Appendices A–G were drafted with the chapters and H–L were added afterwards (next bullet).**
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 81 chapters + 13 appendices (A–M);
+  Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet) and M
+  with the 2026-11-09 monitoring chapters.**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 76 chapters + 12 appendices (A–L). Appendix H's version numbers and
+  now: front matter + 81 chapters + 13 appendices (A–M). Appendix H's version numbers and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
 - Phase 3 (done): **the book was reorganized into twelve topical Parts** and every chapter
@@ -441,22 +452,35 @@ Code & content guidelines:
   - **IV — Memory Management** (23–26).
   - **V — Numerics & Data Parallelism** (27–29).
   - **VI — Concurrency** (30–40): …coroutines, `std::execution`, correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (41–47): …SMT, cache allocation (RDT), RT scheduling, warming.
+  - **VII — OS, Scheduling & Isolation** (41–47): …SMT, cache allocation (RDT), RT scheduling, hunting
+    residual noise (Ch. 46, added 2026-11-09), warming.
   - **VIII — Kernel I/O, Sockets & Zero-Copy** (48–53): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
-  - **IX — Market Data, NIC & Fabric** (54–62): decoding, reliable multicast, NIC, DDIO, flow
-    steering, PTP, precise transmission, fabric.
+  - **IX — Market Data, NIC & Fabric** (54–62): decoding, reliable multicast, multicast membership &
+    dark-feed detection (Ch. 56, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
   - **X — Kernel Bypass, RDMA & Transport** (63–67): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Observability & Operations in Production** (73–81): logging, security, hot reload,
-    process topology, capture/replay, end-to-end case study (the capstone, now genuinely last).
+  - **XII — Observability & Operations in Production** (73–81): logging, application telemetry
+    (Ch. 74, added 2026-11-09), security, hot reload, process topology, capture/replay, host health
+    telemetry and network health & drop forensics (Ch. 79–80, added 2026-11-09), end-to-end case
+    study (the capstone, still last).
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved
   chapter's framing/teasers and regenerating `chapters/README.md` from the chapter files.
   A full consistency sweep (title/section numbering, teaser chaining N→N+1, cross-ref range,
   README link resolution, no-hard-wrap) is clean. A PDF build toolchain lives in `tools/book-pdf/`
   (pandoc + tectonic). Remaining work is *revision*: backfill real measured benchmark runs.
+- **2026-11-09 monitoring insertion (work-queue item P3-1):** five chapters were inserted with
+  `tools/review/insert_chapter.py` (which renumbers files, headings, teasers, every `Ch.`/`§`/file
+  cross-reference, the README outline, the preface and the Part ranges above, and appends a step to
+  `tools/review/stale_crossrefs.py`'s renumber chain): **46** Hunting Residual Noise on Isolated
+  Cores, **56** Multicast Group Management & Dark-Feed Detection, **74** Zero-Overhead Application
+  Telemetry, **79** Host Health Telemetry, **80** Network Health Telemetry & Drop Forensics. Renumber
+  map: 1–45 unchanged; old 46–54 → 47–55; old 55–71 → 57–73; old 72–75 → 75–78; old 76 → 81.
+  Also added: §55.4.4 (feed liveness, invariants, session health), **Appendix M** (readiness gate &
+  market-open playbook) and Appendix C.6 (configuration as code). Use `insert_chapter.py` for any
+  further insertion; never renumber by hand.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to

@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 81 chapters are grouped into twelve Parts; twelve appendices (A–L) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 81 chapters are grouped into twelve Parts; thirteen appendices (A–M) follow.
 
 ---
 
@@ -529,7 +529,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part VII — OS, Scheduling & Isolation
 
-*Building and keeping a quiet, isolated, warm core — including cache and bandwidth partitioning.*
+*Building and keeping a quiet, isolated, warm core — including cache and bandwidth partitioning — and attributing the noise that remains.*
 
 ### [41. Context Switching & Its Mitigation](41-context-switching-mitigation.md)
 - 41.1 Why it matters: a switch trashes the caches and TLB
@@ -675,7 +675,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part IX — Market Data, NIC & Fabric
 
-*Decoding the feed, recovering losses, and the NIC, cache, timing, and fabric hardware around the receive and send paths.*
+*Decoding the feed, recovering losses, keeping the multicast membership alive, and the NIC, cache, timing, and fabric hardware around the receive and send paths.*
 
 ### [54. Zero-Copy Wire Handling & Market-Data Decoding](54-zero-copy-wire-market-data-decoding.md)
 - 54.1 Why it matters: parse off the wire without copies
@@ -915,7 +915,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part XII — Observability & Operations in Production
 
-*Running the system: logging, security, hot reload, process topology, capture/replay, and the end-to-end case study.*
+*Running the system: logging and telemetry, security, hot reload, process topology, capture/replay, host and network health, and the end-to-end case study.*
 
 ### [73. Zero-Overhead Logging](73-zero-overhead-logging.md)
 - 73.1 Why it matters: logging must never stall the hot path
@@ -1074,6 +1074,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - C.3 Runtime knobs (governor, IRQ affinity/`irqbalance`, `tuned`, RPS/XPS, NIC ring/coalescing, `sysctl`, THP, `mlockall`)
 - C.4 Per-process (affinity/`taskset`, RT priority, `numactl`)
 - C.5 Verification pass (`cyclictest`, jitter measurement)
+- C.6 Configuration as code and drift detection
 
 ### [Appendix D — Compiler Flag Reference](appendix-D-compiler-flag-reference.md)
 - D.1 Optimization levels (`-O2`/`-O3`/`-Ofast` caveats)
@@ -1151,3 +1152,13 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - L.2 Tail-latency capture with HdrHistogram (and avoiding coordinated omission)
 - L.3 Making a run repeatable (environment & isolation)
 - L.4 The pre-trust checklist
+
+### [Appendix M — Pre-Open Readiness Gate & Market-Open Playbook](appendix-M-readiness-gate-market-open.md)
+- M.1 The readiness state machine (cold → warming → syncing → reconciled → armed → trading → disarmed; one predicted branch on the order path)
+- M.2 T-60: host attestation (provenance, isolation, memory/clock/frequency, RDT, NIC/PCIe, hardware health — each a command with an expected value)
+- M.3 T-30: clock, feed and network gates (PTP servo/offset, membership and querier, both lines live, snapshot rebuilt, zero drops, samplers quiet)
+- M.4 T-5: session, positions, warm-up and the kill-switch dry-run
+- M.5 T-0 and intraday: arm, re-verify, re-arm after a restart, disarm
+- M.6 The host fingerprint micro-suite (Appendix L harness vs Appendix E and the host's history)
+- M.7 Configuration as code and drift detection (summary; Appendix C.6)
+- M.8 The gate runner (skeleton)
