@@ -2,7 +2,7 @@
 
 # Chapter 81 — Production Profiling & End-to-End Case Study
 
-> **Prerequisites:** all of it — this is the capstone. Most directly: Ch. 2–3 (profiling / micro-benchmarking), Ch. 1 (tail-latency thinking), Ch. 17/60 (timestamps), Ch. 63 (eBPF production tracing), Ch. 77–78 (deterministic state machine + capture/replay — the basis of the regression gate), Ch. 54, 57, 60, 63, 64 (the wire path the walkthrough traces).
+> **Prerequisites:** Ch. 74, 79, 80 (telemetry, host health, network health — the three continuous signal sources this chapter's monitoring half consumes), all of it — this is the capstone. Most directly: Ch. 2–3 (profiling / micro-benchmarking), Ch. 1 (tail-latency thinking), Ch. 17/60 (timestamps), Ch. 63 (eBPF production tracing), Ch. 77–78 (deterministic state machine + capture/replay — the basis of the regression gate), Ch. 54, 57, 60, 63, 64 (the wire path the walkthrough traces).
 >
 > **Leads into:** the Appendices (A: ARM/Graviton; C: tuning checklist; E: latency numbers; G: bibliography; I: tooling command cookbook; J: market-structure & protocol primer; L: reproducible benchmark harness). The book's final chapter: continuous performance monitoring, regression detection, and a full tick-to-trade walkthrough that touches every Part.
 

@@ -1023,12 +1023,19 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 79.6 Exercises & checklist
 
 ### [80. Network Health Telemetry & Drop Forensics](80-network-health-telemetry-drop-forensics.md)
-- 80.1 Why it matters: TODO
-- 80.2 Mental model: TODO
-- 80.3 Measure it: TODO
+- 80.1 Why it matters: a silent drop at the open is a wrong book and a lost race
+- 80.2 Mental model: the counter hierarchy, by the layer that dropped
+  - 80.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
+  - 80.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
+  - 80.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
+- 80.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
 - 80.4 Techniques
-  - 80.4.1 TODO
-- 80.5 Pitfalls & anti-patterns: TODO
+  - 80.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
+  - 80.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
+  - 80.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
+  - 80.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
+  - 80.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
+- 80.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
 - 80.6 Exercises & checklist
 
 ### [81. Production Profiling & End-to-End Case Study](81-production-profiling-end-to-end-case-study.md)

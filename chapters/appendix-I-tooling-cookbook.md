@@ -144,7 +144,7 @@ Inspecting and tuning the RX/TX path (Ch. 52, 54, 57, 58).
    phc2sys -a -r -m                             # sync system clock to the NIC PHC (Ch. 60)
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 54) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 80 §80.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §80.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 60, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 
