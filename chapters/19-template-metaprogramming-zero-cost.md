@@ -218,7 +218,7 @@ If instead you see *multiple* loops or temporary allocations, the expression tem
 
 - **For any "zero-cost" abstraction on the hot path, diff its asm against the hand-written equivalent.** Same instructions = the claim holds. A stray `call`, extra moves, or a missing inline = it leaked.
 - **Confirm the dispatch inlined** (no `call [rax]`, the §19.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 9).
-- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 84).
+- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 85).
 
 ### Build-time/size caveat
 

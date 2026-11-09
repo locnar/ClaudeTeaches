@@ -1,14 +1,14 @@
 # Appendix M — Pre-Open Readiness Gate & Market-Open Playbook
 
-> **Consolidates:** Ch. 46 (the signed-off quiet core and its baseline), Ch. 47 (warming as a go-live precondition), Ch. 55 §55.4.4 and Ch. 56 (feed liveness, membership, the feed gate), Ch. 60 (PTP offset and servo state), Ch. 75 (the telemetry segment that carries the readiness word), Ch. 78 §78.4.4 (kill-switch, gateway failover, warm restart), Ch. 82–83 (host and network invariants), Appendix C (the knobs this gate re-verifies), Appendix E and Appendix L (the fingerprint micro-suite's reference numbers and harness), Appendix J.3 and Appendix K.4 (the session layer and venue mandates). This is the *operational* companion to Appendix C: C says how to build a quiet, correct box; M says how to prove, every trading day, before the first order, that it still is one — and how the process itself knows whether it is allowed to trade.
+> **Consolidates:** Ch. 46 (the signed-off quiet core and its baseline), Ch. 47 (warming as a go-live precondition), Ch. 55 §55.4.4 and Ch. 56 (feed liveness, membership, the feed gate), Ch. 60 (PTP offset and servo state), Ch. 76 (the telemetry segment that carries the readiness word), Ch. 79 §79.4.4 (kill-switch, gateway failover, warm restart), Ch. 83–84 (host and network invariants), Appendix C (the knobs this gate re-verifies), Appendix E and Appendix L (the fingerprint micro-suite's reference numbers and harness), Appendix J.3 and Appendix K.4 (the session layer and venue mandates). This is the *operational* companion to Appendix C: C says how to build a quiet, correct box; M says how to prove, every trading day, before the first order, that it still is one — and how the process itself knows whether it is allowed to trade.
 
-**How to use this:** the gate is a *timed, scripted procedure with pass/fail criteria*, not a checklist read by a human. M.1 defines the in-process readiness state machine that the gate drives and the order path reads. M.2–M.5 are the gates themselves in time order — T-60 (host attestation), T-30 (clock, feed, network), T-5 (session, positions, warm-up, kill-switch), T-0 and intraday (arm, continuous re-verification, re-arm after a restart, disarm) — each item **a command with an expected value**. M.6 is the host fingerprint micro-suite that compares the box against Appendix E and its own history. M.7 is configuration as code and drift detection (the full treatment is Appendix C.6). M.8 is the gate runner as a script skeleton. The book's five dangling references to "the readiness gate/check" (Ch. 44, Ch. 78, Ch. 84, Appendix C) resolve here. The gate takes about ninety seconds of machine time, runs unattended, and its output — PASS, or the first FAIL with the command, the expected value and the observed one — is the only thing a human reads at 09:25.
+**How to use this:** the gate is a *timed, scripted procedure with pass/fail criteria*, not a checklist read by a human. M.1 defines the in-process readiness state machine that the gate drives and the order path reads. M.2–M.5 are the gates themselves in time order — T-60 (host attestation), T-30 (clock, feed, network), T-5 (session, positions, warm-up, kill-switch), T-0 and intraday (arm, continuous re-verification, re-arm after a restart, disarm) — each item **a command with an expected value**. M.6 is the host fingerprint micro-suite that compares the box against Appendix E and its own history. M.7 is configuration as code and drift detection (the full treatment is Appendix C.6). M.8 is the gate runner as a script skeleton. The book's five dangling references to "the readiness gate/check" (Ch. 44, Ch. 79, Ch. 85, Appendix C) resolve here. The gate takes about ninety seconds of machine time, runs unattended, and its output — PASS, or the first FAIL with the command, the expected value and the observed one — is the only thing a human reads at 09:25.
 
 ---
 
 ## M.1 The readiness state machine
 
-A trading process is in exactly one of seven states, published as a single 32-bit word in the header of the telemetry segment (Ch. 75 §75.4.1, `Segment::readiness`), written only by the process itself (or its supervisor on its behalf when it is dead), and read by the gate runner, the supervisor (Ch. 78) and the dashboards:
+A trading process is in exactly one of seven states, published as a single 32-bit word in the header of the telemetry segment (Ch. 76 §76.4.1, `Segment::readiness`), written only by the process itself (or its supervisor on its behalf when it is dead), and read by the gate runner, the supervisor (Ch. 79) and the dashboards:
 
 ```
    cold ──> warming ──> syncing ──> reconciled ──> armed ──> trading ──> disarmed
@@ -22,25 +22,25 @@ A trading process is in exactly one of seven states, published as a single 32-bi
    any state ──(gate FAIL, invariant delta, feed dark, session dead)──> disarmed   (never back to armed without re-running the gates)
 ```
 
-- **The order path reads one word.** The gateway's send function checks `readiness == trading` with a single load and a predicted-taken branch (Ch. 13) — the same shape as Ch. 55's per-instrument stale flag — and refuses otherwise. Nothing else on the hot path knows about states; everything that *changes* the state runs off the hot path (the gate runner, the control plane — Ch. 78 §78.4.1, the supervisor).
+- **The order path reads one word.** The gateway's send function checks `readiness == trading` with a single load and a predicted-taken branch (Ch. 13) — the same shape as Ch. 55's per-instrument stale flag — and refuses otherwise. Nothing else on the hot path knows about states; everything that *changes* the state runs off the hot path (the gate runner, the control plane — Ch. 79 §79.4.1, the supervisor).
 
 ```cpp
-// readiness.hpp — the one hot-path touch point of the gate (Ch. 75's Segment::readiness is this word)
+// readiness.hpp — the one hot-path touch point of the gate (Ch. 76's Segment::readiness is this word)
 enum class Readiness : std::uint32_t { cold, warming, syncing, reconciled, armed, trading, disarmed };
 inline bool may_send(const std::atomic<std::uint32_t>& r) noexcept {           // one load + one predicted branch
     return r.load(std::memory_order_acquire) == static_cast<std::uint32_t>(Readiness::trading);
 }
 // off the hot path, the gate runner / control plane advances it:  seg.readiness.store(uint32_t(Readiness::armed), release);
-// and ANY failing invariant (Ch. 82/83 sampler, dark feed, dead session, kill-switch) stores `disarmed` — from a housekeeping core.
+// and ANY failing invariant (Ch. 83/84 sampler, dark feed, dead session, kill-switch) stores `disarmed` — from a housekeeping core.
 ```
 
 - **Transitions are monotonic until `disarmed`.** A process advances only when the gate for that state passes; any later failure drops it to `disarmed`, and the only way back is to re-run the gates from the failed one forward (M.5). There is no `armed`-to-`armed` "retry": the state is a claim with evidence behind it, and the evidence has a timestamp.
 - **`armed` vs `trading`.** `armed` means every gate passed and the process *may* trade at T-0; `trading` is set by the operator or the scheduler at the open (or at re-arm after a restart) and is what the order path reads. The split exists so that the whole fleet can be verified `armed` at T-5 with the order path still closed, and opened together.
-- **The supervisor owns the word when the process does not.** On a crash the supervisor (Ch. 78 §78.4.3) writes `disarmed` into the dead process's slot before restarting it, so a dashboard never shows a dead process as `trading` — and the restarted process starts at `cold` with the same gates ahead of it (M.5).
+- **The supervisor owns the word when the process does not.** On a crash the supervisor (Ch. 79 §79.4.3) writes `disarmed` into the dead process's slot before restarting it, so a dashboard never shows a dead process as `trading` — and the restarted process starts at `cold` with the same gates ahead of it (M.5).
 
 ## M.2 T-60: host attestation
 
-Sixty minutes before the open, on every box: *is this the machine we signed off, configured the way we signed it off?* Each line is the command, then the expected value; a mismatch is a FAIL that blocks `warming`. The baseline is the fingerprint recorded at sign-off (Ch. 46 §46.4.3, Ch. 82 §82.4.4) and stored with the release (M.7).
+Sixty minutes before the open, on every box: *is this the machine we signed off, configured the way we signed it off?* Each line is the command, then the expected value; a mismatch is a FAIL that blocks `warming`. The baseline is the fingerprint recorded at sign-off (Ch. 46 §46.4.3, Ch. 83 §83.4.4) and stored with the release (M.7).
 
 ```bash
 # --- provenance: anything here differing from the baseline is a change nobody declared
@@ -65,26 +65,26 @@ cat /sys/devices/system/clocksource/clocksource0/current_clocksource   == tsc
 grep -c -E 'constant_tsc|nonstop_tsc' /proc/cpuinfo            == 2 × cpu count
 cpupower frequency-info -p | grep -o 'performance'             == performance ; cat /sys/devices/system/cpu/intel_pstate/no_turbo == 1 (per Appendix L.3 policy)
 cpupower idle-info | grep -A1 'C6' | grep -c 'DISABLED'        == 1 (deep C-states off — Appendix C.1/C.2)
-cat /sys/devices/system/cpu/vulnerabilities/* | sort -u        == the baseline mitigation set (Ch. 6, 76)
+cat /sys/devices/system/cpu/vulnerabilities/* | sort -u        == the baseline mitigation set (Ch. 6, 77)
 sudo rdmsr -p 0 0x34                                           == baseline SMI count (unchanged since last night's value: no SMI storm overnight — Ch. 6 §6.4.4)
 # --- cache partitioning (Ch. 44)
 cat /sys/fs/resctrl/hotpath/schemata; cat /sys/fs/resctrl/hotpath/cpus_list   == baseline CBM masks and hot cpus
-# --- NIC and PCIe (Ch. 57, 59, 67, 83)
+# --- NIC and PCIe (Ch. 57, 59, 67, 84)
 ethtool -g <feednic> | awk '/^Current/,0'                      == baseline ring sizes (RX 4096 ...)
 ethtool -c <feednic> | grep -E 'Adaptive|rx-usecs'              == Adaptive RX: off ; rx-usecs: 0
 ethtool -k <feednic> | grep -E 'generic-receive-offload|large-receive-offload'   == off / off
 ethtool -l <feednic> | awk '/^Current/,0' | grep Combined       == baseline queue count
-ethtool -a <feednic> | grep -E 'RX|TX'                          == off / off (flow control — Ch. 83 §83.2.3; on only by lossless-fabric design, Ch. 66)
+ethtool -a <feednic> | grep -E 'RX|TX'                          == off / off (flow control — Ch. 84 §84.2.3; on only by lossless-fabric design, Ch. 66)
 ethtool <feednic> | grep -E 'Speed|Duplex|Link detected'        == baseline speed, Full, yes
 cat /sys/bus/pci/devices/<nic bdf>/current_link_{speed,width}  == baseline (e.g. 16.0 GT/s PCIe, 16) — Ch. 67
 cat /sys/bus/pci/devices/<nic bdf>/aer_dev_correctable | awk '{s+=$2} END{print s}'   == baseline (no overnight growth)
 cat /sys/class/net/<feednic>/carrier_changes                   == baseline (no overnight flaps)
-# --- hardware health (Ch. 82 §82.4.3)
+# --- hardware health (Ch. 83 §83.4.3)
 cat /sys/devices/system/edac/mc/mc*/ce_count | paste -sd+ | bc  == baseline (no overnight growth); ue_count == 0
 sensors 2>/dev/null | grep -E 'Package|Core' | awk '{print $NF}'   # or ipmitool sdr: temperatures inside the vendor's normal band
 ```
 
-Then start the Ch. 82 sampler (`hostwatch`) and the Ch. 83 sampler (`netwatch`) on a housekeeping core, pointed at the hot CPUs, and record "quiet since" = now. Every later gate requires that *no invariant delta* has been reported since this timestamp.
+Then start the Ch. 83 sampler (`hostwatch`) and the Ch. 84 sampler (`netwatch`) on a housekeeping core, pointed at the hot CPUs, and record "quiet since" = now. Every later gate requires that *no invariant delta* has been reported since this timestamp.
 
 ## M.3 T-30: clock, feed and network gates
 
@@ -101,15 +101,15 @@ cat /sys/devices/system/clocksource/clocksource0/current_clocksource   == tsc (a
 grep -c . /proc/net/igmp                                        == 2 + <expected groups> per feed interface section (Ch. 56 §56.4.3)
 timeout 260 tcpdump -i <feednic> -nn -c 1 'igmp and igmp[0]==0x11'   == a General Query seen within one Query Interval (a querier exists)
 nstat -az IPReversePathFilter                                    == unchanged since T-60
-telemetry: per channel book_age_ns (Ch. 75 §75.4.2)             == < phase threshold on BOTH lines for every channel (both lines live)
+telemetry: per channel book_age_ns (Ch. 76 §76.4.2)             == < phase threshold on BOTH lines for every channel (both lines live)
 telemetry: per channel A/B skew                                 == within baseline ± tolerance (no path change overnight — §55.4.4)
 telemetry: gaps post-A/B since start                            == 0 ; snapshot rebuild complete for every instrument (Ch. 55 §55.4.2)
 telemetry: invariant violations (crossed/locked/collar)         == 0 since rebuild
-# --- network gate (Ch. 83): nothing has dropped anywhere since T-60
+# --- network gate (Ch. 84): nothing has dropped anywhere since T-60
 netwatch log since T-60                                          == no NIC/driver, NAPI, STACK or LINK lines (ring, FIFO, squeeze, socket, rp_filter, CRC, flaps all zero)
 ethtool -S <feednic> | grep -E 'fec_uncorrectable|rx_crc'        == unchanged since T-60
-ethtool -m <feednic> | grep -E 'Rx|Tx' | grep -i power           == inside the transceiver's warning thresholds (DOM — Ch. 83 §83.4.4)
-# --- host gate (Ch. 82): the box is still the quiet box
+ethtool -m <feednic> | grep -E 'Rx|Tx' | grep -i power           == inside the transceiver's warning thresholds (DOM — Ch. 84 §84.4.4)
+# --- host gate (Ch. 83): the box is still the quiet box
 hostwatch log since T-60                                         == only "ok" lines: no LOC/RES/CAL/TLB/NMI/PMI deltas on hot cpus, no nonvoluntary switches, no faults after warm-up, no throttle, no clocksource change
 sudo rdmsr -p 0 0x34                                             == same as T-60 (no SMI in the last half hour)
 ```
@@ -121,7 +121,7 @@ A process passes `syncing` only when its own channels pass the feed gate; a box 
 Five minutes out, the checks that need the venue:
 
 ```bash
-# --- session gate (Appendix J.3, Ch. 55 §55.4.4, Ch. 78 §78.4.4)
+# --- session gate (Appendix J.3, Ch. 55 §55.4.4, Ch. 79 §79.4.4)
 telemetry: session state per venue                              == logged on; inbound/outbound sequence numbers == venue's (no ResendRequest outstanding)
 telemetry: heartbeats received in the last 5 × HeartBtInt       == 5 ± 1 ; TestRequests sent == 0 ; TestRequests received == 0
 gateway: send TestRequest, measure Heartbeat round-trip (TSC)    == within the venue's ack-latency baseline (a warm session; Ch. 47 §47.4.2)
@@ -129,13 +129,13 @@ telemetry: oldest unacknowledged order age                      == 0 (nothing in
 # --- positions and limits
 risk: positions per instrument (internal) vs venue start-of-day / drop-copy (Appendix K.4)   == equal, to the share
 risk: working orders (internal) vs venue open-order report                                    == equal (usually: none)
-risk: pre-trade limits loaded, version == released config version (Ch. 77 §77.4.3)             == match ; kill-switch thresholds loaded
+risk: pre-trade limits loaded, version == released config version (Ch. 78 §78.4.3)             == match ; kill-switch thresholds loaded
 # --- warm-up gate (Ch. 47)
 telemetry: minflt per hot thread since warming began            == 0 for the last 60 s (every page is resident — Ch. 26)
-telemetry: shadow-traffic wire-to-wire p99.9 over the last 60 s  == within the Ch. 84 §84.3 budget (the path is warm, not just mapped)
+telemetry: shadow-traffic wire-to-wire p99.9 over the last 60 s  == within the Ch. 85 §85.3 budget (the path is warm, not just mapped)
 telemetry: per hot thread cpu                                    == the configured isolated cpu (it is where it should be)
 hostwatch: hot-thread nonvoluntary switches since warming        == 0
-# --- the kill-switch, dry-run (Ch. 78 §78.4.4; SEC 15c3-5 / MiFID II RTS 6 mandate it — Appendix K.4)
+# --- the kill-switch, dry-run (Ch. 79 §79.4.4; SEC 15c3-5 / MiFID II RTS 6 mandate it — Appendix K.4)
 control plane: `kill-switch --dry-run <shard>`                   == gateway walks the (empty) working-order set and reports the cancel path reachable within <budget>
 control plane: `disarm <shard>`; then `arm <shard>`              == readiness word transitions observed in the segment within <budget>; order path refuses while disarmed
 ```
@@ -144,10 +144,10 @@ Pass → the process publishes `reconciled`, then `armed`. The operator sees one
 
 ## M.5 T-0 and intraday: arm, re-verify, re-arm, disarm
 
-- **T-0.** The scheduler (or operator) sets `trading` for every `armed` process at the venue's open time — never earlier (an order into a closed book is a reject at best). The first minute of the open is a different SLO regime (Ch. 75 §75.4.4); the gate's job ended at `armed`.
-- **Continuous re-verification.** The Ch. 82 and Ch. 83 samplers run all day. Their invariant classes — hot-thread switches/faults/migrations, the IPI rows, throttling, SMIs, clocksource, drops at any layer, feed age, PTP offset — are not re-checked by a gate; a *delta* is an incident, and the supervisor's policy decides whether it is a ticket (an SMI at 11:00, the strategy keeps trading, someone looks) or a `disarmed` (feed dark on both lines, session dead, clocksource demoted, `nonvoluntary_ctxt_switches` on an order-path thread). Write the mapping down per signal; it is the one table the on-call engineer reads during the session.
-- **Re-arm after an intraday restart.** A process that crashed and was restarted by the supervisor (Ch. 78 §78.4.3) starts at `cold` and must pass the *same* gates — compressed, not skipped: provenance (unchanged since T-60 — skip), host and network invariants (the samplers' logs since the restart: seconds), feed gate (snapshot rebuild and both lines live — the recovery path of Ch. 55 §55.4.2, measured in Ch. 78 §78.3), session gate (logon with sequence recovery), positions (reconcile against the venue — mandatory; the dead process's working orders were already cancelled by the kill-switch), warm-up (shadow traffic until the first-message latency is within budget — Ch. 47). Time-box it: a re-arm that cannot complete inside the budget (say 30 s) stays `disarmed` and the shard sits out; a half-reconciled process that trades is worse than a shard that does not.
-- **Disarm.** At the close, or on an operator command, or on a kill-switch: `disarmed`, working orders cancelled (Ch. 78 §78.4.4), memberships *kept* (the overnight feed and the venue's post-close messages are data too — Ch. 56 §56.5), samplers left running. The overnight SMI/EDAC/AER/carrier counts are exactly what T-60 compares against tomorrow.
+- **T-0.** The scheduler (or operator) sets `trading` for every `armed` process at the venue's open time — never earlier (an order into a closed book is a reject at best). The first minute of the open is a different SLO regime (Ch. 76 §76.4.4); the gate's job ended at `armed`.
+- **Continuous re-verification.** The Ch. 83 and Ch. 84 samplers run all day. Their invariant classes — hot-thread switches/faults/migrations, the IPI rows, throttling, SMIs, clocksource, drops at any layer, feed age, PTP offset — are not re-checked by a gate; a *delta* is an incident, and the supervisor's policy decides whether it is a ticket (an SMI at 11:00, the strategy keeps trading, someone looks) or a `disarmed` (feed dark on both lines, session dead, clocksource demoted, `nonvoluntary_ctxt_switches` on an order-path thread). Write the mapping down per signal; it is the one table the on-call engineer reads during the session.
+- **Re-arm after an intraday restart.** A process that crashed and was restarted by the supervisor (Ch. 79 §79.4.3) starts at `cold` and must pass the *same* gates — compressed, not skipped: provenance (unchanged since T-60 — skip), host and network invariants (the samplers' logs since the restart: seconds), feed gate (snapshot rebuild and both lines live — the recovery path of Ch. 55 §55.4.2, measured in Ch. 79 §79.3), session gate (logon with sequence recovery), positions (reconcile against the venue — mandatory; the dead process's working orders were already cancelled by the kill-switch), warm-up (shadow traffic until the first-message latency is within budget — Ch. 47). Time-box it: a re-arm that cannot complete inside the budget (say 30 s) stays `disarmed` and the shard sits out; a half-reconciled process that trades is worse than a shard that does not.
+- **Disarm.** At the close, or on an operator command, or on a kill-switch: `disarmed`, working orders cancelled (Ch. 79 §79.4.4), memberships *kept* (the overnight feed and the venue's post-close messages are data too — Ch. 56 §56.5), samplers left running. The overnight SMI/EDAC/AER/carrier counts are exactly what T-60 compares against tomorrow.
 
 ## M.6 The host fingerprint micro-suite
 
@@ -175,7 +175,7 @@ Appendix C.6 carries the checklist; the principle in one paragraph: **the box's 
 
 ## M.8 The gate runner (skeleton)
 
-The whole appendix as a program: a shell skeleton whose `check` function records a command, an expected value and the observed one, and whose exit status is the gate's verdict. Fill the `expected` values from the baseline file; add the telemetry reads through the Ch. 75 scraper's export.
+The whole appendix as a program: a shell skeleton whose `check` function records a command, an expected value and the observed one, and whose exit status is the gate's verdict. Fill the `expected` values from the baseline file; add the telemetry reads through the Ch. 76 scraper's export.
 
 ```bash
 #!/usr/bin/env bash
@@ -229,11 +229,11 @@ esac
 (( FAILS == 0 )) && echo "GATE $1 PASS" || { echo "GATE $1 FAIL ($FAILS)"; exit 1; }
 ```
 
-The runner is deliberately dull: no logic beyond compare-and-report, no thresholds computed at runtime (they come from the baseline file the release generated — M.7), and its log is the day's attestation record (Ch. 80's compliance archive is the right home for it).
+The runner is deliberately dull: no logic beyond compare-and-report, no thresholds computed at runtime (they come from the baseline file the release generated — M.7), and its log is the day's attestation record (Ch. 81's compliance archive is the right home for it).
 
 ## M.9 References
 
-- Ch. 46 §46.4.3 and Ch. 82 §82.4.4 (the sign-off baseline and the drift audit), Ch. 47 (warming as a precondition), Ch. 55 §55.4.4 and Ch. 56 §56.4.3 (the feed gate's checks), Ch. 60 §60.4.1 (PTP servo states and offset), Ch. 75 (the segment and the `readiness` word), Ch. 78 §78.3–§78.4.4 (restart timing, kill-switch, gateway failover), Ch. 82–83 (the invariants the gate requires to be quiet), Appendix C (every knob re-verified here), Appendix E and L (the micro-suite's references and harness), Appendix J.3 and K.4 (session layer, venue mandates).
+- Ch. 46 §46.4.3 and Ch. 83 §83.4.4 (the sign-off baseline and the drift audit), Ch. 47 (warming as a precondition), Ch. 55 §55.4.4 and Ch. 56 §56.4.3 (the feed gate's checks), Ch. 60 §60.4.1 (PTP servo states and offset), Ch. 76 (the segment and the `readiness` word), Ch. 79 §79.3–§79.4.4 (restart timing, kill-switch, gateway failover), Ch. 83–84 (the invariants the gate requires to be quiet), Appendix C (every knob re-verified here), Appendix E and L (the micro-suite's references and harness), Appendix J.3 and K.4 (session layer, venue mandates).
 - SEC Rule 15c3-5 (Market Access Rule) and ESMA MiFID II RTS 6 (Articles 5–7, 12–13: annual self-assessment, pre-trade controls, kill functionality, real-time monitoring) — the regulatory requirements a readiness gate and kill-switch test satisfy (M.4).
 - `linuxptp` documentation (`pmc` management messages `TIME_STATUS_NP`, `GRANDMASTER_SETTINGS_NP`; `ptp4l` servo states) — the clock gate (M.3).
 - Ansible/Salt documentation and the systemd unit/`sysctl.d`/`tuned` profile mechanisms — configuration as code (M.7, Appendix C.6).
@@ -247,4 +247,4 @@ The runner is deliberately dull: no logic beyond compare-and-report, no threshol
 
 ---
 
-*Next: Appendix N — Incident Diagnostics Bundle, the other end of the operating day: when the gate passed and a spike, a crash or a drop happened anyway, the checklist and bounded collector that gather provenance, clock anchors and every layer's frozen evidence into one alignable, attributable, checkable bundle (Ch. 79, 81).*
+*Next: Appendix N — Incident Diagnostics Bundle, the other end of the operating day: when the gate passed and a spike, a crash or a drop happened anyway, the checklist and bounded collector that gather provenance, clock anchors and every layer's frozen evidence into one alignable, attributable, checkable bundle (Ch. 80, 82).*

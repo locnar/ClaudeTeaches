@@ -58,7 +58,7 @@ Code & content guidelines:
 ## Table of Contents
 
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
-> A–G), kept for history. The book was since reorganised into twelve Parts with 76 chapters and twelve
+> A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
 > appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M) and then to **84 chapters and fourteen appendices (A–N)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
 > *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–N)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
@@ -450,7 +450,7 @@ Code & content guidelines:
 - Phase 3 (done): **the book was reorganized into twelve topical Parts** and every chapter
   renumbered accordingly (the `## Table of Contents` prose above predates this reorg and reflects
   the original drafting order — **the authoritative current structure is `chapters/README.md`**).
-  The twelve Parts and their chapter ranges:
+  The thirteen Parts and their chapter ranges:
   - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup.
   - **II — CPU Microarchitecture** (7–17).
@@ -467,7 +467,8 @@ Code & content guidelines:
   - **X — Kernel Bypass, RDMA & Transport** (63–67): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (68–72): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Observability & Operations in Production** (73–84): logging, in-band latency tracing
+  - **XII — Beyond C++: Languages at the Latency Floor** (73–73): TODO.
+  - **XIII — Observability & Operations in Production** (74–85): logging, in-band latency tracing
     (Ch. 74, added 2026-11-09 P3-2), application telemetry (Ch. 75, added 2026-11-09 P3-1), security,
     hot reload, process topology, crash handling & post-mortem (Ch. 79, P3-2), capture/replay,
     latency-spike forensics (Ch. 81, P3-2), host health telemetry and network health & drop forensics
@@ -499,7 +500,7 @@ Code & content guidelines:
   core PMU), §5.4.4–§5.4.5 and the rr-limits block in §5.4.2, §20.4.4, §22.4.4, §41.4.3 (signals),
   §78.4.6 (divergence forensics; §78.4.5 reduced to sharding + a pointer to Ch. 79), §84.4.4 and a
   rewritten three-tier §84.2, Appendix I.10, Appendix D/H rows, the Appendix J.5 venue-timestamp table,
-  the Appendix E signal-delivery row, Ch. 60 §60.4.2's exchange-timestamp paragraph. Part XII order is
+  the Appendix E signal-delivery row, Ch. 60 §60.4.2's exchange-timestamp paragraph. Part XIII order is
   now: logging → tracing → telemetry → security → hot reload → topology → crash → capture → spike
   forensics → host health → network health → capstone.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
