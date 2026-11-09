@@ -259,6 +259,8 @@ int main() {
 
 Two caveats that matter here. First, **clock overhead and resolution** (Ch. 17): if the operation is only a few nanoseconds, two `clock::now()` calls may cost more than the work — measure the clock's own overhead and subtract it, or time *batches* of N ops and divide (accepting that batching hides per-op tail, a §3.2.2-flavored trade-off). Second, this back-to-back loop measures **service time**, so it is CO-immune by construction but does *not* show queueing tails; to measure response-time-under-load you'd drive it from a scheduled, CO-corrected generator (§3.2.2). Pick the one that matches your question. Appendix L §L.2 gives that generator as copy-paste code: the same loop paced to a fixed intended schedule, keeping this service-time histogram and a second response-time histogram (`end − intended`, one sample per op) side by side — and explains why `hdr_record_corrected_value`'s back-fill belongs only on an *unpaced* closed loop, never combined with pacing or mixed into the service-time histogram.
 
+The production sequel — recording into a shared-memory histogram with a few stores, scraping it off-core, and the rule that histograms merge by adding buckets while percentiles cannot be averaged across hosts or windows — is Ch. 74.
+
 ### 3.4.4 Statistical rigor: repetitions, variance, regression
 
 One run is an anecdote. The tail and the noise both demand repetition and a little statistics:

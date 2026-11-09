@@ -929,13 +929,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 73.7 Exercises & checklist
 
 ### [74. Zero-Overhead Application Telemetry](74-zero-overhead-application-telemetry.md)
-- 74.1 Why it matters: TODO
-- 74.2 Mental model: TODO
-- 74.3 Measure it: TODO
+- 74.1 Why it matters: the counter that has to leave a busy-poll process
+- 74.2 Mental model
+  - 74.2.1 Counter, gauge, high-water mark, histogram — and what each may cost
+  - 74.2.2 Percentiles are not additive: merge histograms, never average percentiles
+  - 74.2.3 Interval vs cumulative, windows and minimum samples
+  - 74.2.4 Coordinated omission in production
+- 74.3 Measure it: per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence
 - 74.4 Techniques
-  - 74.4.1 TODO
-- 74.5 Pitfalls & anti-patterns: TODO
-- 74.6 Exercises & checklist
+  - 74.4.1 The shared-memory telemetry segment
+  - 74.4.2 What a trading process must expose
+  - 74.4.3 The off-core scraper and export
+  - 74.4.4 From metrics to SLOs, alerts and triggers
+- 74.5 Verify the codegen: the instrumentation is a few stores
+- 74.6 Pitfalls & anti-patterns: shared counters, averaged percentiles, service time, the scraper on the sibling
+- 74.7 Exercises & checklist
 
 ### [75. Secure Programming for Low-Latency Systems](75-secure-programming-low-latency.md)
 - 75.1 Why it matters: security as a hot-path concern

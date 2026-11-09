@@ -87,7 +87,7 @@ The core technique: carve the L3 so the hot path owns a private set of ways.
 Cache partitioning handles *capacity*; bandwidth and monitoring complete the picture.
 
 - **MBA to cap a bandwidth-hungry neighbor.** Put the streaming housekeeping work (capture writer — Ch. 78, log flusher — Ch. 73, batch jobs) in a CLOS with an MBA throttle: `MB:0=20` (limit to ~20% of memory bandwidth). This stops a `memcpy`-heavy neighbor from saturating the memory controller (Ch. 16) and stalling the hot path's own DRAM accesses. MBA is a coarse throttle (delay-based, per-core); measure its effect with MBM, don't assume the percentage is exact.
-- **Monitor continuously (CMT/MBM) in production.** Create monitoring groups and poll `mon_data/mon_L3_XX/llc_occupancy` and `.../mbm_total_bytes` — this is the production-safe observability (Ch. 81) for the cache: it shows, live, who occupies the L3 and who consumes bandwidth. Alert when the hot group's occupancy dips (something is stealing its ways — a misconfiguration or a new neighbor) or when a neighbor's bandwidth spikes.
+- **Monitor continuously (CMT/MBM) in production.** Create monitoring groups and poll `mon_data/mon_L3_XX/llc_occupancy` and `.../mbm_total_bytes` — this is the production-safe observability (Ch. 79 — sampled by the same off-core scraper as the application's telemetry, Ch. 74) for the cache: it shows, live, who occupies the L3 and who consumes bandwidth. Alert when the hot group's occupancy dips (something is stealing its ways — a misconfiguration or a new neighbor) or when a neighbor's bandwidth spikes.
 - **Combine CAT + MBA + pinning as one policy.** The full isolation recipe: pin the hot thread to an isolated core (Ch. 42), give that core a CLOS with exclusive L3 ways (CAT), and put *all other* work in CLOSes with complementary ways and MBA throttles. Bake it into the box's startup (Appendix C) alongside `isolcpus`/IRQ affinity, and verify with CMT/MBM in the readiness check (Ch. 81).
 
 ### 44.4.3 Partitioning for DDIO and multi-tenant boxes
@@ -127,7 +127,7 @@ Two higher-order uses that connect forward:
 - [ ] **Bandwidth-hungry neighbors** (capture, logging, batch) are **MBA-throttled** so they can't saturate the memory controller (§44.4.2).
 - [ ] **CMT/MBM monitoring runs in production** (Ch. 81) — occupancy and bandwidth per group, alerting on the hot group losing ways or a neighbor spiking (§44.4.2, §44.5).
 - [ ] Masks respect the part's **contiguity/min-width** rules and are **probed at runtime** (`info/L3/`), not hard-coded across CPU generations (§44.5).
-- [ ] The **CAT/MBA policy is baked into box startup** alongside the Appendix C pinning/isolation knobs, and verified in the readiness check; combined with the DDIO region separation of Ch. 58 where a NIC is on the hot path (§44.4.3).
+- [ ] The **CAT/MBA policy is baked into box startup** alongside the Appendix C pinning/isolation knobs, and verified in the readiness check (Appendix M); combined with the DDIO region separation of Ch. 58 where a NIC is on the hot path (§44.4.3).
 
 ## 44.7 References
 

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 34 (lock-free SPSC queues — the producer→consumer ring under an async logger), Ch. 37 (Disruptor — the batching pipeline pattern), Ch. 23–24 (no allocation/syscalls on the hot path — logging must obey both), Ch. 17 (TSC timestamps — cheap per-record time), Ch. 4 (reading codegen — proving the log call is tiny), Ch. 1 (tail latency — a logging stall is a tail event).
 >
-> **Leads into:** Ch. 78 (capture/persistence — binary logging is the same off-hot-path-writer discipline applied to ticks/orders), Ch. 81 (the case study — logging is how you *see* the tick-to-trade path in production). Opens Part XII — observability and operations: making a low-latency system *visible* without slowing it down.
+> **Leads into:** Ch. 74 (telemetry — the same capture-here/format-there discipline applied to counters and histograms), Ch. 78 (capture/persistence — binary logging is the same off-hot-path-writer discipline applied to ticks/orders), Ch. 81 (the case study — logging is how you *see* the tick-to-trade path in production). Opens Part XII — observability and operations: making a low-latency system *visible* without slowing it down.
 
 ---
 
@@ -230,4 +230,4 @@ If the asm shows the few-stores-and-publish shape, the measurement of §73.3 (si
 
 ---
 
-*Next: Ch. 74 — Zero-Overhead Application Telemetry.*
+*Next: Ch. 74 — Zero-Overhead Application Telemetry, the metrics sibling of this chapter: how a counter, a gauge and a per-stage latency histogram leave a pinned busy-poll process without a syscall, a format call or a shared cache line — a shared-memory telemetry segment written with plain stores and read by an off-core scraper — and the percentile mathematics (merge histograms, never average percentiles) and session-phase SLOs that keep the dashboard from quietly reinstating the mean.*
