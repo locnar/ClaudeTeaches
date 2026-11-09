@@ -41,7 +41,7 @@
 
 - **BMI / BMI2** — Bit Manipulation Instruction sets: `tzcnt`/`lzcnt`/`popcnt`, `blsr`, `pdep`/`pext` — single-instruction bit tricks for bitmap-based book occupancy and free lists; enabled by `-march=` (Haswell+ / x86-64-v3). (Ch. 28, Appendix D.2)
 - **BTB** — Branch Target Buffer: predicts the *target* of indirect branches/calls (vtables, function pointers — Ch. 14); a BTB miss is an indirect-branch mispredict. (Ch. 13, 14)
-- **Cache line** — the unit of transfer between cache levels and of coherence: 64 bytes on x86-64 (128 on some ARM cores, 256 on A64FX); every layout, padding and false-sharing decision is about which data shares a line. (Ch. 7, 9, 33; Appendix A.3)
+- **Cache line** — the unit of transfer between cache levels and of coherence: 64 bytes on x86-64 (128 on some ARM cores, 256 on A64FX); every layout, padding and false-sharing decision is about which data shares a line. (Ch. 7 — the memory hierarchy; Ch. 9, 33; Appendix A.3)
 - **DSB / µop cache** — Decoded Stream Buffer: caches decoded µops so the front-end skips re-decoding hot code; staying in the DSB avoids legacy-decode front-end stalls. (Ch. 12)
 - **Flame graph** — a visualization of sampled stacks (`perf record -g` → `stackcollapse`/`flamegraph.pl`) in which width is time: the fastest way to see where a hot path's cycles go. (Ch. 2)
 - **HITM** — "Hit Modified": a cache load that hits a line *modified* in another core's cache, forcing a cross-core transfer — the signature of false sharing / contention (`perf c2c`). (Ch. 33)
@@ -171,7 +171,7 @@
 - **LAUNCHTIME / `SO_TXTIME`** — NIC-hardware / socket mechanism to transmit a packet at an exact scheduled nanosecond, via the ETF qdisc. (Ch. 59)
 - **`MSG_ZEROCOPY` / `TCP_ZEROCOPY_RECEIVE`** — kernel zero-copy send/receive: the NIC DMAs to/from *your* buffer, at the cost of asynchronous buffer-lifetime management (send) or page alignment (receive). (Ch. 49)
 - **Nagle / delayed ACK** — TCP throughput heuristics whose interaction can inject a ~40 ms stall into small request-response flows; disabled with `TCP_NODELAY` / `TCP_QUICKACK`. (Ch. 52)
-- **NAPI** — the kernel's interrupt-mitigation receive model: the first packet's interrupt disables further RX interrupts and switches the driver to polling the ring until it is drained (then re-arms); `busy_poll` extends the same polling into the socket layer. (Ch. 47, 55)
+- **NAPI** — the kernel's interrupt-mitigation receive model: the first packet's interrupt disables further RX interrupts and switches the driver to polling the ring until it is drained (then re-arms); `busy_poll` extends the same polling into the socket layer. (Ch. 47 — native I/O; Ch. 55)
 - **NAK** — Negative Acknowledgment: a receiver requesting retransmission of specific missing messages (reliable multicast); a *NAK storm* is many subscribers requesting at once. (Ch. 54)
 - **One-sided RDMA** — a remote READ/WRITE that completes on the NIC without involving the remote CPU (vs two-sided send/recv). (Ch. 63)
 - **Pacing** — spreading sends over time to a smooth rate (`SO_MAX_PACING_RATE` / FQ) to avoid self-inflicted microbursts. (Ch. 59)

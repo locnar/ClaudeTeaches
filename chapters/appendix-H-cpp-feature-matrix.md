@@ -58,7 +58,7 @@ The threading/atomics and async surface (Part VI).
 | `std::jthread` / `std::stop_token` (Ch. 31) | P0660 | libstdc++ 10 | libc++ 20 (18–19 only with `-fexperimental-library`) | `__cpp_lib_jthread >= 201911` | `std::thread` + manual join + a `std::atomic<bool>` stop flag |
 | `std::barrier` / `std::latch` (Ch. 30) | P1135 | libstdc++ 11 | libc++ 11 | `__cpp_lib_barrier`, `__cpp_lib_latch` | condition-variable + counter |
 | `std::hardware_destructive_interference_size` (Ch. 33) | P0154 | libstdc++ 12 (`-Winterference-size` warns when it leaks into an ABI) | libc++ 19 (macro only from 19) | `__cpp_lib_hardware_interference_size >= 201703` | `constexpr std::size_t kLine = 64;` — and note the value is a *tuning default*, not a hardware query: 64 on GCC x86-64, **256** on GCC AArch64 (Appendix A.3) |
-| `std::atomic<T>::wait` / `notify_one` / `notify_all` (Ch. 31–32) | P1135 | libstdc++ 11 | libc++ 11 | `__cpp_lib_atomic_wait >= 201907` | spin with `pause` then `futex(2)` (Ch. 32), or a condition variable |
+| `std::atomic<T>::wait` / `notify_one` / `notify_all` (Ch. 32 — spinlocks/backoff) | P1135 | libstdc++ 11 | libc++ 11 | `__cpp_lib_atomic_wait >= 201907` | spin with `pause` then `futex(2)` (Ch. 32), or a condition variable |
 | `std::execution` — senders/receivers (Ch. 39) | P2300 | not in libstdc++ yet | not in libc++ yet | `__cpp_lib_senders` (when shipped) | the **stdexec** reference implementation (NVIDIA), or a hand-rolled executor |
 | `std::hive` (C++26) | P0447 | not yet | not yet | `__cpp_lib_hive` (when shipped) | `plf::colony` (the library it standardizes), or a pool allocator (Ch. 24) |
 
@@ -76,7 +76,7 @@ The bit-twiddling and numeric-conversion surface (Part V, Ch. 28; parsing in Ch.
 | `std::endian` (Ch. 53) | P0463 | libstdc++ 8 | libc++ 7 | `__cpp_lib_endian >= 201907` | `__BYTE_ORDER__` / `__ORDER_LITTLE_ENDIAN__` |
 | Saturating arithmetic `add_sat` etc. (Ch. 72) | P0543 (C++26) | libstdc++ 14 | libc++ 18 | `__cpp_lib_saturation_arithmetic >= 202311` | manual clamp with overflow check (Ch. 72), or `__builtin_add_overflow` + clamp |
 | `std::assume_aligned<N>(p)` (Ch. 21, 29) | P1007 | libstdc++ 10 | libc++ 15 | `__cpp_lib_assume_aligned >= 201811` | `__builtin_assume_aligned(p, N)` |
-| `std::unreachable()` (Ch. 13, 21) | P0627 | libstdc++ 12 | libc++ 15 | `__cpp_lib_unreachable >= 202202` | `__builtin_unreachable()` |
+| `std::unreachable()` (Ch. 21) | P0627 | libstdc++ 12 | libc++ 15 | `__cpp_lib_unreachable >= 202202` | `__builtin_unreachable()` |
 | `std::start_lifetime_as<T>(p)` (Ch. 21, 53 — the sanctioned struct-over-bytes overlay) | P2590 | libstdc++ 16 (experimental; absent in 13–15) | not yet | `__cpp_lib_start_lifetime_as >= 202207` | `memcpy`/`std::bit_cast` into a local, or the `reinterpret_cast` the chapters mark as technically UB |
 | `std::simd` (C++26; Ch. 29, Appendix A.2) | P1928 | libstdc++ 16 (experimental); `<experimental/simd>` (Parallelism TS v2) since libstdc++ 11 | not yet | `__cpp_lib_simd` (when shipped); `__cpp_lib_experimental_parallel_simd` for the TS | `std::experimental::simd`, xsimd, Google Highway, or raw intrinsics (Ch. 29) |
 | `std::inplace_vector` (C++26 — fixed-capacity, no allocation) | P0843 | libstdc++ 15 | not yet (check) | `__cpp_lib_inplace_vector >= 202406` | a `std::array` + size field, `boost::container::static_vector` |
