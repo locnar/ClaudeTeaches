@@ -57,30 +57,36 @@ The decisive measurement: run your latency-sensitive thread on a logical CPU and
 
 ```cpp
 // smt.cpp — measure a thread's performance with its SMT sibling idle vs busy.
-// Build: g++ -O2 -std=c++20 -march=native smt.cpp -o smt -pthread
+// Build: g++ -O2 -std=c++20 -march=native smt.cpp -o smt
 // Find sibling of CPU 2:  cat /sys/devices/system/cpu/cpu2/topology/thread_siblings_list  (e.g. "2,18" on this 16-core box)
 // Run:  taskset -c 2 ./smt            (sibling 18 idle)
-//       (in another shell) taskset -c 18 ./smt_load    (sibling busy — a port/cache hog)
+//       (in another shell) taskset -c 18 ./smt_load    (sibling busy — the port/cache hog below)
 //       then re-run  taskset -c 2 ./smt   and compare
 #include <cstdio>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
-#include <chrono>
+#include <x86intrin.h>
 
 int main() {
-    constexpr int N = 8192;                       // ~L1/L2 working set
+    constexpr int N = 8192;                       // 64 KiB in + 64 KiB out: L1/L2-resident working set
     constexpr long REPS = 2'000'000;
-    std::vector<std::uint64_t> a(N, 1);
-    // a mixed workload: dependent + independent ops + loads (uses ports + L1/L2 — Ch.7,11)
-    std::vector<std::uint32_t> samples; samples.reserve(REPS);
+    std::vector<std::uint64_t> a(N, 1), b(N, 0);
+    // A port/L1-bound kernel: four INDEPENDENT accumulators (no loop-carried latency chain to hide behind —
+    // an earlier draft's `s += a[i]*3 + (s>>1)` was a 3-cycle dependency chain, so its p50 was set by latency,
+    // not by the shared ports the sibling competes for) plus a store stream. Loads, multiplies, adds, stores:
+    // exactly the resources a busy sibling steals (Ch. 7, 11).
+    std::vector<std::uint32_t> samples(REPS);     // pre-faulted (Ch. 42)
     for (long r = 0; r < REPS; ++r) {
-        std::uint64_t t0 = __builtin_ia32_rdtsc();
-        std::uint64_t s = 0;
-        for (int i = 0; i < N; ++i) s += a[i] * 3 + (s >> 1);   // ports + loads + a dependency
-        a[r & (N-1)] = s;                                       // a store
-        std::uint64_t t1 = __builtin_ia32_rdtsc();
-        samples.push_back(std::uint32_t(t1 - t0));
+        std::uint64_t t0 = __rdtsc();
+        std::uint64_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+        for (int i = 0; i < N; i += 4) {
+            s0 += a[i] * 3; s1 += a[i+1] * 3; s2 += a[i+2] * 3; s3 += a[i+3] * 3;
+            b[i >> 2] = s0 ^ s1 ^ s2 ^ s3;                       // the store stream
+        }
+        asm volatile("" :: "r"(b.data()) : "memory");           // keep the stores (Appendix L)
+        std::uint64_t t1 = __rdtsc();
+        samples[r] = std::uint32_t(t1 - t0);
     }
     std::sort(samples.begin(), samples.end());
     auto pct=[&](double p){return samples[std::size_t(p*(REPS-1))];};
@@ -88,16 +94,30 @@ int main() {
                 pct(0.5), pct(0.99), pct(0.999));
     return 0;
 }
-// smt_load: a sibling hog — tight loop hammering execution ports + cache (compile similarly).
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16C/32T with HT enabled — CPU 2's sibling is CPU 18), pinned, turbo off (illustrative; *interference varies hugely by workload*):
+The hog that goes on the sibling:
+
+```cpp
+// smt_load.cpp — the sibling hog: integer ALU + L1-streaming loads/stores, deliberately NO AVX (so the
+// frequency-license effect of Ch. 29 is excluded and only resource sharing is measured).
+// Build: g++ -O2 -std=c++20 -mno-avx smt_load.cpp -o smt_load     Run: taskset -c 18 ./smt_load
+#include <cstdint>
+#include <vector>
+int main() {
+    std::vector<std::uint64_t> v(8192, 1);                        // 64 KiB: lives in the shared L1d/L2
+    for (std::uint64_t k = 0;; ++k)
+        for (int i = 0; i < 8192; ++i) { v[i] = v[i] * 7 + k; asm volatile("" ::: "memory"); }   // mul + add + load + store, forever
+}
+```
+
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, 16C/32T with HT enabled — CPU 2's sibling is CPU 18), pinned, turbo off so TSC ticks are core cycles (illustrative; *interference varies hugely by workload*). The kernel is port/L1-bound at ~1.6 elements per cycle, so its floor is ~5,000 cycles for 8,192 elements:
 
 ```
    hot thread on CPU 2:                p50 cycles   p99    p99.9    note
-   sibling (CPU 18) IDLE (halted)      ~10,000      ~10,400 ~11,000  near full-core resources
-   sibling BUSY (port/cache hog)       ~17,000      ~22,000 ~35,000  ~1.7-2x slower + jittier — SMT steals!
-   HT OFF (whole core, BIOS)           ~9,200       ~9,400  ~9,600   fastest + flattest (no sibling wake-ups)
+   sibling (CPU 18) IDLE (halted)      ~5,200       ~5,400  ~5,800   near full-core resources
+   sibling BUSY (smt_load)             ~9,000       ~11,500 ~18,000  ~1.7-2x slower + jittier — SMT steals!
+   HT OFF (whole core, BIOS)           ~5,000       ~5,100  ~5,200   fastest + flattest (no sibling wake-ups)
 
    the gap (idle→busy) is the SMT interference; the small (idle→HT-off) gap is sibling wake-ups re-splitting the core.
 ```
@@ -130,8 +150,8 @@ The strategic decision — and it's genuinely a *decision*, measured per workloa
 
 - **Latency cores: HT off (or sibling idle).** The hot tick-to-trade cores want to own their physical core fully — **HT off** gives them the whole core with no sibling to ever re-partition it (§43.2), the lowest and flattest latency (§43.3). This is the default for the latency-critical cores in HFT.
 - **Throughput cores: HT on.** Cores running *throughput*-bound, parallel, latency-insensitive work — risk calc, Monte Carlo, backtesting, compilation, general housekeeping — benefit from HT's extra hardware threads (more aggregate work). Keep HT *on* there.
-- **The wrinkle: HT is usually a whole-CPU/BIOS setting.** You typically can't enable HT on some cores and disable it on others within one CPU — it's a BIOS toggle for the whole socket (Ch. 6). So the real choices are: **(a)** HT *off* for the whole box (simplest, best for latency, sacrifices throughput-core hardware threads); **(b)** HT *on* for the whole box, with the latency cores' **siblings left idle + isolated** (§43.4.2) — getting most of the latency benefit on hot cores while keeping HT for throughput cores. Many shops pick (b) on a mixed box, or (a) on a pure latency box. (Linux *can* offline individual siblings at runtime — `echo 0 > /sys/devices/system/cpu/cpuN/online` — a per-sibling "soft HT-off" without a reboot, a useful middle path.)
-- **Decide by measuring (§43.3) — and security (Ch. 6, 72).** Measure the idle-vs-busy-sibling gap for *your* hot workload to quantify what HT costs you. Also weigh security: SMT has been the vector for several side-channel attacks (L1TF, MDS, the cross-sibling leaks), so some environments disable HT for **security** regardless of latency (Ch. 6, 72) — a reason that compounds with the latency case on a hot box.
+- **The wrinkle: HT is usually a whole-CPU/BIOS setting.** You typically can't enable HT on some cores and disable it on others within one CPU — it's a BIOS toggle for the whole socket (Ch. 6). So the real choices are: **(a)** HT *off* for the whole box (simplest, best for latency, sacrifices throughput-core hardware threads) — from the BIOS, or **from the kernel without a BIOS visit**: `nosmt` on the command line, or at runtime `echo off > /sys/devices/system/cpu/smt/control` (check `smt/active`; `forceoff` makes it stick; this is what `mitigations=auto,nosmt` uses) — equivalent to offlining every sibling and reversible without a reboot; **(b)** HT *on* for the whole box, with the latency cores' **siblings left idle + isolated** (§43.4.2) — getting most of the latency benefit on hot cores while keeping HT for throughput cores. Many shops pick (b) on a mixed box, or (a) on a pure latency box. (Linux *can* offline individual siblings at runtime — `echo 0 > /sys/devices/system/cpu/cpuN/online` — a per-sibling "soft HT-off" without a reboot, a useful middle path.)
+- **Decide by measuring (§43.3) — and security (Ch. 6 §6.2.3).** Measure the idle-vs-busy-sibling gap for *your* hot workload to quantify what HT costs you. Also weigh security: SMT has been the vector for several side-channel attacks (L1TF, MDS, the cross-sibling leaks), so some environments disable HT for **security** regardless of latency (Ch. 6 §6.2.3) — a reason that compounds with the latency case on a hot box.
 - **Offlining siblings at runtime.** `echo 0 > /sys/devices/system/cpu/cpuN/online` takes a logical CPU offline without a reboot — a flexible way to "disable HT" on just the hot cores' siblings (an offlined sibling sits halted, so the partitioned resources recombine — §43.2). Handy for testing the HT-on/off trade live and for per-core control when BIOS is whole-socket.
 
 ## 43.5 Pitfalls & anti-patterns: co-scheduling two hot threads on one core
@@ -143,7 +163,7 @@ The strategic decision — and it's genuinely a *decision*, measured per workloa
 - **IRQs on the sibling (Ch. 42).** Routing IRQs off the hot logical CPU but *not* its sibling still pollutes the shared core's caches. Route IRQs off **both** logical CPUs of every hot physical core.
 - **Forgetting AVX downclocking is core-shared (Ch. 29).** Heavy AVX-512 on the sibling can *downclock the whole physical core* (Ch. 29), slowing the hot thread even if the sibling isn't otherwise contending. Another reason to keep the sibling quiet (or AVX-free) on a hot core.
 - **Believing "sibling idle" == "HT off."** Sibling-idle recombines the partitioned store buffer/ROB only while the sibling is *halted* (§43.2) — a spinning sibling (`idle=poll`, a polling thread) keeps it halved — and it risks the OS scheduling something there if not isolated (Ch. 45). For the most sensitive threads, prefer **HT off / sibling offlined**; if leaving it idle, **isolate** it.
-- **Ignoring SMT security implications (Ch. 6, 72).** SMT side-channels (MDS/L1TF) can leak across siblings; in a multi-tenant or security-sensitive context, disabling HT is a *security* requirement that also happens to help latency. Don't enable HT on sensitive cores without considering this.
+- **Ignoring SMT security implications (Ch. 6 §6.2.3).** SMT side-channels (MDS/L1TF) can leak across siblings; in a multi-tenant or security-sensitive context, disabling HT is a *security* requirement that also happens to help latency. Don't enable HT on sensitive cores without considering this.
 - **Not measuring per workload.** SMT interference varies *hugely* by what the hot thread does (port-bound suffers most; some memory-bound work is neutral or helped). Concluding "HT is bad/fine" without measuring *your* hot thread (§43.3) gets the trade wrong. Measure the idle-vs-busy-sibling gap.
 
 ## 43.6 Exercises & checklist
@@ -164,14 +184,14 @@ The strategic decision — and it's genuinely a *decision*, measured per workloa
 - [ ] The **HT on/off decision is made per workload type**: **off / sibling-halted** for latency cores (the whole core, nothing to re-partition it — lowest/flattest latency), **on** for throughput cores (extra hardware threads) — measured (§43.3), not assumed.
 - [ ] For the most sensitive threads I prefer **HT off / sibling offlined** over sibling-idle (no sibling wake-ups to re-partition the store buffer/ROB — §43.2).
 - [ ] On a **pure latency box**, HT is **off** (no throughput work to exploit it); on a mixed box, HT on with hot siblings idle/offlined.
-- [ ] **Security** implications of SMT (MDS/L1TF side-channels — Ch. 6, 72) are considered in the HT decision.
+- [ ] **Security** implications of SMT (MDS/L1TF side-channels — Ch. 6 §6.2.3) are considered in the HT decision.
 - [ ] I **measured the idle-vs-busy-sibling gap** for the actual hot workload (§43.3) — the SMT tax varies hugely by what the thread does.
 
 ## 43.7 References
 
 - Intel *SDM* / *Optimization Reference Manual* (Hyper-Threading: shared vs partitioned resources) and Agner Fog's microarchitecture guide — exactly which resources siblings share vs partition (§43.2).
 - The Linux `Documentation/admin-guide/` (CPU topology, `thread_siblings_list`, CPU hotplug/online) and `lscpu(1)`/`hwloc`/`lstopo` docs — sibling detection and offlining (§43.4.1, §43.4.3).
-- Intel's L1TF/MDS advisories and the Linux SMT-mitigation documentation (`/sys/devices/system/cpu/smt/`) — the security case for disabling HT (§43.4.3, ties Ch. 6, 72).
+- Intel's L1TF/MDS advisories and the Linux SMT-mitigation documentation (`/sys/devices/system/cpu/smt/`) — the security case for disabling HT (§43.4.3, ties Ch. 6 §6.2.3).
 - Red Hat / kernel low-latency tuning guides — SMT and the latency-vs-throughput trade-off on isolated cores (consolidated in Appendix C).
 - Carl Cook / HFT latency talks — why hot cores run with siblings idle or HT disabled.
 
@@ -179,7 +199,7 @@ The strategic decision — and it's genuinely a *decision*, measured per workloa
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — measuring SMT interference and the shared-resource model.
 - The `cyclictest`/rt-tests and `turbostat` documentation — measuring jitter and frequency effects (incl. the AVX-downclock sibling interaction — Ch. 29).
-- Ch. 42 (*Pinning*) — pinning to the right logical CPU and handling the sibling; Ch. 45 (*RT Scheduling*) — isolating the sibling; Ch. 11–12 (*Pipelines / Front-End*) — the ports/front-end siblings share; Ch. 7 (*Caches*) — the shared L1/L2; Ch. 29 (*SIMD*) — AVX downclocking is core-shared; Ch. 6 (*System Setup*) — BIOS HT toggle; Ch. 72 (*Security*) — SMT side-channels.
+- Ch. 42 (*Pinning*) — pinning to the right logical CPU and handling the sibling; Ch. 45 (*RT Scheduling*) — isolating the sibling; Ch. 11–12 (*Pipelines / Front-End*) — the ports/front-end siblings share; Ch. 7 (*Caches*) — the shared L1/L2; Ch. 29 (*SIMD*) — AVX downclocking is core-shared; Ch. 6 (*System Setup*, §6.2.3) — BIOS HT toggle and the SMT side-channel (L1TF/MDS) mitigations.
 - **Appendix A** — SMT differences on ARM (big.LITTLE / heterogeneous cores, fewer SMT designs); **Appendix C** — the HT/SMT tuning decision in the checklist.
 
 ---

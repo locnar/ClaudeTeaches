@@ -49,9 +49,9 @@ while (true) {
 
 Now spinners share the line read-only; only the actual handoff causes a coherence transfer. This is the baseline correct spinlock (§32.4.1).
 
-**The `pause` instruction (and `tpause`).** Inside a spin loop, `pause` (`_mm_pause()`) tells the CPU "I'm spin-waiting": it (1) hints the pipeline to not aggressively speculate the loop (avoiding a costly memory-order-violation flush when the lock changes — Ch. 11), (2) reduces power, and (3) on SMT (Ch. 43) yields pipeline resources to the sibling thread. It's essentially free and **mandatory** in a spin loop — omitting it both wastes power and *slows* the spin. `tpause`/`umwait`/`umonitor` (newer ISA) let a core wait on a memory location with a timeout in a low-power state — a more efficient "wait until this address changes" for spin-waiting.
+**The `pause` instruction (and `tpause`).** Inside a spin loop, `pause` (`_mm_pause()`) tells the CPU "I'm spin-waiting": it (1) hints the pipeline to not aggressively speculate the loop (avoiding a costly memory-order-violation flush when the lock changes — Ch. 11), (2) reduces power, and (3) on SMT (Ch. 43) yields pipeline resources to the sibling thread. It is cheap but **not free**, and its cost is microarchitecture-dependent: ~10 cycles up to Broadwell, **~140 cycles on Skylake-SP and Ice Lake-SP** (uops.info: 138–145 on ICL; ~40 on Cascade Lake, ~65 on Zen 2–4) — ~48 ns per `pause` at 2.9 GHz, which caps how quickly a TTAS waiter can notice the release (one `pause` per iteration means up to ~50 ns of detection granularity on the reference machine; Ch. 34's SPSC queue spins *without* `pause` for exactly this reason). It is still **mandatory** in a lock's spin loop — omitting it wastes power, starves the SMT sibling, and eats the pipeline-flush penalty — but budget for its latency. `umonitor`/`umwait` (WAITPKG) let a core wait, in the C0.1/C0.2 low-power states, for a *write to a monitored line* or a TSC deadline; `tpause` is the deadline-only variant (it watches no address). Not on Ice Lake-SP (the §32.3 machine) — it needs Sapphire Rapids, Alder Lake or Tremont (§32.4.2).
 
-**Futex internals (how blocking locks work).** A `std::mutex` is built on the Linux **futex** (fast userspace mutex): the *uncontended* case is a single atomic in userspace (no syscall — fast); only on *contention* does it call `futex(FUTEX_WAIT)` to sleep and `futex(FUTEX_WAKE)` to wake a waiter. So a `std::mutex` is cheap when uncontended (just an atomic) and expensive only when it actually has to block — meaning the spin-vs-block question is really "how often, and how long, is it contended?" Many mutexes also **spin briefly before blocking** (an adaptive mutex) to get the best of both. Understanding the futex shows why "mutexes are slow" is only true *under contention*.
+**Futex internals (how blocking locks work).** A `std::mutex` is built on the Linux **futex** (fast userspace mutex): the *uncontended* case is a single atomic in userspace (no syscall — fast); only on *contention* does it call `futex(FUTEX_WAIT)` to sleep and `futex(FUTEX_WAKE)` to wake a waiter. So a `std::mutex` is cheap when uncontended (just an atomic) and expensive only when it actually has to block — meaning the spin-vs-block question is really "how often, and how long, is it contended?" glibc's default `std::mutex` (a `PTHREAD_MUTEX_NORMAL` pthread mutex) does **not** spin: one CAS, then straight to `futex_wait` on failure, and the unlocker pays a `futex_wake` whenever waiters exist. Only `PTHREAD_MUTEX_ADAPTIVE_NP` (tunable `glibc.pthread.mutex_spin_count`, default 100) **spins briefly before blocking** — an adaptive mutex, which you get by initialising a `pthread_mutex_t` with that type, not from `std::mutex`. Understanding the futex shows why "mutexes are slow" is only true *under contention*.
 
 The model: **a lock is an atomic acquire/release protocol (Ch. 30); spinning busy-waits (cheap for short sections on dedicated cores) while blocking sleeps via futex (cheap uncontended, microseconds when it blocks). A correct spinlock spins on a *read* (TTAS) with `pause`, and adds backoff/queueing as contention rises — choosing spin vs block by section length and whether the core is dedicated.**
 
@@ -62,16 +62,24 @@ Measure the two crossovers: (1) spin vs `std::mutex` as a function of **critical
 ```cpp
 // spin.cpp — naive TAS vs TTAS+pause spinlock vs std::mutex, under contention.
 // Build: g++ -O2 -std=c++20 -march=native spin.cpp -o spin -pthread
-// Run:  ./spin tas 8 | ./spin ttas 8 | ./spin mutex 8   (threads pinned to distinct cores)
+// Run:  ./spin tas 8 ; ./spin ttas 8 ; ./spin mutex 8   (each thread pins itself to core t)
 #include <atomic>
 #include <mutex>
 #include <cstdio>
+#include <cstdlib>       // std::atoi
 #include <cstring>
 #include <cstdint>
 #include <thread>
 #include <vector>
 #include <chrono>
 #include <immintrin.h>   // _mm_pause
+#include <pthread.h>
+#include <sched.h>
+
+static void pin_to(int core) {                           // Ch. 42
+    cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
+    if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
+}
 
 struct TAS  { std::atomic<int> f{0};
     void lock(){ while (f.exchange(1, std::memory_order_acquire)) {} }       // naive: spin on WRITE
@@ -88,7 +96,8 @@ double run(int M, Lock& lk) {
     constexpr long TOTAL = 20'000'000; long per = TOTAL / M;
     auto t0 = std::chrono::steady_clock::now();
     std::vector<std::thread> ts;
-    for (int t=0;t<M;++t) ts.emplace_back([&]{
+    for (int t=0;t<M;++t) ts.emplace_back([&, t]{
+        pin_to(t);
         for (long i=0;i<per;++i){ lk.lock(); shared_counter++; /* tiny CS */ lk.unlock(); }
     });
     for (auto& th:ts) th.join();
@@ -108,20 +117,20 @@ int main(int argc, char** argv){
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket), threads pinned to distinct cores, turbo off, *tiny* critical section (illustrative):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP, single socket), each thread pinned to its own core by the listing, turbo off, *tiny* critical section (illustrative):
 
 ```
    M=8 cores, tiny critical section:
    TAS (naive spin-on-write)   ~900 ns/CS    line ping-pongs among all 8 writers — catastrophic
    TTAS (+pause)               ~250 ns/CS    spin on read; only handoff bounces — much better
-   std::mutex                  ~600 ns/CS    futex: brief adaptive spin then syscall under contention
+   std::mutex                  ~600 ns/CS    glibc NORMAL mutex: one CAS, then futex_wait — no spinning; unlocker pays futex_wake
 
    crossover (single holder, varying CS length, low contention):
    short CS (~50 ns)   spin wins (no syscall)
    long  CS (~5 µs)    block wins (spinning wastes the core; let it sleep)
 ```
 
-Read it: under contention with a tiny critical section, **naive TAS is a disaster** (~900 ns — every spinner writes the line, the holder can barely get it back to release), **TTAS+`pause` is ~3.6× better** (spinners share the read-only line; only the handoff transfers ownership), and `std::mutex` sits in between (its adaptive spin + futex). The crossover row is the spin-vs-block rule: for a *short* section spinning beats the mutex's syscall; for a *long* section the mutex's sleep beats burning a core spinning. The lessons: (1) **never use naive TAS** — always TTAS + `pause` (§32.4.1); (2) **spin for short sections on dedicated cores, block for long ones**; and (3) even TTAS degrades with more contenders — beyond a few cores, add **backoff** (§32.4.2) or a **queue lock** (§32.4.3), or reconsider whether you should be locking at all (lock-free — Ch. 34, or shared-nothing — Ch. 31). The fundamental cost is the lock line's coherence traffic; everything here is about reducing how much it bounces.
+Read it: under contention with a tiny critical section, **naive TAS is a disaster** (~900 ns — every spinner writes the line, the holder can barely get it back to release), **TTAS+`pause` is ~3.6× better** (spinners share the read-only line; only the handoff transfers ownership), and `std::mutex` sits in between (one CAS then a futex sleep/wake pair — it never spins, so it loses to TTAS on a tiny section but doesn't hammer the line like TAS). The crossover row is the spin-vs-block rule: for a *short* section spinning beats the mutex's syscall; for a *long* section the mutex's sleep beats burning a core spinning. The lessons: (1) **never use naive TAS** — always TTAS + `pause` (§32.4.1); (2) **spin for short sections on dedicated cores, block for long ones**; and (3) even TTAS degrades with more contenders — beyond a few cores, add **backoff** (§32.4.2) or a **queue lock** (§32.4.3), or reconsider whether you should be locking at all (lock-free — Ch. 34, or shared-nothing — Ch. 31). The fundamental cost is the lock line's coherence traffic; everything here is about reducing how much it bounces.
 
 ## 32.4 Techniques
 
@@ -130,7 +139,7 @@ Read it: under contention with a tiny critical section, **naive TAS is a disaste
 The correct baseline spinlock (§32.2, §32.3):
 
 - **Spin on a read, write only to acquire.** The inner loop reads the lock (`load(relaxed)`) until it *looks* free — keeping the line in shared state across all spinners, no coherence bounce — then attempts the atomic `exchange`/`compare_exchange` to actually take it (retrying if another spinner won the race). Never spin on the atomic write (the naive TAS disaster).
-- **`pause` in the spin loop — mandatory.** `_mm_pause()` every spin iteration: avoids the memory-order-violation pipeline flush when the lock changes (Ch. 11), saves power, and yields to the SMT sibling (Ch. 43). Omitting it both wastes energy and *slows* the spin (the flush penalty).
+- **`pause` in the spin loop — mandatory, but not free.** `_mm_pause()` every spin iteration: avoids the memory-order-violation pipeline flush when the lock changes (Ch. 11), saves power, and yields to the SMT sibling (Ch. 43). Omitting it both wastes energy and *slows* the spin (the flush penalty). Remember its ~140-cycle latency on Skylake-SP/Ice Lake-SP (§32.2): the waiter re-checks the lock at most every ~48 ns, which bounds the handoff latency a TTAS lock can deliver on those cores.
 - **Acquire/release ordering (Ch. 30).** Acquire on the lock (so the critical section's reads can't hoist above it), release on the unlock (so the critical section's writes are published before the lock frees). This is the publication pattern of Ch. 30; `seq_cst` is unnecessary.
 - **Pad the lock to a cache line (Ch. 33).** The lock word must not share a cache line with the data it protects (or other locks) — false sharing makes every data access bounce the lock line. `alignas(hardware_destructive_interference_size)`.
 - **When TTAS is enough.** Short critical sections, low-to-moderate contention, dedicated cores — TTAS+`pause` is simple, fast, and correct. Add backoff/queueing only when measurement (§32.3) shows TTAS degrading under your contention.
@@ -139,10 +148,10 @@ The correct baseline spinlock (§32.2, §32.3):
 
 When contention is high enough that even TTAS spinners contend on the handoff, **back off** — wait progressively longer between attempts to reduce hammering:
 
-- **The idea.** On each failed acquire, spin-wait a *growing* number of `pause` iterations (1, 2, 4, 8, … up to a cap) before re-checking — so contenders spread out their attempts, cutting the coherence traffic and giving the holder room to release and the next waiter a clean shot. Like network backoff (Ch. 51), applied to the lock.
+- **The idea.** On each failed acquire, spin-wait a *growing* number of `pause` iterations (1, 2, 4, 8, … up to a cap) before re-checking — so contenders spread out their attempts, cutting the coherence traffic and giving the holder room to release and the next waiter a clean shot. Like Ethernet/TCP exponential backoff, applied to the lock.
 - **Bounded and randomized.** Cap the backoff (so latency doesn't blow up) and optionally add randomization (jitter) to de-synchronize contenders that would otherwise back off in lockstep. The cap trades fairness/latency against contention reduction — tune it to your contention level (§32.3).
 - **Backoff vs queue locks.** Backoff is simple and stateless (good for moderate contention) but *unfair* (a thread can be unlucky repeatedly — starvation/latency tail) and still has all contenders touching the lock line. For *high* contention or fairness needs, a queue lock (§32.4.3) is better. Backoff is the easy upgrade from plain TTAS; queue locks are the heavier-duty answer.
-- **`tpause`/`umwait` for power-aware backoff.** On newer ISAs, `tpause` waits in a low-power state for a bounded time — a more efficient backoff than spinning `pause` loops, and `umonitor`/`umwait` can wake on the lock line changing.
+- **`tpause`/`umwait` for power-aware backoff.** With WAITPKG, `tpause` waits in a low-power state (C0.1 or C0.2) until a TSC deadline — a more efficient backoff than spinning `pause` loops — and `umonitor`/`umwait` wake early when the monitored lock line is written. Sapphire Rapids+/Alder Lake+/Tremont+ only (not the §32.3 Ice Lake-SP box) — check for `waitpkg` in `/proc/cpuinfo`; build with `-mwaitpkg` and use `_tpause(ctrl, deadline_tsc)`/`_umwait` from `<immintrin.h>`; the maximum wait is capped by the OS via `IA32_UMWAIT_CONTROL` (Linux default ~100 µs), so a long wait returns early with CF set and must loop.
 
 ### 32.4.3 MCS/CLH queue locks
 
@@ -153,6 +162,7 @@ For high contention (or when fairness/latency-tail matter), **queue locks** elim
 - **CLH lock** — similar, but a thread spins on its *predecessor's* node; slightly different memory traffic, also fair. Both give FIFO fairness and per-line spinning.
 - **When to use.** High contention where TTAS+backoff degrades (the line bounces among many waiters) and/or where **fairness/bounded latency** matters (backoff can starve; queue locks are FIFO-fair — a better *tail*, Ch. 1). The cost is complexity and the per-thread node bookkeeping. For most low-latency code, the better answer at this contention level is to **remove the sharing** (shared-nothing — Ch. 31) or go **lock-free** (Ch. 34); queue locks are for when you genuinely must have a fair, scalable lock.
 - **The honest framing.** If you're reaching for an MCS lock, the contention is high enough that you should first ask whether the *design* is wrong (Ch. 31) — a well-partitioned system rarely needs a heavily-contended lock. Queue locks are the right tool when the sharing is genuinely irreducible.
+- **When a spinlock *beats* lock-free.** The reverse case is real and common: when contention is *rare* (the lock is almost always free), a TTAS lock costs one uncontended `xchg` plus one release `mov` — ~20 cycles, about the same as the single CAS a lock-free update would need — and buys you things lock-free code cannot: a **multi-field invariant** updated atomically (bid, ask *and* sequence number together, without the 16-byte-CAS or seqlock gymnastics of Ch. 34–35), **no ABA and no reclamation problem** (Ch. 36 — nothing is freed while another thread may hold a pointer to it), and code a reviewer can *verify* in minutes. Prefer the spinlock when the critical section is tiny and fault-free, the holder cannot be preempted (isolated core), and the measured contention is low; prefer lock-free when many threads genuinely contend, when a waiter must never stall behind a holder (progress guarantee), or when the structure is a queue/ring whose natural single-writer shape (Ch. 34) needs no lock at all. Appendix E's own numbers make the point: an uncontended lock/unlock pair is ~20 ns, a *contended* lock-free CAS retry loop under line bouncing is not cheaper than a contended lock — the sharing, not the primitive, is the cost.
 
 ## 32.5 Pitfalls & anti-patterns: spinning across the scheduler; lock convoy
 

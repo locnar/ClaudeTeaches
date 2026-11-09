@@ -10,22 +10,22 @@
 
 ## 30.1 Why it matters: correctness and cost of sharing
 
-The moment two threads touch the same memory, you leave the comfortable world where code runs in the order you wrote it. Both the **compiler** (Ch. 11, 21 — it reorders, caches values in registers, eliminates "redundant" loads) and the **hardware** (Ch. 7, 11 — out-of-order execution, store buffers, cache coherence) reorder memory operations, and that reordering is *invisible and correct* for single-threaded code but *catastrophic* for sharing: thread B can observe thread A's writes in a different order than A issued them, see a half-updated structure, or never see an update at all (the value sits in A's store buffer or B's register). The C++ memory model (since C++11) is the contract that makes concurrent code *definable*: `std::atomic` and `memory_order` are how you tell the compiler and CPU which reorderings you can tolerate, turning "undefined behavior" (a data race) into "well-defined, with these visibility guarantees."
+The moment two threads touch the same memory, you leave the comfortable world where code runs in the order you wrote it. Both the **compiler** (Ch. 4, 21 — it reorders, caches values in registers, eliminates "redundant" loads) and the **hardware** (Ch. 7, 11 — out-of-order execution, store buffers, cache coherence) reorder memory operations, and that reordering is *invisible and correct* for single-threaded code but *catastrophic* for sharing: thread B can observe thread A's writes in a different order than A issued them, see a half-updated structure, or never see an update at all (the value sits in A's store buffer or B's register). The C++ memory model (since C++11) is the contract that makes concurrent code *definable*: `std::atomic` and `memory_order` are how you tell the compiler and CPU which reorderings you can tolerate, turning "undefined behavior" (a data race) into "well-defined, with these visibility guarantees."
 
-This is the **foundation of all of Part VI**. Every lock-free queue (Ch. 34), seqlock (Ch. 35), spinlock (Ch. 32), and the Disruptor (Ch. 37) is built out of atomic operations with carefully chosen memory orderings — and getting the ordering wrong produces bugs that are *rare, non-deterministic, hardware-dependent, and nearly impossible to reproduce* (they manifest under specific timing on specific CPUs, often never on x86 but always on ARM — Appendix A). For HFT, where shared-memory IPC (Ch. 26, 50) and lock-free pipelines are the fast path between feed handler, strategy, and gateway, the memory model isn't academic: it's the difference between a correct nanosecond-latency data plane and a heisenbug that costs money once a month.
+This is the **foundation of all of Part VI**. Every lock-free queue (Ch. 34), seqlock (Ch. 35), spinlock (Ch. 32), and the Disruptor (Ch. 37) is built out of atomic operations with carefully chosen memory orderings — and getting the ordering wrong produces bugs that are *rare, non-deterministic, hardware-dependent, and nearly impossible to reproduce* (they manifest under specific timing on specific CPUs, often never on x86 but readily — though still non-deterministically — on ARM; Appendix A). For HFT, where shared-memory IPC (Ch. 26, 50) and lock-free pipelines are the fast path between feed handler, strategy, and gateway, the memory model isn't academic: it's the difference between a correct nanosecond-latency data plane and a heisenbug that costs money once a month.
 
 And it's a *cost* axis, not just correctness. Atomic operations are **cache-coherence operations** (Ch. 7): an atomic store must make the value visible to other cores, which means the cache line moves (a coherence transfer — ~tens of ns when contended, the HITM of Ch. 7/33), and stronger memory orderings emit **barriers** that prevent the CPU from hiding latency by reordering. `seq_cst` (the default, and the safe one) is the *most expensive* ordering; `relaxed` is nearly free but gives almost no guarantees; acquire/release sit in between. So the discipline has two halves: **correctness** (choose an ordering strong enough that your algorithm is right) and **cost** (choose the *weakest* ordering that's still correct, so you don't pay for guarantees you don't need). This chapter builds the mental model of `memory_order` (§30.2), measures the cost of each (§30.3), gives the rules for choosing (§30.4), and verifies in the asm what barriers each ordering actually emits on x86 vs ARM (§30.5) — because the gap between "x86 made my sloppy ordering work" and "ARM exposed the bug" is exactly what §30.5 reveals.
 
 ## 30.2 Mental model: `memory_order`; acquire/release/seq_cst; fences; reordering
 
-**The problem: two kinds of reordering.** Memory operations get reordered by (1) the **compiler** (Ch. 11/21 — it hoists loads into registers, sinks stores, reorders independent accesses) and (2) the **hardware** (Ch. 7/11 — store buffers delay stores becoming visible; out-of-order execution and the cache-coherence protocol let other cores observe writes in a different order). For single-threaded code the result is *as-if* sequential; across threads, without synchronization, thread B can see thread A's operations in *any* order consistent with each thread's own program order — and a **data race** (two threads access the same location, at least one writing, with no synchronization) is flat **undefined behavior**.
+**The problem: two kinds of reordering.** Memory operations get reordered by (1) the **compiler** (Ch. 4/21 — it hoists loads into registers, sinks stores, reorders independent accesses) and (2) the **hardware** (Ch. 7/11 — store buffers delay stores becoming visible; out-of-order execution and the cache-coherence protocol let other cores observe writes in a different order). For single-threaded code the result is *as-if* sequential; across threads, without synchronization, thread B can see thread A's operations in *any* order consistent with each thread's own program order — and a **data race** (two threads access the same location, at least one writing, with no synchronization) is flat **undefined behavior**.
 
 **`std::atomic` + `memory_order`: the contract.** An atomic operation is indivisible *and* carries a `memory_order` that constrains reordering of the *surrounding non-atomic* operations relative to it. The orderings, weakest to strongest:
 
 - **`relaxed`** — atomicity only, **no ordering/visibility guarantees** beyond the single location's own modification order. Other operations can reorder freely around it. Nearly free (no barrier). Use for counters/statistics where you only need the value to be atomic, not ordered relative to other data (e.g. a monotonic event counter you read later).
 - **`acquire` (on a load) / `release` (on a store)** — the **workhorse pair** for publishing data. A `release` store *publishes*: everything the thread wrote *before* the release is visible to any thread that later does an `acquire` load *seeing that store*. An `acquire` load *consumes*: nothing after it can be reordered before it. Together they form a **happens-before** edge: "write data, then `release`-store a flag; `acquire`-load the flag, then read the data" guarantees the data is there. This is how you publish a message/pointer/snapshot — the basis of SPSC queues (Ch. 34), seqlocks (Ch. 35), the Disruptor (Ch. 37). Cheap on x86 (often *no* extra barrier — §30.5), real cost on ARM.
 - **`acq_rel`** — for read-modify-write operations (`fetch_add`, `compare_exchange`) that both consume and publish: acquire on the read part, release on the write part.
-- **`seq_cst` (sequentially consistent)** — the **default** and **strongest**: acquire/release *plus* a single **total order** of all `seq_cst` operations that all threads agree on. The easiest to reason about (everything looks interleaved-but-consistent) and the **most expensive** (a full barrier — `mfence`/`xchg` on x86 stores, `dmb ish` on ARM). The default precisely *because* it's the safe choice when you're unsure — but it's overkill for most acquire/release patterns.
+- **`seq_cst` (sequentially consistent)** — the **default** and **strongest**: acquire/release *plus* a single **total order** of all `seq_cst` operations that all threads agree on. The easiest to reason about (everything looks interleaved-but-consistent) and the **most expensive** (a full barrier on x86 — `xchg`, or `mov`+`mfence`, for the store; on AArch64 the seq_cst store is still `stlr` and the load `ldar`, the extra strength coming from how `ldar`/`stlr` interact — only a standalone `atomic_thread_fence(seq_cst)` is `dmb ish`). The default precisely *because* it's the safe choice when you're unsure — but it's overkill for most acquire/release patterns.
 
 ```
    release/acquire publication (the workhorse):
@@ -36,6 +36,8 @@ And it's a *cost* axis, not just correctness. Atomic operations are **cache-cohe
 ```
 
 **Fences (`std::atomic_thread_fence`).** Standalone barriers (`fence(acquire)`, `fence(release)`, `fence(seq_cst)`) that order surrounding atomic operations *without* being attached to a specific load/store. Useful when you want one barrier to cover several operations, or to separate the atomic access from the ordering. Mostly equivalent to ordered atomics; ordered atomics are usually clearer (§30.4.2).
+
+**The rest of the atomic toolkit.** *Compare-and-swap:* `compare_exchange_weak` may fail *spuriously* (on ARM it maps to a load-linked/store-conditional pair) and belongs inside a retry loop; `compare_exchange_strong` fails only on a genuine mismatch (on x86 both are one `lock cmpxchg`). Both take separate *success* and *failure* orders — the failure order is a load order, so never `release`/`acq_rel`. The CAS loop is what every structure in Ch. 34–36 is built on. `std::atomic<T>::is_always_lock_free` tells you at compile time whether `T` is lock-free: a 16-byte pointer+counter pair (the ABA fix of Ch. 34) is lock-free on x86-64 only via `cmpxchg16b` (`-mcx16`, implied by `-march=native`), and libstdc++ otherwise routes it through libatomic — check before putting one on the hot path. *C++20 additions:* `std::atomic_ref<T>` (libstdc++ 10+, libc++ 19+) applies atomic operations to an *existing* non-atomic object — the tool for fields of a shared-memory layout you don't own (Ch. 26, 50); `wait()`/`notify_one()`/`notify_all()` block on a value change, futex-backed on Linux, for the *non*-hot threads (Ch. 32 covers spin-then-wait). `memory_order_consume` is still in the standard but every compiler promotes it to `acquire`; don't write it.
 
 **The architecture matters enormously (§30.5, Appendix A).** **x86 is strongly ordered (TSO):** loads aren't reordered with loads, stores aren't reordered with stores, and the only reordering is store→load (a store buffered before a later load). So on x86, `acquire`/`release` often need **no extra instructions** (plain `mov` suffices) — only `seq_cst` stores need a barrier. **ARM/POWER are weakly ordered:** they reorder almost everything, so acquire/release emit real barriers (`ldar`/`stlr`/`dmb`). This is why **x86 forgives wrong orderings that ARM punishes** — sloppy code "works" on your Intel dev box and fails on Graviton (Appendix A). Reason about correctness from the *model*, not from what x86 happens to do.
 
@@ -49,16 +51,24 @@ The cost of an atomic depends on (1) the **memory order** (barriers emitted) and
 // atomics.cpp — cost of relaxed/release/seq_cst stores, uncontended; and contended fetch_add.
 // Build: g++ -O2 -std=c++20 -march=native atomics.cpp -o atomics -pthread
 // Run pinned:  taskset -c 2 ./atomics relaxed | release | seqcst
-//   contention:  ./atomics contend <nthreads>   (pin threads to different cores)
+//   contention:  ./atomics contend <nthreads>   (each thread pins itself to core t)
 #include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cstdlib>    // std::atoi
 #include <thread>
 #include <vector>
 #include <chrono>
+#include <pthread.h>
+#include <sched.h>
 
 std::atomic<std::uint64_t> g{0};
+
+static void pin_to(int core) {                           // Ch. 42: each contender on its own core
+    cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
+    if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
+}
 
 // The memory order MUST be a compile-time constant. GCC's __atomic builtins (which std::atomic
 // inlines to) map any run-time memory_order to seq_cst, so `g.store(i, order)` with a variable
@@ -79,7 +89,8 @@ int main(int argc, char** argv) {
         int M = argc > 2 ? std::atoi(argv[2]) : 4;
         auto t0 = std::chrono::steady_clock::now();
         std::vector<std::thread> ts;
-        for (int t = 0; t < M; ++t) ts.emplace_back([&]{
+        for (int t = 0; t < M; ++t) ts.emplace_back([&, t]{
+            pin_to(t);
             for (long i = 0; i < N / M; ++i) g.fetch_add(1, std::memory_order_relaxed);
         });
         for (auto& th : ts) th.join();
@@ -107,12 +118,12 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
 
    CONTENDED fetch_add (M cores hammering one line):
    M=1       ~6 ns/op          uncontended RMW (the atomic itself, line stays local)
-   M=2       ~40 ns/op         line ping-pongs between 2 cores (HITM — Ch. 7/33)
-   M=4       ~110 ns/op        ... worse; cache line bounces among 4 cores
-   M=8       ~250 ns/op        contention dominates; ~negative scaling
+   M=2       ~20 ns/op         line ping-pongs between 2 cores (HITM — Ch. 7/33): 2 cores, LESS than half the throughput of 1
+   M=4       ~33 ns/op         ... worse; cache line bounces among 4 cores
+   M=8       ~50 ns/op         contention dominates; retrograde scaling (the same curve as Ch. 31 §31.3)
 ```
 
-Two distinct lessons. (1) **Ordering cost (uncontended):** on x86, `relaxed` and `release` stores are *the same* plain `mov` — release is **free** under TSO (§30.5) — while `seq_cst` costs ~20× because it emits a full barrier. So defaulting to `seq_cst` when acquire/release would do is pure waste on the store side. (2) **Contention cost:** the *atomic operation itself* is cheap (~6 ns uncontended), but when multiple cores hammer the *same cache line*, the line ping-pongs (the HITM coherence transfer of Ch. 7 — and across sockets, the NUMA cliff of Ch. 16), and throughput **collapses** — ~40× worse at 8 cores, *negative* scaling. This is the dominant cost in real concurrent code, and the lesson that drives Part VI: **the expensive thing isn't the atomic, it's the *contention*** — the cure is not a faster atomic but *not sharing the line* (per-thread state, padding — Ch. 33, sharding — Ch. 31). The memory-order choice (§30.4) is the cheaper, second-order optimization on top.
+Two distinct lessons. (1) **Ordering cost (uncontended):** on x86, `relaxed` and `release` stores are *the same* plain `mov` — release is **free** under TSO (§30.5) — while `seq_cst` costs ~20× because it emits a full barrier. So defaulting to `seq_cst` when acquire/release would do is pure waste on the store side. (2) **Contention cost:** the *atomic operation itself* is cheap (~6 ns uncontended), but when multiple cores hammer the *same cache line*, the line ping-pongs (the HITM coherence transfer of Ch. 7 — and across sockets, the NUMA cliff of Ch. 16), and throughput **collapses** — ~8× worse per op at 8 cores than uncontended, so eight cores together do *less* than one did alone (retrograde scaling; Ch. 31 §31.3 plots the same curve). This is the dominant cost in real concurrent code, and the lesson that drives Part VI: **the expensive thing isn't the atomic, it's the *contention*** — the cure is not a faster atomic but *not sharing the line* (per-thread state, padding — Ch. 33, sharding — Ch. 31). The memory-order choice (§30.4) is the cheaper, second-order optimization on top.
 
 ## 30.4 Techniques
 
@@ -163,12 +174,13 @@ On x86, **acquire loads and release stores are plain `mov`** — *no barrier* �
         stlr    x1, [x0]
 ; x.load(acquire):        LDAR — acquire load (a real barrier instruction)
         ldar    x0, [x0]
-; x.store(v, seq_cst):    STLR (+ stronger fencing as needed)
+; x.store(v, seq_cst):    stlr    x1, [x0]   — the SAME instruction as release: AArch64's seq_cst premium is in
+;                         the ldar/stlr pairing rules, not an extra barrier (only atomic_thread_fence(seq_cst) is dmb ish)
 ```
 
 On ARM, **acquire/release emit real instructions** (`ldar`/`stlr`) and `relaxed` does not — so the ordering you choose has *visible cost and visible correctness effect*. Code that omits the needed acquire/release compiles to plain `str`/`ldr` on ARM and **races** — the bug x86 hid.
 
-The verification habits: **(1) read the asm for your atomics on *both* x86 and ARM** (Godbolt cross-compile) — confirm `seq_cst` stores emit the barrier you're paying for, and that on ARM your acquire/release became `ldar`/`stlr` (if they're plain `ldr`/`str`, your ordering is too weak and you have a latent race). **(2) Notice when `seq_cst` is costing you** a barrier (x86 `xchg`/`mfence`, ARM `dmb`) that acquire/release would avoid — the §30.4.1 optimization, visible in the asm. **(3) Don't trust x86 testing for correctness** — the asm shows x86 emits nothing for acquire/release, so x86 *cannot* catch a too-weak-ordering bug; only the model, a weakly-ordered machine, or a model checker (Ch. 40) can.
+The verification habits: **(1) read the asm for your atomics on *both* x86 and ARM** (Godbolt cross-compile) — confirm `seq_cst` stores emit the barrier you're paying for, and that on ARM your acquire/release became `ldar`/`stlr` (if they're plain `ldr`/`str`, your ordering is too weak and you have a latent race). **(2) Notice when `seq_cst` is costing you** a barrier (x86 `xchg`/`mfence`; on ARM a `dmb ish` appears only for a standalone `seq_cst` fence) that acquire/release would avoid — the §30.4.1 optimization, visible in the asm. **(3) Don't trust x86 testing for correctness** — the asm shows x86 emits nothing for acquire/release, so x86 *cannot* catch a too-weak-ordering bug; only the model, a weakly-ordered machine, or a model checker (Ch. 40) can.
 
 ## 30.6 Pitfalls & anti-patterns: seq_cst by default; data races
 
@@ -177,7 +189,7 @@ The verification habits: **(1) read the asm for your atomics on *both* x86 and A
 - **Data race = UB, not "probably fine."** Two threads accessing the same non-atomic location with at least one write, unsynchronized, is **undefined behavior** — the compiler may assume it can't happen and miscompile (Ch. 21). Not "you read a stale value"; *anything* can happen. Make shared mutable access atomic or synchronized. (TSan — Ch. 40 — finds these.)
 - **`volatile` as an atomic/ordering tool.** `volatile` prevents *compiler* optimization of an access but provides **no atomicity and no inter-thread ordering** — it is *not* a concurrency primitive in C++ (unlike Java/C#). Using it for thread communication is a classic, real bug. Use `std::atomic`.
 - **Testing only on x86.** x86-TSO emits *nothing* for acquire/release (§30.5), so it physically *cannot* expose a too-weak-ordering bug. Code that passes on Intel can fail on ARM/Graviton (Appendix A). Test on a weakly-ordered machine and/or model-check (Ch. 40) before trusting lock-free code.
-- **Ignoring contention (optimizing the wrong thing).** The dominant cost of shared atomics is **cache-line contention** (the line ping-ponging — §30.3, Ch. 7/33), not the ordering. Tuning `seq_cst`→`acquire` saves a barrier; *not sharing the line* (per-thread counters, padding — Ch. 33, sharding — Ch. 31) saves the ~40× contention collapse. Fix contention first.
+- **Ignoring contention (optimizing the wrong thing).** The dominant cost of shared atomics is **cache-line contention** (the line ping-ponging — §30.3, Ch. 7/33), not the ordering. Tuning `seq_cst`→`acquire` saves a barrier; *not sharing the line* (per-thread counters, padding — Ch. 33, sharding — Ch. 31) saves the ~8× contention collapse (and the retrograde scaling behind it). Fix contention first.
 - **False sharing of atomics (Ch. 33).** Two unrelated atomics on the same cache line contend even though they're logically independent — the line bounces. Pad hot atomics to separate cache lines (`alignas(hardware_destructive_interference_size)`).
 - **Assuming atomic = lock-free for all types.** `std::atomic<T>` for large `T` may use a hidden lock (`is_lock_free()`/`is_always_lock_free`); only suitably-sized/aligned types are truly lock-free. Check for hot-path atomics.
 - **Mixing fence and ordered-atomic reasoning sloppily.** Fence-to-atomic pairing rules differ from ordered-atomic pairing; combining them carelessly creates subtle gaps. Prefer ordered atomics; use fences deliberately (§30.4.2).

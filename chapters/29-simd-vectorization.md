@@ -31,14 +31,14 @@ The x86 vector ISAs, by width:
 
 - **SSE** (128-bit, `xmm`): 4×float / 2×double / 16×int8 — the baseline, available everywhere.
 - **AVX/AVX2** (256-bit, `ymm`): 8×float / 4×double / 32×int8 — the sweet spot for most servers; modest downclocking.
-- **AVX-512** (512-bit, `zmm`): 16×float / 8×double / 64×int8, plus **mask registers** (`k0-k7`) for per-lane predication and many new ops — the widest, but the most downclocking (§29.2 below), and not on all CPUs.
+- **AVX-512** (512-bit, `zmm`): 16×float / 8×double / 64×int8, plus **mask registers** (`k0-k7`) for per-lane predication and many new ops — the widest, but the most downclocking (the downclocking paragraph at the end of this section, and the measurement in §29.3), and not on all CPUs.
 
 **Two ways to get SIMD:**
 
 - **Auto-vectorization (let the compiler do it).** At `-O3 -march=native` (Ch. 22) the compiler vectorizes loops it can *prove* safe — which requires no aliasing (Ch. 21 — `restrict`), a vectorizable access pattern (contiguous, SoA — Ch. 8), permission to reassociate FP reductions (Ch. 27 — `-ffast-math`), and known alignment (Ch. 9). When it works, it's free and portable. When it *doesn't* (and it often silently doesn't), you read the vectorization report (`-fopt-info-vec`/`-Rpass`) and the asm (§29.5) to find the blocker.
 - **Intrinsics (do it yourself).** `<immintrin.h>` exposes the instructions directly (`_mm256_add_ps`, `_mm512_loadu_ps`, …) — full control, guaranteed vectorization, but verbose, ISA-specific, and unportable. Use when the compiler won't auto-vectorize a kernel that matters (§29.4.2). Wrapper libraries (`std::experimental::simd`, Highway, xsimd, Eve) give portable, readable SIMD across ISAs — usually the better choice than raw intrinsics.
 
-**Downclocking — the signature caveat.** Wide SIMD draws a lot of power, so Intel CPUs (especially Skylake-SP through Ice Lake) run AVX2/AVX-512 at *reduced frequency* — there are "AVX2" and "AVX-512" frequency licenses, each lower than the base (non-AVX) turbo. Worse, the frequency reduction can apply to the *whole core* and **persist for ~milliseconds after** the SIMD code finishes, and can affect the *sibling SMT thread* (Ch. 43). So a heavy-AVX-512 kernel can lower the clock of the *scalar* code running before/after/alongside it — including your latency-critical hot path. The net effect depends on how *much* SIMD vs scalar work the core does: a SIMD-dominated batch core benefits; a latency core doing occasional SIMD amid scalar critical-path work can *lose overall* even though the kernel itself sped up (§29.3). Newer cores (Ice Lake, and especially the latest) have *much* milder AVX-512 downclocking, but it's a per-microarchitecture fact you must measure (§29.3), not assume away.
+**Downclocking — the signature caveat.** Wide SIMD draws a lot of power, so Intel CPUs (especially Skylake-SP / Cascade Lake; Ice Lake-SP and later are much milder) run AVX2/AVX-512 at *reduced frequency* — there are "AVX2" and "AVX-512" frequency licenses, each lower than the base (non-AVX) turbo. Worse, the frequency reduction can apply to the *whole core* and **persist for ~milliseconds after** the SIMD code finishes, and can affect the *sibling SMT thread* (Ch. 43). So a heavy-AVX-512 kernel can lower the clock of the *scalar* code running before/after/alongside it — including your latency-critical hot path. The net effect depends on how *much* SIMD vs scalar work the core does: a SIMD-dominated batch core benefits; a latency core doing occasional SIMD amid scalar critical-path work can *lose overall* even though the kernel itself sped up (§29.3). Newer cores (Ice Lake, and especially the latest) have *much* milder AVX-512 downclocking, but it's a per-microarchitecture fact you must measure (§29.3), not assume away.
 
 The model: **SIMD does N lanes per instruction (4-16× throughput) for uniform batch work, via auto-vectorization (needs no-alias + SoA + alignment + FP-reassoc) or intrinsics. It's a *throughput* tool — right for batch/parallel work, often wrong on the latency critical path — and wide AVX-512 can *downclock the core*, so the kernel's local speedup must be weighed against its effect on everything else on that core.**
 
@@ -113,7 +113,7 @@ Read it two ways. (1) **The kernel win is real**: vectorization gives ~2-4× on 
 SIMD's hard prerequisite is layout — the Ch. 8–9 work is what *enables* vectorization:
 
 - **SoA, not AoS (Ch. 8).** SIMD loads N *contiguous, same-field* values into a lane vector. Struct-of-Arrays (`prices[]`, `qtys[]`) puts each field contiguous → one vector load grabs 8 prices. Array-of-Structs (`Order{price,qty,...}[]`) interleaves fields → a vector load grabs garbage (price, qty, price, qty…) and the compiler must *gather* (slow) or give up. **SoA is the single most important enabler of vectorization.** (Hybrid AoSoA — arrays of small SoA blocks — balances SoA's SIMD-friendliness with AoS's per-record locality.)
-- **Alignment (Ch. 9).** Aligned vector loads/stores (`vmovaps`) are faster than unaligned (`vmovups`), and AVX-512 especially benefits; align hot arrays to the vector width (32B for AVX2, 64B for AVX-512 — also a cache line) with `alignas`/aligned allocation, and tell the compiler (`__builtin_assume_aligned`). Misalignment forces a scalar prologue/epilogue and slower loads (§29.6).
+- **Alignment (Ch. 9).** The cost is in the *data*, not the mnemonic: on every AVX-capable core `vmovups` on an aligned address runs exactly like `vmovaps`, but a vector access that *straddles a cache line* (or a 4 KiB page) costs an extra line access — and a 64-byte `zmm` load that isn't 64-byte-aligned straddles one *every time*. So align hot arrays to the vector width (32B for AVX2, 64B for AVX-512 — also a cache line) with `alignas`/aligned allocation, and tell the compiler (`__builtin_assume_aligned`) so it can skip the alignment prologue/epilogue it otherwise emits to reach a safe boundary (§29.6).
 - **Contiguous, unit-stride access.** Vectorization wants `a[i]`, `a[i+1]`, … contiguous; strided/gather access (`a[idx[i]]`) is far slower (gather instructions exist but are weak). Restructure to unit stride where possible.
 - **No aliasing (Ch. 21) and FP-reassoc permission (Ch. 27).** `restrict` the pointers (the #1 auto-vec blocker) and allow FP reassociation (`-ffast-math` or multiple accumulators) for reductions, or the compiler *can't* vectorize — the scalar-row miss in §29.3. These two are the most common "why won't it vectorize" answers.
 - **Trip count and remainder.** Vectorized loops process N-at-a-time with a scalar remainder for `n % N`; very short loops may not be worth vectorizing (the setup/remainder dominates). Size and pad arrays to vector multiples where it helps.
@@ -123,8 +123,31 @@ SIMD's hard prerequisite is layout — the Ch. 8–9 work is what *enables* vect
 When auto-vectorization fails or is suboptimal on a kernel that matters, drop to explicit SIMD:
 
 - **When to reach for intrinsics.** The compiler won't vectorize (a blocker you can't remove, a pattern it doesn't recognize — horizontal ops, shuffles, saturating arithmetic, byte-wise compares for parsing), or it vectorizes *poorly*. Confirm the failure first (`-fopt-info-vec-missed`/asm — §29.5); often fixing layout/aliasing (§29.4.1) lets the compiler do it for free, which is preferable.
-- **Prefer a portable wrapper over raw intrinsics.** `std::experimental::simd` (Parallelism TS / C++26 direction), Google **Highway**, **xsimd**, **Eve** give readable, portable SIMD that compiles to the best ISA available and falls back gracefully — far more maintainable than `_mm512_*` intrinsics hand-written per ISA. Use raw intrinsics only for the last few percent or an op the wrappers lack.
-- **The common SIMD idioms.** Load (`loadu`/`load`), arithmetic (`add`/`mul`/`fmadd`), compare-to-mask + blend (predication — the SIMD form of branchless select, Ch. 13/28), horizontal reduce (sum/min/max across lanes — needed at the end of a reduction), shuffle/permute, gather/scatter (use sparingly). Market-data scanning uses byte compares + mask + `popcount`/`tzcnt` (Ch. 28) to find delimiters/matches across 32-64 bytes at once (Ch. 53).
+- **Prefer a portable wrapper over raw intrinsics.** `std::simd` (C++26 `<simd>`, adopted from the Parallelism TS 2 — today available as `std::experimental::simd` in libstdc++'s `<experimental/simd>`, GCC 11+; feature-test `__cpp_lib_simd`; Appendix H), Google **Highway**, **xsimd**, **Eve** give readable, portable SIMD that compiles to the best ISA available and falls back gracefully — far more maintainable than `_mm512_*` intrinsics hand-written per ISA. Use raw intrinsics only for the last few percent or an op the wrappers lack.
+- **The common SIMD idioms.** Load (`loadu`/`load`), arithmetic (`add`/`mul`/`fmadd`), compare-to-mask + blend (predication — the SIMD form of branchless select, Ch. 13/28), horizontal reduce (sum/min/max across lanes — needed at the end of a reduction), shuffle/permute, gather/scatter (use sparingly). Market-data scanning uses byte compares + mask + `popcount`/`tzcnt` (Ch. 28) to find delimiters/matches across 32-64 bytes at once (Ch. 53). The canonical kernel, in raw intrinsics:
+
+```cpp
+// scan.cpp — first '|' in a 32-byte block: AVX2 compare + movemask + tzcnt vs a scalar loop.
+// Build: g++ -O2 -std=c++20 -mavx2 scan.cpp -c      (clang++ 18 gives the same four instructions)
+#include <immintrin.h>
+#include <bit>
+#include <cstdint>
+
+// Index of the first `delim` in buf[0..32), or 32 if none.  Scalar: a data-dependent loop + exit mispredict.
+int find_delim_scalar(const char* buf, char delim) {
+    for (int i = 0; i < 32; ++i) if (buf[i] == delim) return i;
+    return 32;
+}
+// SIMD: 32 byte-compares in one instruction; the mask's lowest set bit is the answer (Ch. 28).
+int find_delim_avx2(const char* buf, char delim) {
+    __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf));   // vmovdqu (no alignment needed)
+    __m256i eq    = _mm256_cmpeq_epi8(chunk, _mm256_set1_epi8(delim));           // vpcmpeqb: 0xFF per matching lane
+    std::uint32_t mask = static_cast<std::uint32_t>(_mm256_movemask_epi8(eq));   // vpmovmskb: one bit per lane
+    return mask ? std::countr_zero(mask) : 32;                                    // tzcnt + cmov — no loop, no mispredict
+}
+```
+
+  GCC 13.3 compiles `find_delim_avx2` to `vpbroadcastb` / `vpcmpeqb` / `vpmovmskb` / `tzcnt` / `cmove` (verified) — a flat ~6-cycle answer regardless of where the delimiter sits, where the scalar loop costs 1 iteration per byte plus a mispredict at exit. Ch. 53 builds the full field tokenizer on this; the same kernel in Highway or `std::simd` is portable to NEON/SVE (Appendix A).
 - **Masking (AVX-512).** `k`-mask registers do per-lane predication natively — conditional vector ops without branches or blends, the clean way to vectorize data-dependent work. Powerful, but AVX-512-only (downclock/portability — §29.6).
 - **Keep a scalar fallback and runtime-dispatch.** For portability across CPUs (and the AMD/ISA-availability reality — Ch. 22, 28), compile multiple ISA versions and dispatch at runtime on CPU features (`__builtin_cpu_supports`, function multiversioning, or the wrapper's dispatch). Never ship an AVX-512 binary that SIGILLs on a non-AVX-512 box (Ch. 22).
 
@@ -140,7 +163,7 @@ Wider is *not* automatically better — the width choice is a measured trade aga
 
 ## 29.5 Verify the codegen: vector instruction selection
 
-Whether a loop vectorized — and to what width — is visible in the asm, and it's the verification that the technique fired. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O3`).
+Whether a loop vectorized — and to what width — is visible in the asm, and it's the verification that the technique fired. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -O3 -march=icelake-server` for the scalar-FMA form, plus `-ffast-math -mprefer-vector-width=512` for the `zmm` form — with plain `-O3` and no `-march` you get SSE `mulss`/`addss`, and without the width flag `ymm`).
 
 **Scalar (didn't vectorize) vs packed.** A reduction without FP-reassociation permission stays scalar (`...ss`/`...sd`, one lane); with `-ffast-math`/`-march` it goes packed (`...ps`/`...pd`, N lanes):
 
@@ -148,7 +171,7 @@ Whether a loop vectorized — and to what width — is visible in the asm, and i
 ; dot product, -O3 (no fast-math):  SCALAR — reduction not reassociated (Ch. 27)
 .loop:  vfmadd231ss xmm0, xmm1, [rsi+rax]    ; ss = scalar single, ONE lane
 
-; dot product, -O3 -march=native -ffast-math:  PACKED AVX-512 (16 lanes) + multiple accumulators
+; dot product, -O3 -march=icelake-server -ffast-math -mprefer-vector-width=512:  PACKED AVX-512 (16 lanes) + multiple accumulators
 .loop:  vfmadd231ps zmm0, zmm4, [rsi+rax]    ; ps + zmm = 16 floats/op
         vfmadd231ps zmm1, zmm4, [rsi+rax+64] ; multiple zmm accumulators (Ch. 11 ILP)
         ...
@@ -162,19 +185,19 @@ Whether a loop vectorized — and to what width — is visible in the asm, and i
         vaddps  zmm0, zmm0, [rdi]    ; 512-bit, 16 floats (AVX-512)
 ```
 
-**Aligned vs unaligned loads.** `vmovaps` (aligned) vs `vmovups` (unaligned) — and a misaligned loop emits a scalar prologue to reach alignment:
+**Aligned vs unaligned loads.** `vmovaps` (asserts alignment — faults otherwise) vs `vmovups` (no assertion) — the mnemonic tells you what the compiler could *prove*, not how fast the load is; a loop over data of unknown alignment also gets a scalar peel/prologue to reach a safe boundary:
 
 ```asm
-        vmovaps ymm0, [rdi]          ; aligned (fast) — array was 32B-aligned (Ch. 9)
-        vmovups ymm0, [rdi]          ; unaligned (compiler couldn't prove alignment)
+        vmovaps ymm0, [rdi]          ; compiler PROVED 32B alignment (Ch. 9) — no peel loop needed
+        vmovups ymm0, [rdi]          ; alignment unknown — same speed on aligned data, a split-line penalty on misaligned data
 ```
 
-The verification habits: **for a kernel you expect to vectorize, disassemble and confirm packed ops (`...ps`/`...pd`) at the width you intended (`ymm`/`zmm`)** — `...ss`/`...sd` scalar ops mean it *didn't* vectorize (check aliasing — Ch. 21, FP-reassoc — Ch. 27, layout — §29.4.1, via `-fopt-info-vec-missed`); **confirm aligned loads** (`vmovaps`) where you aligned the data; and **confirm the width matches your ISA decision** (§29.4.3 — you didn't accidentally get `zmm`/AVX-512 on a core where you wanted AVX2 to avoid downclock). The vectorization report plus the asm is how you turn "I hope it vectorized" into "I confirmed it did, at the width I chose."
+The verification habits: **for a kernel you expect to vectorize, disassemble and confirm packed ops (`...ps`/`...pd`) at the width you intended (`ymm`/`zmm`)** — `...ss`/`...sd` scalar ops mean it *didn't* vectorize (check aliasing — Ch. 21, FP-reassoc — Ch. 27, layout — §29.4.1, via `-fopt-info-vec-missed`); **confirm the alignment you established reached the compiler** (`vmovaps`, or `vmovups` with no peel loop after `__builtin_assume_aligned`) where you aligned the data; and **confirm the width matches your ISA decision** (§29.4.3 — you didn't accidentally get `zmm`/AVX-512 on a core where you wanted AVX2 to avoid downclock). The vectorization report plus the asm is how you turn "I hope it vectorized" into "I confirmed it did, at the width I chose."
 
 ## 29.6 Pitfalls & anti-patterns: AVX-512 downclocking; misaligned loads
 
 - **AVX-512 downclocking taxing the latency path.** The signature SIMD trap: heavy AVX-512 lowers the core frequency (and lingers ~ms, can hit the SMT sibling — Ch. 43), so a kernel that's faster *in isolation* slows the *scalar* critical-path work around it — a net loss on a latency core (§29.3). Measure the frequency effect on surrounding work; consider capping at AVX2 on latency cores. (Newer cores: much milder — check.)
-- **Misaligned loads / no alignment.** Unaligned data forces `vmovups` and a scalar prologue/epilogue, losing much of the win (§29.5). Align hot arrays to the vector width (Ch. 9) and tell the compiler.
+- **Misaligned data / unknown alignment.** Data that straddles cache lines pays a split-line penalty on every vector access, and alignment the compiler can't *prove* costs a scalar prologue/epilogue (§29.5) — `vmovups` itself is free on aligned addresses. Align hot arrays to the vector width (Ch. 9) and tell the compiler.
 - **AoS layout defeating vectorization (Ch. 8).** Interleaved fields force gathers or block vectorization entirely. SoA (or AoSoA) is the prerequisite; "I added SIMD but it didn't help" is usually a layout problem.
 - **Aliasing blocking auto-vec (Ch. 21).** No `restrict` → the compiler assumes overlap → scalar code (or a runtime guard). The #1 reason a loop won't vectorize. `restrict` the pointers and verify (§29.5).
 - **Forgetting FP reassociation for reductions (Ch. 27).** A sum/dot reduction won't vectorize without `-ffast-math`/multiple accumulators (the scalar row in §29.3) — and enabling reassociation *changes the result bits* (determinism — Ch. 27). Decide deliberately; don't blanket `-ffast-math` on replay-critical math.
@@ -198,7 +221,7 @@ The verification habits: **for a kernel you expect to vectorize, disassemble and
 
 - [ ] SIMD is applied to **batch/throughput** work (feed scanning, risk/pricing over many instruments), **not** reflexively on the single-message latency critical path (Ch. 1).
 - [ ] Data is **SoA (or AoSoA)** and **aligned** to the vector width (Ch. 8–9); pointers are **`restrict`** (Ch. 21) and FP reductions have **reassociation permission** (Ch. 27) — the auto-vec prerequisites.
-- [ ] I **verified vectorization in the asm** (§29.5): packed `...ps`/`...pd` at the **intended width** (`ymm`/`zmm`), aligned loads — not scalar `...ss`/`...sd`; used `-fopt-info-vec`/`-Rpass` to diagnose misses.
+- [ ] I **verified vectorization in the asm** (§29.5): packed `...ps`/`...pd` at the **intended width** (`ymm`/`zmm`), no alignment peel loop — not scalar `...ss`/`...sd`; used `-fopt-info-vec`/`-Rpass` to diagnose misses.
 - [ ] The **ISA width is chosen per core** by the SIMD-vs-scalar mix (AVX2 sweet spot for latency-adjacent cores; AVX-512 for SIMD-dominated cores), with the **downclocking effect measured** (§29.3, §29.4.3).
 - [ ] **AVX-512 downclocking** is checked on the deployment CPU and weighed against the surrounding scalar latency path (Ch. 43) — capped at AVX2 where it taxes the hot path.
 - [ ] Where auto-vec won't work, I use a **portable wrapper** (Highway/xsimd/`std::simd`) over raw intrinsics, with **runtime CPU-feature dispatch + scalar fallback** (no SIGILL — Ch. 22).
@@ -218,7 +241,7 @@ The verification habits: **for a kernel you expect to vectorize, disassemble and
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — vectorization analysis, downclocking, and reading vectorization reports.
 - Matt Pharr / ISPC and the "SPMD on SIMD" model — an alternative way to write portable data-parallel kernels.
 - Ch. 8–9 (*Layout/Alignment*) — the SoA/alignment prerequisites; Ch. 21 (*Aliasing*) — the #1 blocker; Ch. 27 (*FP*) — reassociation/determinism; Ch. 11 (*Pipelines*) — ILP/accumulators; Ch. 28 (*Bit Tricks*) — SIMD bit/byte ops; Ch. 43 (*SMT*) — downclock/sibling effects; Ch. 53 (*Wire Decoding*) — SIMD parsing; Ch. 67 (*GPU*) — when data-parallel work outgrows SIMD.
-- **Appendix A** — NEON/SVE/SVE2 on ARM/Graviton; **Appendix E** — SIMD op throughput numbers; **Appendix D** — `-march`/SIMD flags.
+- **Appendix A** — NEON/SVE/SVE2 on ARM/Graviton; Agner Fog's *Instruction Tables* / uops.info and the Intel *Optimization Reference Manual* (§29.8) — SIMD op throughput and AVX frequency-license numbers (Appendix E's table has no SIMD rows); **Appendix D** — `-march`/SIMD flags.
 
 ---
 

@@ -10,7 +10,7 @@
 
 ## 47.1 Why it matters: the baseline before bypass
 
-Parts VII built a quiet, warm, isolated place to *compute*; Part VIII is about getting market data *in* and orders *out* — the network I/O that bookends the tick-to-trade path. This chapter is the **baseline**: the standard Linux kernel networking stack — `epoll`, non-blocking sockets, the readiness model — which is what the *vast majority* of networked software uses and what you must understand before reaching for io_uring (Ch. 48) or kernel bypass (Ch. 62). It's important to be clear up front: **for the absolute lowest-latency tick-to-trade path, the kernel stack is too slow** — every packet traverses the driver, the network stack (IP/TCP/UDP processing), socket buffers, and a syscall boundary, costing *microseconds* per packet — which is why HFT graduates to kernel bypass (Ch. 62, Solarflare/Onload, DPDK). But the kernel stack is the foundation: it's where you start, what most of the system's *non-ultra-hot* I/O uses (control connections, drop copies, less-latency-critical feeds), and the model everything else builds on or escapes from.
+Part VII built a quiet, warm, isolated place to *compute*; Part VIII is about getting market data *in* and orders *out* — the network I/O that bookends the tick-to-trade path. This chapter is the **baseline**: the standard Linux kernel networking stack — `epoll`, non-blocking sockets, the readiness model — which is what the *vast majority* of networked software uses and what you must understand before reaching for io_uring (Ch. 48) or kernel bypass (Ch. 62). It's important to be clear up front: **for the absolute lowest-latency tick-to-trade path, the kernel stack is too slow** — every packet traverses the driver, the network stack (IP/TCP/UDP processing), socket buffers, and a syscall boundary, costing *microseconds* per packet — which is why HFT graduates to kernel bypass (Ch. 62, Solarflare/Onload, DPDK). But the kernel stack is the foundation: it's where you start, what most of the system's *non-ultra-hot* I/O uses (control connections, drop copies, less-latency-critical feeds), and the model everything else builds on or escapes from.
 
 The core concept this chapter teaches is **readiness-based, event-driven I/O** — the `epoll` model — and *why* it replaced thread-per-connection (Ch. 38). Instead of one thread blocking per socket (thousands of threads, constant context switching — Ch. 41), one thread uses `epoll` to wait on *many* sockets at once and is told *which* are ready, then does non-blocking reads/writes on those. This scales to tens of thousands of connections on one thread — the standard high-performance server architecture (nginx, Redis, every event loop). For a trading system it's the right tool for the *many-connection, I/O-bound* work (the same niche as coroutines — Ch. 38, which often wrap `epoll`): venue sessions, market-data subscriptions, control plane. The key mental distinction — **readiness** (`epoll` tells you "the socket is readable," then *you* call `read`) vs **completion** (io_uring/Windows IOCP: "your read of N bytes is *done*, here's the data") — defines this whole Part and the io_uring contrast of Ch. 48.
 
@@ -61,52 +61,96 @@ The model: **non-blocking sockets + `epoll` give event-driven, readiness-based I
 Measure the **round-trip latency** of the kernel TCP stack — send a small message, get a reply (a ping-pong / echo) — which captures the full path cost (syscalls, stack, context switches) that the kernel I/O baseline imposes. Compare **blocking** (thread-per-connection style), **`epoll` (blocking wait)**, and **busy-poll** (no block/wake switch).
 
 ```cpp
-// epoll_rtt.cpp — TCP echo round-trip latency: blocking vs epoll vs busy-poll (sketch).
+// epoll_rtt.cpp — TCP echo round-trip latency over loopback: blocking read vs epoll (blocking wait) vs spin.
 // Build: g++ -O2 -std=c++20 epoll_rtt.cpp -o epoll_rtt
-// Run:  ./epoll_rtt server &   ;   taskset -c 2 ./epoll_rtt client 127.0.0.1
-//   (over loopback here; real latency is over the NIC — Ch.55 — and far higher than loopback)
+// Run:   ./epoll_rtt server &                      # echo server on 127.0.0.1:9000
+//        taskset -c 2 ./epoll_rtt block            # client, blocking read()
+//        taskset -c 2 ./epoll_rtt epoll            # client, epoll_wait(-1) then read()
+//        taskset -c 2 ./epoll_rtt spin             # client, non-blocking read() spin (no sleep/wake)
+//   Loopback isolates the SOFTWARE cost: no NIC, no wire (Ch. 55 for real RTTs). NAPI busy polling
+//   (net.core.busy_poll / EPIOCSPARAMS — §47.4.1) is INERT over lo: packets arrive via the per-CPU
+//   backlog, which carries no NAPI id, so the only way to avoid the sleep/wake here is to spin.
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <cerrno>
 #include <cstring>
 #include <vector>
 #include <algorithm>
-#include <chrono>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <x86intrin.h>
 
-// ... setup elided: socket(), TCP_NODELAY (Ch.51!), connect/accept ...
-// Client measures: write(req); read(reply); record the round-trip; repeat.
-// Server: read(req); write(reply) as fast as possible (echo).
+static constexpr int kPort = 9000;
+static constexpr long kIters = 200'000;
+static constexpr double kTscGHz = 2.9;             // Appendix L.3: 2.9 GHz, turbo off, invariant TSC (Ch. 17)
+
+static void die(const char* what) { std::perror(what); std::exit(1); }
+static void nodelay(int fd) { int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); }  // Ch. 51 — mandatory
+static sockaddr_in addr() { sockaddr_in a{}; a.sin_family = AF_INET; a.sin_port = htons(kPort); a.sin_addr.s_addr = htonl(INADDR_LOOPBACK); return a; }
+
+static int server() {                                // echo: read 8 bytes, write them back, forever
+    int ls = socket(AF_INET, SOCK_STREAM, 0); int one = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    sockaddr_in a = addr(); if (bind(ls, (sockaddr*)&a, sizeof a) < 0) die("bind"); listen(ls, 1);
+    for (;;) {
+        int fd = accept(ls, nullptr, nullptr); if (fd < 0) die("accept"); nodelay(fd);
+        std::uint64_t v; while (read(fd, &v, 8) == 8) if (write(fd, &v, 8) != 8) break;
+        close(fd);
+    }
+}
+
+static int client(const char* mode) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0); sockaddr_in a = addr();
+    if (connect(fd, (sockaddr*)&a, sizeof a) < 0) die("connect"); nodelay(fd);
+    bool use_epoll = !std::strcmp(mode, "epoll"), spin = !std::strcmp(mode, "spin");
+    int ep = -1;
+    if (use_epoll) { ep = epoll_create1(0); epoll_event ev{EPOLLIN, {}}; ev.data.fd = fd; epoll_ctl(ep, EPOLL_CTL_ADD, fd, &ev); }
+    if (spin) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+
+    std::vector<std::uint32_t> samples(kIters);
+    for (long i = -2000; i < kIters; ++i) {          // 2000 warm-up round trips (Ch. 46), then measured
+        std::uint64_t req = i, rep = 0;
+        std::uint64_t t0 = __rdtsc();
+        if (write(fd, &req, 8) != 8) die("write");
+        if (use_epoll) { epoll_event ev; while (epoll_wait(ep, &ev, 1, -1) != 1) {} }       // SLEEP until readable
+        ssize_t n;
+        do { n = read(fd, &rep, 8); } while (n < 0 && errno == EAGAIN);                       // spin: EAGAIN until data
+        if (n != 8) die("read");
+        std::uint64_t t1 = __rdtsc();
+        if (i >= 0) samples[i] = std::uint32_t(t1 - t0);
+    }
+    std::sort(samples.begin(), samples.end());
+    auto pct = [&](double p) { return samples[std::size_t(p * (kIters - 1))] / kTscGHz; };
+    std::printf("%-6s loopback TCP echo RTT: p50=%.2f us  p99=%.2f us  p99.9=%.2f us\n", mode, pct(0.5)/1e3, pct(0.99)/1e3, pct(0.999)/1e3);
+    return 0;
+}
 
 int main(int argc, char** argv) {
-    // (illustrative — the point is the measured numbers below; full socket setup omitted)
-    // Key knobs that matter for the measurement:
-    //   - setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, 1)   // disable Nagle (Ch.51) — critical!
-    //   - O_NONBLOCK + epoll, vs blocking read, vs busy-poll (net.core.busy_poll / SO_BUSY_POLL)
-    // Client loop (warm — Ch.46 — then measured):
-    //   for N iters: t0=rdtsc; write(fd,&req,8); read(fd,&rep,8); t1=rdtsc; samples.push_back(t1-t0);
-    std::printf("see representative numbers below\n");
-    return 0;
+    const char* mode = argc > 1 ? argv[1] : "block";
+    return !std::strcmp(mode, "server") ? server() : client(mode);
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), loopback TCP, pinned, `TCP_NODELAY` on, turbo off (illustrative; **real NIC RTTs are higher** — Ch. 55 — loopback isolates the *software* cost):
+Representative results (toolchain and machine: Appendix L.3 — Linux 6.18, GCC 13; the kernel version is load-bearing here, epoll busy-poll behaviour changed across 5.x/6.x) — reference machine **Xeon Gold 6326** (Ice Lake-SP), loopback TCP, client pinned, server on another core, `TCP_NODELAY` on, turbo off (illustrative; **real NIC RTTs are higher** — Ch. 55 — loopback isolates the *software* cost). One request in flight at a time, so this is a latency ladder, not a throughput one:
 
 ```
-   model (loopback TCP echo round-trip)     p50        p99        notes
-   blocking read (thread-per-conn)          ~6 µs      ~25 µs     blocks → context switch each way (Ch.41)
-   epoll (blocking epoll_wait)              ~5 µs      ~20 µs     epoll_wait sleeps → switch + cold (Ch.41,46)
-   epoll + busy-poll (net.core.busy_poll)   ~3 µs      ~7 µs      busy-poll avoids the block/wake switch
-   (preview) io_uring polled (Ch.48)        ~2.5 µs    ~5 µs      fewer syscalls
-   (preview) kernel bypass (Ch.62)          ~0.5-1 µs  ~1-2 µs    no kernel stack — the real HFT path
+   model (loopback TCP echo round-trip)             p50        p99        notes
+   blocking read (thread-per-conn)                  ~5 µs      ~20 µs     blocks → context switch each way (Ch.41)
+   epoll (blocking epoll_wait) + read               ~5.5 µs    ~21 µs     the same sleep/wake path plus one more syscall (Ch.41,46)
+   non-blocking read() spin (no sleep/wake)         ~3 µs      ~7 µs      the spin removes the block/wake switch — NAPI busy-poll is INERT over lo
+   (preview, ONE-WAY wire→app, Ch. 48) io_uring polled   ~2.5 µs  ~5 µs   fewer syscalls; a different quantity from the RTT rows above
+   (preview, ONE-WAY wire→app, Ch. 62) kernel bypass     ~0.5-1 µs ~1-2 µs no kernel stack — the real HFT path (≈2 µs as a round trip)
 
-   even busy-polled, the kernel stack is MICROSECONDS — the floor is bypass (Ch.62).
+   even spun/busy-polled, the kernel stack is MICROSECONDS — the floor is bypass (Ch.62).
 ```
 
-Read it: the **blocking** and **blocking-`epoll`** models cost ~5-6 µs round-trip on *loopback* (no real network!) — dominated by the **syscalls** (`read`/`write`/`epoll_wait`) and the **context switch** each time `epoll_wait`/`read` sleeps and wakes (Ch. 41), plus the cold restart (Ch. 46). **Busy-polling** (kernel NAPI busy-poll — `net.core.busy_poll`/the epoll ioctl for `epoll_wait`, `SO_BUSY_POLL` on a blocking receive — or busy-looping non-blocking reads on a dedicated core — Ch. 41) removes the block/wake switch and nearly halves the latency (~3 µs) — the biggest win available *within* the kernel model, and why a latency-sensitive `epoll` loop on a dedicated core busy-polls rather than blocks. But the headline lesson is the *floor*: **even perfectly busy-polled, the kernel TCP stack is microseconds** — the per-packet stack traversal (driver → IP/TCP → socket buffer → copy) is irreducible within the kernel. io_uring (Ch. 48) shaves the syscalls; **kernel bypass (Ch. 62) — removing the kernel from the path entirely — is what gets to ~1 µs and below**, which is why it's *the* HFT data path. The kernel native I/O of this chapter is the baseline you measure the rest of Part VIII against: optimize it (busy-poll, batch — §47.4) for the *non-ultra-hot* I/O, and bypass it (Ch. 62) for the tick-to-trade path. (And note `TCP_NODELAY` — Ch. 51 — is non-negotiable: without it, Nagle's algorithm batches small sends and adds *milliseconds*.)
+Read it: the **blocking** and **blocking-`epoll`** models cost ~5-6 µs round-trip on *loopback* (no real network!) — dominated by the **syscalls** (`read`/`write`/`epoll_wait`) and the **context switch** each time `epoll_wait`/`read` sleeps and wakes (Ch. 41), plus the cold restart (Ch. 46); for one connection, `epoll_wait` + `read` is a strict superset of a blocking `read`, so it is slightly *slower*, not faster. **Spinning** (non-blocking reads in a loop on a dedicated core — Ch. 41) removes the block/wake switch and nearly halves the latency (~3 µs) — the biggest win available *within* the kernel model, and why a latency-sensitive `epoll` loop on a dedicated core polls rather than blocks. Over a *real NIC* the kernel's **NAPI busy-poll** (`net.core.busy_poll`/the epoll ioctl for `epoll_wait`, `SO_BUSY_POLL` on a blocking receive — §47.4.1) buys the same thing *and* pulls packets off the NIC queue before the interrupt fires; over loopback it is inert (packets arrive via the per-CPU backlog, which has no NAPI id), which is why this table spins instead — move the busy-poll comparison to a two-host run (Ch. 55 §55.3). But the headline lesson is the *floor*: **even perfectly busy-polled, the kernel TCP stack is microseconds** — the per-packet stack traversal (driver → IP/TCP → socket buffer → copy) is irreducible within the kernel. io_uring (Ch. 48) shaves the syscalls; **kernel bypass (Ch. 62) — removing the kernel from the path entirely — is what gets to ~1 µs and below**, which is why it's *the* HFT data path. The kernel native I/O of this chapter is the baseline you measure the rest of Part VIII against: optimize it (busy-poll, batch — §47.4) for the *non-ultra-hot* I/O, and bypass it (Ch. 62) for the tick-to-trade path. (And note `TCP_NODELAY` — Ch. 51 — is non-negotiable: without it, Nagle's algorithm batches small sends and adds *milliseconds*.)
 
 ## 47.4 Techniques
 
@@ -116,8 +160,18 @@ The standard scalable readiness loop — and how to make it low-latency:
 
 - **The structure.** `epoll_create1` → `epoll_ctl(ADD)` each non-blocking socket → loop: `epoll_wait` returns the ready fds → for each, do non-blocking `read`/`write` (handling `EAGAIN`) → process. One thread, many connections, O(ready). This is the nginx/Redis/event-loop architecture, and what coroutine runtimes (Ch. 38) wrap.
 - **Edge-triggered + full drain (lower overhead).** Use ET (`EPOLLET`) to get *one* wakeup per data arrival (not repeated LT wakeups), and on each ready socket **read until `EAGAIN`** (drain it fully) — otherwise you miss data until the next edge (§47.5). ET reduces `epoll_wait` overhead but demands the drain discipline; LT is safer if you can't guarantee full draining.
-- **Busy-poll on the latency path (Ch. 41).** For latency-sensitive sockets on a dedicated core, don't let `epoll_wait` *block* (that's a context switch — Ch. 41, §47.3). Options: a **zero-timeout `epoll_wait`** in a busy loop (poll, don't sleep), or the kernel's **NAPI busy-poll** (the kernel spins on the NIC queue before sleeping — Ch. 55). For `epoll_wait` the latter means the global `net.core.busy_poll=<µs>` sysctl or, on Linux 6.9+, the per-instance `ioctl(epfd, EPIOCSPARAMS, &epoll_params{busy_poll_usecs, busy_poll_budget, prefer_busy_poll})`; the per-socket **`SO_BUSY_POLL`** option (default `net.core.busy_read`) governs only a *blocking* `recv` on that socket and is never consulted by `epoll_wait` (`fs/eventpoll.c`, `ep_busy_loop_on()`). Epoll busy-polls a single NAPI ID — the queue of the socket it most recently saw — so keep the latency sockets on one RX queue (Ch. 57). On a dedicated core, busy-polling is the right model (Ch. 41.4.2); block only on cold/background connections.
-- **One event loop per thread, sharded.** For multiple latency threads, give each its own `epoll` instance and a *shard* of the connections (shared-nothing — Ch. 31), each thread pinned (Ch. 42). Don't share one `epoll` across threads if you can sard — sharing invites the thundering herd (§47.5) and contention.
+- **Busy-poll on the latency path (Ch. 41).** For latency-sensitive sockets on a dedicated core, don't let `epoll_wait` *block* (that's a context switch — Ch. 41, §47.3). Options: a **zero-timeout `epoll_wait`** (or a non-blocking `read` loop) in a busy loop — which avoids the sleep/wake switch but does **not** busy-poll the NIC (`ep_poll()` returns on a zero timeout before ever reaching `ep_busy_loop()`, so packets still arrive through the IRQ → softirq → `ep_poll_callback` path, interrupt latency and jitter included) — or the kernel's **NAPI busy-poll**, in which the waiting thread itself pulls packets from the NIC queue (Ch. 55). For `epoll_wait` the latter means the global `net.core.busy_poll=<µs>` sysctl or, on Linux 6.9+, the per-instance `ioctl(epfd, EPIOCSPARAMS, &epoll_params{busy_poll_usecs, busy_poll_budget, prefer_busy_poll})`; the per-socket **`SO_BUSY_POLL`** option (default `net.core.busy_read`) governs only a *blocking* `recv` on that socket and is never consulted by `epoll_wait` (`fs/eventpoll.c`, `ep_busy_loop_on()`). Epoll busy-polls a single NAPI ID — the queue of the socket it most recently saw — so keep the latency sockets on one RX queue (Ch. 57). On a dedicated core, busy-polling is the right model (§41.4.2); block only on cold/background connections. The knobs, in one place:
+
+  | knob | scope | what it does | typical |
+  |---|---|---|---|
+  | `net.core.busy_read` | sysctl, default for `SO_BUSY_POLL` | µs a *blocking* `recv`/`read` spins on the socket's NAPI queue before sleeping | 50–200 |
+  | `net.core.busy_poll` | sysctl | µs `select`/`poll`/`epoll_wait` spin on the NAPI queue before sleeping (global) | 50–200 |
+  | `SO_BUSY_POLL` / `SO_PREFER_BUSY_POLL` / `SO_BUSY_POLL_BUDGET` | per socket | per-socket override of `busy_read`; prefer polling over IRQ (defers the IRQ while polling succeeds); packets per poll | 50–200 / 1 / 8–64 |
+  | `ioctl(epfd, EPIOCSPARAMS, &epoll_params{busy_poll_usecs, busy_poll_budget, prefer_busy_poll})` | per epoll instance (Linux 6.9+) | per-instance version of `net.core.busy_poll`, no global side effect | 50–200 µs |
+  | `SO_INCOMING_NAPI_ID` | per socket (read) | the NAPI id a socket's packets arrive on — epoll busy-polls **one** NAPI id, so every latency socket in the set must share a queue (Ch. 57 flow steering) | — |
+  | `/sys/class/net/<dev>/napi_defer_hard_irqs`, `gro_flush_timeout` | per device | keep the NIC in polled mode between packets (defer N IRQs, flush GRO after T ns) — the pair that makes `prefer_busy_poll` effective | 2 / 50000–200000 |
+
+- **One event loop per thread, sharded.** For multiple latency threads, give each its own `epoll` instance and a *shard* of the connections (shared-nothing — Ch. 31), each thread pinned (Ch. 42). Don't share one `epoll` across threads if you can shard — sharing invites the thundering herd (§47.5) and contention.
 - **Handle writability correctly.** Register `EPOLLOUT` only when a write would block (the socket buffer is full); a perpetually-registered `EPOLLOUT` floods you with ready events (the socket is *usually* writable). Add `EPOLLOUT` on `EAGAIN` from `write`, remove it once drained.
 
 ### 47.4.2 Syscall batching
@@ -146,8 +200,8 @@ Each syscall is a kernel crossing (~hundreds of ns — Ch. 41); **batching amort
 
 **Exercises**
 
-1. **Round-trip, three ways.** Build a TCP echo client/server; measure round-trip latency (loopback) with (a) blocking, (b) `epoll` blocking, (c) `epoll` busy-poll (`net.core.busy_poll` or zero-timeout). Confirm busy-poll roughly halves it (§47.3). Add `perf stat -e context-switches` — which models switch?
-2. **`TCP_NODELAY`.** Run the round-trip *without* `TCP_NODELAY` and watch the latency explode (Nagle — milliseconds for small messages). Add it; confirm the fix. This is the §47.5 mandatory knob.
+1. **Round-trip, three ways.** Build `epoll_rtt.cpp`; measure loopback round-trip latency with `block`, `epoll` and `spin`. Confirm the spin roughly halves it (§47.3) and that blocking `epoll` is no faster than a blocking `read` for one connection. Add `perf stat -e context-switches` — which models switch? Then, on two hosts over a real NIC, add a fourth mode with `net.core.busy_poll=100` (or the `EPIOCSPARAMS` ioctl) and compare it with the spin — on the wire, NAPI busy-poll also beats the interrupt.
+2. **`TCP_NODELAY`.** Nagle only withholds a small segment while earlier data is *unacknowledged*, so the strict one-in-flight ping-pong of `epoll_rtt.cpp` never triggers it — every ACK rides the reply. Change the client to send each request as *two* small `write()` calls (a 4-byte header, then a 4-byte body) with the server reading all 8 bytes before replying: now the second write waits for the ACK of the first, which the server delays (~40 ms, delayed ACK) because it has nothing to send yet — the classic write-write-read stall. Watch the RTT jump to ~40 ms without `TCP_NODELAY`; add it and confirm the fix. This is the chapter's mandatory knob (Ch. 51 has the mechanism).
 3. **ET drain bug.** Build an ET `epoll` loop that reads only *once* per ready event (not draining); send a burst and watch messages get stuck until the next arrival. Fix with read-until-`EAGAIN`; confirm (§47.5).
 4. **Batching.** Receive a high-rate UDP stream with `recv` (one syscall per packet) vs `recvmmsg` (many packets per syscall). Measure syscalls/sec (`strace -c`) and throughput/latency. Quantify the batching win (§47.4.2, ties Ch. 53).
 5. **Thundering herd.** Have N threads share one listening `epoll` (naive) vs `SO_REUSEPORT` (per-thread). Measure wakeups and CPU under connection load; confirm the herd and its fix (§47.5).
@@ -177,7 +231,7 @@ Each syscall is a kernel crossing (~hundreds of ns — Ch. 41); **batching amort
 - The io_uring vs epoll comparison writeups (ties Ch. 48) — readiness vs completion, measured.
 - Ch. 48 (*io_uring*) — the completion-based successor with fewer syscalls; Ch. 50 (*IPC*) — shared-memory alternatives to sockets; Ch. 51 (*Socket/TCP Tuning*) — `TCP_NODELAY`, buffers, congestion control; Ch. 53 (*Wire Decoding*) — `recvmmsg` and parsing the received data; Ch. 55 (*NIC*) — busy-poll/offloads; Ch. 62 (*Kernel Bypass*) — escaping the kernel stack; Ch. 38 (*Coroutines*) — the async layer over epoll.
 - Ch. 49 (*Zero-Copy & the Modern Kernel Fast Path*) — removing the per-byte copy from this kernel path (`MSG_ZEROCOPY`, `TCP_ZEROCOPY_RECEIVE`, io_uring zero-copy) without full bypass.
-- **Appendix E** — kernel-stack vs busy-poll vs bypass RX latency numbers; **Appendix C** — busy-poll/`SO_BUSY_POLL` tuning.
+- **Appendix E** — the kernel-stack (~5-15 µs) and kernel-bypass (~1-2 µs) NIC RX rows (the busy-polled kernel-stack figure is Ch. 55 §55.3's); **Appendix C** — busy-poll/`SO_BUSY_POLL` tuning.
 
 ---
 

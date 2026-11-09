@@ -1,5 +1,17 @@
 # Full finding list (part2-ch27-52) — automated review of the book (25 of 25 chunks reviewed, 25 verified)
 
+**Status (2026-11-09): processed** (work-queue item P2-2 part 2, branch `work/item-13-part2`) — 241 rows fixed, 175 already fixed by earlier items (P0-1..P1-6, P2-1 — located by Quote in the current text and confirmed gone), 5 left (listed below). Scope: every `confirmed`/`verifier-added` row of severity high/medium/low in Ch. 27–52; `refuted`, `duplicate` and `book-wide check` rows were not processed. Every listing touched was rebuilt with g++ 13.3 (and clang++ 18.1 where the chapter names it) and run where the host allows; README outlines for Ch. 27–52 mirror the chapters' real headings (new sub-sections §36.4.4, §38.5, §50.4.3 added).
+
+Rows left (each needs a new benchmark or hardware this pass could not supply — Phase 4 / gap work):
+
+- **34:45** (low, missing-measurement) — SPSC push→pop *handoff latency* (ping-pong RTT, HdrHistogram) and the cached-opposite-index batching variant: a new benchmark; §34.3's prose now states that its figure is inverse throughput and where the latency is measured.
+- **37:49** (medium, missing-measurement) — publish→consume latency histogram and the induced-stall burst recovery: a new rdtsc-stamped harness; the §37.3 burst rows are now labelled as expected behaviour produced by Exercise 2, not program output.
+- **39:49** (medium, convention-violation) — a compilable `stdexec` sender pipeline + hand-written baseline + measurement: `stdexec` is not in the toolchain image; the chapter now states the toolchain status and fallback ladder honestly, the table remains "figures pending".
+- **44:49** (low, missing-measurement) — the `noisy.cpp` lookup-loop + streaming-neighbour harness and CAT runs: needs a resctrl-capable box; the literal `perf stat` / `resctrl` commands were added to §44.3, the listing and figures are left.
+- **49:44** (medium, missing-measurement) — the zero-copy send/receive harness and crossover figures: needs two hosts over a scatter-gather NIC (loopback always copies, now stated); harness and numbers left.
+
+Partially addressed (the text fix was applied, the measurement half is left for Phase 4): 31:17 (thread lifecycle / C++20 primitives — a bullet, not a §31.4.3, and no measured thread-creation cost), 32:154 (when a spinlock beats lock-free — criteria added, no TTAS-vs-CAS measurement), 36:56 (`reclaim.cpp` relabelled read-side-only; no writer/retire path).
+
 Each row is one reviewer finding (technical-accuracy lens or editorial lens) with the adversarial verifier's ruling. **Verdict**: `confirmed` (verifier re-read the passage and agrees), `refuted` (kept for transparency — the verifier explains why the text is fine), `duplicate` (same issue as another row), `uncertain`, `verifier-added` (found by the verifier itself), or `book-wide check` (from the eight cross-cutting agents, which were not separately verified). **Sev** is the verifier's severity when it ruled, else the reviewer's. Line numbers are approximate.
 
 

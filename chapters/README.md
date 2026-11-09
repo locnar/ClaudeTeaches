@@ -479,6 +479,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 36.4.1 RCU
   - 36.4.2 Hazard pointers
   - 36.4.3 Epoch-based reclamation
+  - 36.4.4 The escape hatch: avoid reclamation
 - 36.5 Pitfalls & anti-patterns: use-after-free, unbounded deferral
 - 36.6 Exercises & checklist
 
@@ -499,8 +500,9 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 38.4 Techniques
   - 38.4.1 Event loops
   - 38.4.2 Custom awaiters for I/O
-- 38.5 Pitfalls & anti-patterns: hidden allocations in coroutine frames
-- 38.6 Exercises & checklist
+- 38.5 Verify the codegen: did the frame get elided?
+- 38.6 Pitfalls & anti-patterns: hidden allocations in coroutine frames
+- 38.7 Exercises & checklist
 
 ### [39. std::execution: Senders/Receivers & Structured Async](39-std-execution-senders-receivers.md)
 - 39.1 Why it matters: a standard async model, if it's actually zero-cost
@@ -635,6 +637,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 50.4 Techniques
   - 50.4.1 Lock-free cross-process ring buffers
   - 50.4.2 Shared-memory layout and addressing
+  - 50.4.3 Segment setup and cross-process synchronization
 - 50.5 Pitfalls & anti-patterns: pointers across address spaces
 - 50.6 Exercises & checklist
 

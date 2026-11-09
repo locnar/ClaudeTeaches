@@ -10,7 +10,7 @@
 
 ## 36.1 Why it matters: freeing memory under lock-free readers
 
-Chapters 34 and 35 each *dodged* the single hardest problem in lock-free programming. The SPSC ring (Ch. 34) avoided it by never freeing anything (fixed array, integer indices). The seqlock (Ch. 35) avoided it by copying small data instead of sharing it by pointer. But the moment you have a **genuinely dynamic, pointer-linked, shared structure** — a lock-free list/tree/hash-map where nodes are allocated and removed, read concurrently by many threads without locks — you face the question they both ducked: **when a node is removed, when is it safe to `free` it?** The answer is *not* "immediately after unlinking it," because another thread may have loaded the pointer to that node *before* you unlinked it and is **still reading it**. Freeing it now is a **use-after-free** (Ch. 23, 72) — the reader dereferences freed (possibly reallocated) memory. This is the **safe-memory-reclamation (SMR)** problem, and it's the reason lock-free programming has a reputation for being brutally hard.
+Chapters 34 and 35 each *dodged* the single hardest problem in lock-free programming. The SPSC ring (Ch. 34) avoided it by never freeing anything (fixed array, integer indices). The seqlock (Ch. 35) avoided it by copying small data instead of sharing it by pointer. But the moment you have a **genuinely dynamic, pointer-linked, shared structure** — a lock-free list/tree/hash-map where nodes are allocated and removed, read concurrently by many threads without locks — you face the question they both ducked: **when a node is removed, when is it safe to `free` it?** The answer is *not* "immediately after unlinking it," because another thread may have loaded the pointer to that node *before* you unlinked it and is **still reading it**. Freeing it now is a **use-after-free** (Ch. 24, 72) — the reader dereferences freed (possibly reallocated) memory. This is the **safe-memory-reclamation (SMR)** problem, and it's the reason lock-free programming has a reputation for being brutally hard.
 
 The difficulty is fundamental: in a *locked* structure, a removed node is trivially safe to free (no one can be inside the structure without the lock). In a *lock-free* structure there's no lock, so there's no moment you can point to and say "no reader is here." A reader can be holding a raw pointer to a node with nothing telling the remover about it. So you need a protocol that lets readers stay lock-free (no writing, no contention — the whole point) while *also* letting the writer know when every reader that *could* have seen a removed node has finished with it — at which point reclamation is safe. The three classic solutions — **RCU**, **hazard pointers**, and **epoch-based reclamation** — are different answers to "how does the writer know it's safe to free?", trading off read-side cost, reclamation latency, and memory overhead.
 
@@ -53,10 +53,14 @@ The decisive metric for a read-mostly structure is **read-side cost** (what ever
 // reclaim.cpp — read-side cost of shared_mutex vs RCU-style vs hazard-pointer reads.
 // (Illustrative skeleton — real RCU/HP via liburcu / folly::hazptr; here a sketch of the read path.)
 // Build: g++ -O2 -std=c++20 -march=native reclaim.cpp -o reclaim -pthread
-// Run:  ./reclaim rwlock 8 | ./reclaim rcu 8 | ./reclaim hazptr 8   (N readers + 1 occasional writer)
+// Run:  ./reclaim rwlock 8 ; ./reclaim rcu 8 ; ./reclaim hazptr 8
+// Measures the READ-SIDE cost only: there is no writer and nothing is ever retired, so the hazard
+// validation never fails and EBR is not represented. The writer/reclaim paths are liburcu's and
+// folly::hazptr's job (Exercise 2); what is compared here is what every reader pays on every access.
 #include <atomic>
 #include <shared_mutex>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -75,7 +79,12 @@ std::atomic<Node*> hp_slot[64];                 // one hazard slot per reader th
 int hp_read(int tid) {
     Node* p;
     do { p = g_ptr.load(std::memory_order_acquire);
-         hp_slot[tid].store(p, std::memory_order_seq_cst);   // PUBLISH what I'm about to use
+         hp_slot[tid].store(p, std::memory_order_relaxed);    // PUBLISH what I'm about to use ...
+         std::atomic_thread_fence(std::memory_order_seq_cst);  // ... and make the store visible BEFORE the re-read:
+                                                               // a seq_cst STORE alone would not order it against the
+                                                               // acquire load below (store-buffering is allowed); the
+                                                               // reclaimer pairs this with a seq_cst fence between
+                                                               // retiring a node and scanning the slots
     } while (p != g_ptr.load(std::memory_order_acquire));     // validate it didn't change
     int v = p->val;
     hp_slot[tid].store(nullptr, std::memory_order_release);   // done
@@ -87,13 +96,17 @@ std::atomic<bool> stop{false};
 
 int main(int argc, char** argv) {
     const char* mode = argc>1?argv[1]:"rcu"; int R = argc>2?std::atoi(argv[2]):8;
-    g_ptr = new Node{1, 42}; rw_node = new Node{1, 42};
+    enum { RWLOCK, HAZPTR, RCU } m = !std::strcmp(mode,"rwlock") ? RWLOCK           // resolve ONCE, outside the
+                                   : !std::strcmp(mode,"hazptr") ? HAZPTR : RCU;    // timed loop (two strcmp PLT
+    g_ptr = new Node{1, 42}; rw_node = new Node{1, 42};                               // calls per read would swamp a 3 ns read)
     std::vector<std::thread> readers; std::vector<long> cnt(R);
     auto t0 = std::chrono::steady_clock::now();
     for (int i=0;i<R;++i) readers.emplace_back([&,i]{ long n=0; volatile int s=0;
-        while(!stop.load()){ if(!std::strcmp(mode,"rwlock")){ std::shared_lock l(rw); s=rw_node->val; }
-                             else if(!std::strcmp(mode,"hazptr")) s=hp_read(i);
-                             else s=rcu_read(); n++; } cnt[i]=n; });
+        while(!stop.load(std::memory_order_relaxed)){
+            if (m == RWLOCK) { std::shared_lock l(rw); s=rw_node->val; }
+            else if (m == HAZPTR) s=hp_read(i);
+            else s=rcu_read();
+            n++; } cnt[i]=n; });
     std::this_thread::sleep_for(std::chrono::seconds(2));
     stop.store(true); for(auto&t:readers) t.join();
     auto t1 = std::chrono::steady_clock::now();
@@ -104,10 +117,10 @@ int main(int argc, char** argv) {
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), R readers + occasional writer, pinned, turbo off (illustrative; use `liburcu`/`folly::hazptr` for real numbers):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), R readers, pinned, turbo off; **read-side cost only** (no writer in this sketch — the reclamation column states each scheme's *property*, not a measurement; use `liburcu`/`folly::hazptr` for writer-side numbers, Exercise 2):
 
 ```
-   R readers (read-mostly):     ns/read (R=8)     scales with readers?      reclamation
+   R readers (read-side only):  ns/read (R=8)     scales with readers?      reclamation (property, not measured here)
    shared_mutex                 ~250 ns           NO (readers contend)      trivial (lock)
    hazard pointers              ~15 ns            ~yes (per-thread slot)    prompt, bounded memory
    RCU (classic, read ~free)    ~3 ns             YES (read = a load)       grace period (deferred)
@@ -123,8 +136,9 @@ Read it: **classic RCU read-side is almost free** (~a single acquire load — ~3
 
 - **The pattern.** Readers enter a **read-side critical section** (`rcu_read_lock`/`rcu_read_unlock` — in classic/kernel RCU these compile to ~nothing, just disabling preemption or marking a per-thread flag) and access the structure through a published pointer. To update: the writer **copies** the data, modifies the copy, and **atomically swaps** the published pointer to the new version (`rcu_assign_pointer` — a release store). Old readers keep using the old version; new readers see the new one. The writer then waits for a **grace period** (`synchronize_rcu`) — until every reader that could have seen the old version has exited its critical section — and only then frees the old version (or defers via `call_rcu`).
 - **Why it's fast for reads.** Readers take no locks, do no atomic RMW, write nothing — read-side is essentially a pointer load (§36.3). This is why RCU scales to enormous reader counts at near-zero cost — ideal for **read-mostly** data.
-- **Userspace RCU (`liburcu`).** The kernel's RCU has a userspace port (`liburcu`) with several flavors (QSBR — quiescent-state-based, the fastest reads but needs readers to report quiescent states; memb/signal-based — no reader cooperation needed but slightly costlier). QSBR is the lowest read-overhead choice when you can place quiescent points (e.g. at the top of an event loop — natural in a polling hot path, Ch. 37, 41).
+- **Userspace RCU (`liburcu`).** The kernel's RCU has a userspace port (`liburcu`) with several flavors (`urcu-qsbr` — quiescent-state-based, the fastest reads but readers must report quiescent states; `urcu-memb` — the default, built on `membarrier(2)`, no reader cooperation needed but slightly costlier reads; `urcu-bp` — "bulletproof", no thread registration, for libraries; `urcu-mb` — a full barrier per read-side lock. The old `urcu-signal` flavor was deprecated and removed in liburcu 0.15.0 (2024) — migrate to `memb`). QSBR is the lowest read-overhead choice when you can place quiescent points (e.g. at the top of an event loop — natural in a polling hot path, Ch. 37, 41).
 - **HFT fit.** Read-mostly reference/config structures read by many threads and updated rarely: symbol/instrument tables, venue routing maps, risk-limit tables, large book snapshots, strategy parameters. The update = publish-new-version-then-reclaim-old is **exactly hot-reload** (Ch. 73). Atomic pointer-swap *is* the minimal RCU when the "structure" is a single immutable object you replace wholesale (no traversal of internal nodes), with deferred reclamation of the old version.
+- **Standardization (C++26 `<rcu>`, P2545R4).** RCU is in C++26 alongside hazard pointers: `std::rcu_domain` / `std::rcu_default_domain()`, read-side via `std::scoped_lock` on the domain (`rcu_domain::lock()`/`unlock()`), retirement via `std::rcu_obj_base<T>::retire()` or `std::rcu_retire()`, and `std::rcu_synchronize()` / `std::rcu_barrier()` for the writer — an API that mirrors `liburcu`. No shipping libstdc++ (GCC ≤ 14) or libc++ implements it yet; gate on `__cpp_lib_rcu` and fall back to `liburcu` (Appendix H).
 - **The cost is on the writer / grace period.** `synchronize_rcu` can be slow (wait for all readers to pass a quiescent state); `call_rcu` defers it off the hot path. Memory grows by retired-but-not-yet-freed versions until grace periods elapse (§36.5).
 
 ### 36.4.2 Hazard pointers
@@ -132,8 +146,8 @@ Read it: **classic RCU read-side is almost free** (~a single acquire load — ~3
 **Hazard pointers** — per-pointer protection with bounded memory, the robust choice when you can't tolerate unbounded deferral:
 
 - **The pattern (§36.3).** Each thread has a small set of **hazard-pointer slots**. Before dereferencing a node, a reader **stores** the node's pointer into a slot (an atomic store, made visible to writers) and then **re-validates** that the node is still reachable (re-read the source pointer; retry if it changed) — this ordering ensures a writer that frees the node either sees the hazard pointer or the reader sees the node is gone. When done, the reader clears the slot. To reclaim, the writer **scans all threads' hazard slots**; a retired node is freed only if **no** slot points to it, otherwise it's kept on a retired list and retried later.
-- **Properties.** **Bounded memory** (a node is freed as soon as no hazard pointer protects it — at most O(threads × slots) nodes pending), **robust to stalled readers** (a stuck reader only protects the specific nodes in its slots, not all reclamation), and **prompt** reclamation. The cost: a per-access atomic store + validation on the read side (more than RCU — §36.3), and the writer's scan.
-- **Standardization (`std::hazard_pointer`, C++26; `folly::hazptr`).** Hazard pointers are being standardized; `folly::hazptr` is a production implementation. Prefer these over hand-rolling (the validation/ordering is subtle).
+- **Properties.** **Bounded memory** by construction — at most H = threads × slots nodes are protected at any scan, and each thread's retired list holds at most R ≈ H nodes before it scans, so total retired-but-unfreed memory is ≤ threads × R, i.e. O(threads² × slots): small and, crucially, independent of reader stalls, **robust to stalled readers** (a stuck reader only protects the specific nodes in its slots, not all reclamation), and **prompt** reclamation. The cost: a per-access atomic store + validation on the read side (more than RCU — §36.3), and the writer's scan.
+- **Standardization (`std::hazard_pointer`, C++26; `folly::hazptr`).** Hazard pointers are in C++26 (`<hazard_pointer>`, P2530R3: `std::hazard_pointer`, `std::make_hazard_pointer()`, `std::hazard_pointer_obj_base<T>::retire()`), but no shipping libstdc++ or libc++ provides the header yet — gate on `__cpp_lib_hazard_pointer` and fall back to `folly::hazptr`, the production implementation the standard was modelled on (Appendix H). Prefer either over hand-rolling (the validation/ordering is subtle — §36.3's fence comment).
 - **When to choose over RCU.** When **bounded memory** matters (you can't let retired nodes accumulate during a long grace period), when readers can **stall** (so RCU's grace period could be unbounded), or when reclamation must be **prompt**. The price is higher per-read cost. For a latency system that can't tolerate memory growth or a stalled-reader stall, hazard pointers are the safer reclamation choice even though reads cost more.
 
 ### 36.4.3 Epoch-based reclamation
@@ -145,9 +159,9 @@ Read it: **classic RCU read-side is almost free** (~a single acquire load — ~3
 - **The danger: unbounded deferral.** A single thread that **stalls inside a critical section** (descheduled, blocked, slow) keeps the global epoch from advancing, so **no memory can be reclaimed** across the whole structure — retired nodes pile up unboundedly (§36.5). This is EBR's Achilles heel and why it's risky where a reader can stall (the opposite of hazard pointers' robustness). On a system with pinned, non-blocking, fast readers (a dedicated-core hot path — Ch. 32, 41) the risk is low; on a general system it's real.
 - **When to choose.** When you want cheaper reads than hazard pointers, the structure is genuinely dynamic (so RCU's pointer-swap doesn't fit as cleanly), and readers are **short and non-stalling** (bounded critical sections, pinned cores). Otherwise hazard pointers' bounded memory is safer.
 
-### The escape hatch: avoid reclamation
+### 36.4.4 The escape hatch: avoid reclamation
 
-Throughout, keep the strategic option front-and-center (ties Ch. 24, 34, 35): **don't have a dynamic shared structure that needs reclamation.** Fixed-size rings (Ch. 34, 37), object pools with integer **indices** instead of pointers (an index can't be "freed" out from under you — the slot is reused only when you decide — Ch. 24), seqlock **copies** of small data (Ch. 35), single-writer **double-buffering** (two fixed buffers, swap an index), and **type-stable** memory (a pool that never returns memory to the OS, so a stale pointer at worst reads a valid-but-old object of the same type — defusing UAF into a benign stale read). On the hot path these are usually *better* than any reclamation scheme — lower overhead, simpler, no SMR bugs. Reach for RCU/HP/EBR only when the structure genuinely must be dynamic and pointer-shared.
+Throughout, keep the strategic option front-and-center (ties Ch. 24, 34, 35): **don't have a dynamic shared structure that needs reclamation.** Fixed-size rings (Ch. 34, 37), object pools with integer **indices** instead of pointers (an index can't be "freed" out from under you — the slot is reused only when you decide — Ch. 24), seqlock **copies** of small data (Ch. 35), single-writer **double-buffering** (two fixed buffers, swap an index — safe only when reader duration is bounded below the writer's update interval, or with a per-buffer sequence check / a grace period before reuse — Ch. 35's torn-read discussion), and **type-stable** memory (a pool that never returns memory to the OS, so a stale pointer at worst reads a valid-but-old object of the same type — defusing UAF into a benign stale read). On the hot path these are usually *better* than any reclamation scheme — lower overhead, simpler, no SMR bugs. Reach for RCU/HP/EBR only when the structure genuinely must be dynamic and pointer-shared.
 
 ## 36.5 Pitfalls & anti-patterns: use-after-free, unbounded deferral
 
@@ -158,7 +172,7 @@ Throughout, keep the strategic option front-and-center (ties Ch. 24, 34, 35): **
 - **ABA via reclamation (Ch. 34).** Reclamation and ABA are linked: reusing freed memory at the same address causes ABA. Reclamation schemes (defer the free) and tagged pointers/indices solve ABA together. A structure with reclamation bugs often has ABA bugs too.
 - **Wrong scheme for the workload.** RCU for a *write*-heavy structure (grace periods can't keep up, memory blows up) or hazard pointers where the per-read cost dominates a read-extreme path — mismatched. Match: **RCU/pointer-swap = read-mostly, rare writes**; **hazard pointers = bounded-memory/robustness needed, stalled readers possible**; **EBR = cheap reads, short non-stalling readers**.
 - **Reinventing SMR.** RCU, hazard pointers, and EBR are genuinely hard to implement correctly (ordering, the validation races, grace-period detection). Use `liburcu`, `folly::hazptr`/`std::hazard_pointer`, Crossbeam-style libraries — **don't hand-roll** for production; reserve hand-rolling for learning, and validate with TSan/model-checking (Ch. 40).
-- **Using reclamation where you could avoid it.** Reaching for RCU/HP when a fixed ring, an index-based pool, a seqlock copy, or double-buffering would do — paying SMR overhead and risking SMR bugs for no reason (§36.4 escape). On the hot path, prefer the no-reclamation design.
+- **Using reclamation where you could avoid it.** Reaching for RCU/HP when a fixed ring, an index-based pool, a seqlock copy, or double-buffering would do — paying SMR overhead and risking SMR bugs for no reason (§36.4.4). On the hot path, prefer the no-reclamation design.
 - **Type-instability assumptions.** Some "lock-free without reclamation" tricks rely on **type-stable** memory (pooled objects never returned to the OS, so a stale pointer reads a valid old object). This requires the pool to *never* free to the allocator and the stale-read to be benign — verify those assumptions hold (Ch. 24) before relying on it.
 
 ## 36.6 Exercises & checklist
@@ -173,7 +187,7 @@ Throughout, keep the strategic option front-and-center (ties Ch. 24, 34, 35): **
 
 **Checklist — safe memory reclamation**
 
-- [ ] I first asked whether reclamation can be **avoided**: fixed rings (Ch. 34), **index-based** pools (Ch. 24), seqlock copies (Ch. 35), double-buffering, type-stable memory — the no-SMR design preferred on the hot path (§36.4 escape).
+- [ ] I first asked whether reclamation can be **avoided**: fixed rings (Ch. 34), **index-based** pools (Ch. 24), seqlock copies (Ch. 35), double-buffering, type-stable memory — the no-SMR design preferred on the hot path (§36.4.4).
 - [ ] Where a dynamic shared structure is genuinely needed, removed nodes are **never freed immediately** — reclamation is **deferred** via RCU / hazard pointers / EBR (no use-after-free — §36.2, §36.5).
 - [ ] The scheme **matches the workload**: **RCU/pointer-swap** for read-mostly + rare writes (near-free reads); **hazard pointers** when bounded memory / robustness to stalled readers is needed; **EBR** for cheap reads with short, non-stalling readers.
 - [ ] Read-side critical sections are **short, non-blocking, fault-free** (pre-faulted — Ch. 26) — no blocking/syscall/stall inside them (avoids unbounded deferral — §36.5).
@@ -193,10 +207,10 @@ Throughout, keep the strategic option front-and-center (ties Ch. 24, 34, 35): **
 ## 36.8 Additional Reading
 
 - The Crossbeam (Rust) epoch-based reclamation documentation — a clear, modern EBR design and its stalled-reader caveats.
-- D. Bakhvalov / lock-free reclamation surveys and benchmarks comparing RCU/HP/EBR read-side and reclamation costs.
+- T. E. Hart, P. E. McKenney, A. D. Brown & J. Walpole, *"Performance of memory reclamation for lockless synchronization"* (JPDC 67(12), 2007; IPDPS 2006 as *"Making lockless synchronization fast"*) — the canonical QSBR/EBR/hazard-pointer comparison behind §36.3's trade-offs; T. Brown, *"Reclaiming memory for lock-free data structures: there has to be a better way"* (PODC 2015) — a later survey of the design space.
 - Ch. 34 (*Lock-Free*) — where reclamation is deferred from; Ch. 35 (*Seqlocks*) — the small-state single-writer publication (RCU is the large-state version); Ch. 24 (*Allocators*) — index-based pools that avoid reclamation; Ch. 37 (*Disruptor*) — a ring that needs no reclamation; Ch. 73 (*Hot Reload*) — publish-reclaim as configuration update; Ch. 40 (*Tooling*) — ASan/TSan/model-checking for SMR bugs.
-- **Appendix E** — read-side/reclamation latency numbers; **Appendix F** — RCU/hazard-pointer/grace-period/ABA glossary.
+- **Appendix E** — uncontended atomic RMW vs cross-core HITM, the components of a hazard store vs an RCU load; **Appendix F** — RCU/hazard-pointer/ABA glossary entries.
 
 ---
 
-*Next: Ch. 37 — The Disruptor Pattern, the capstone of Part VI: the LMAX ring-buffer + sequence-barrier architecture that combines the SPSC ring (Ch. 34), single-writer publication (Ch. 35), no-reclamation design (this chapter), batching, and mechanical sympathy into a complete, proven low-latency pipeline.*
+*Next: Ch. 37 — The Disruptor Pattern, the capstone of Part VI's lock-free arc: the LMAX ring-buffer + sequence-barrier architecture that combines the SPSC ring (Ch. 34), single-writer publication (Ch. 35), no-reclamation design (this chapter), batching, and mechanical sympathy into a complete, proven low-latency pipeline.*

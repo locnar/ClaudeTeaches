@@ -12,7 +12,7 @@
 
 Chapter 41 established *what* to eliminate — migrations, preemptions, interrupts — and this chapter is *how*: **pinning**. CPU affinity binds a thread to a specific core so the scheduler can't migrate it (keeping its working set warm — Ch. 7, 12, 15, and NUMA-local — Ch. 16); IRQ affinity routes hardware interrupts *away* from that core so nothing steals its cycles or pollutes its caches. Together they implement the core idea of Part VII: **the hot thread *owns* its core, and everything else — other threads, the timer tick, NIC interrupts, kernel work — is evicted from it.** A pinned thread on a cleaned core runs continuously, warm, and uninterrupted; an unpinned thread on a noisy core gets migrated, preempted, and interrupted — each event a cache-trashing latency spike (Ch. 41) that lands in the tail (Ch. 1).
 
-Pinning is the *single highest-leverage* OS-level intervention for latency, and it's two-sided in a way people often half-do. The thread side (`taskset`/`sched_setaffinity`) is well-known: bind the feed handler to core 2, the strategy to core 3. But the **interrupt side** is the one that's frequently missed and just as important: by default, the OS routes hardware interrupts (especially the NIC's — Ch. 55) across all cores, and `irqbalance` actively shuffles them around. If the NIC IRQ that fires on *every* incoming packet lands on your hot core, then every market-data packet *interrupts your hot thread* — handling the IRQ steals cycles and evicts the thread's caches (Ch. 41) at the worst possible moment. Pinning the thread but leaving interrupts on its core is like soundproofing a room but leaving the door open. The full discipline is **both**: pin the hot thread to a core, *and* route all IRQs (and `irqbalance`, and kernel threads, and everything else) *off* that core onto dedicated **housekeeping** cores.
+Pinning is the *single highest-leverage* OS-level intervention for latency, and it's two-sided in a way people often half-do. The thread side (`taskset`/`sched_setaffinity`) is well-known: bind the feed handler to core 2, the strategy to core 3. But the **interrupt side** is the one that's frequently missed and just as important: by default, the OS routes hardware interrupts (especially the NIC's — Ch. 55) across all cores, and `irqbalance` actively shuffles them around. If the NIC IRQ that fires for every packet (or packet batch, under NAPI / interrupt coalescing — Ch. 55) lands on your hot core, then every market-data arrival *interrupts your hot thread* — handling the IRQ steals cycles and evicts the thread's caches (Ch. 41) at the worst possible moment. Pinning the thread but leaving interrupts on its core is like soundproofing a room but leaving the door open. The full discipline is **both**: pin the hot thread to a core, *and* route all IRQs (and `irqbalance`, and kernel threads, and everything else) *off* that core onto dedicated **housekeeping** cores.
 
 This chapter is the concrete mechanics — `taskset`/`sched_setaffinity`/`pthread_setaffinity_np` for threads, `/proc/irq/*/smp_affinity` for interrupts, disabling `irqbalance`, and the topology discovery (Ch. 6) you need to pin *correctly* (the right physical core, the right NUMA node — Ch. 16, the right SMT sibling — Ch. 43). It measures the jitter difference pinning makes (§42.3), gives the pin-threads and route-IRQs techniques (§42.4), and warns about the most common failure — **leftover IRQs and kernel threads on the "isolated" hot core** that silently reintroduce the jitter you pinned to remove (§42.5). Pinning is necessary but not *sufficient* on its own — it pairs with core isolation (`isolcpus`/`nohz_full` — Ch. 45) to actually deliver a quiet core — but it's the foundation, and the rest of Part VII builds on getting it right.
 
@@ -48,7 +48,9 @@ Pinning to the wrong logical CPU (the SMT sibling of a busy core, the wrong NUMA
    - set every IRQ's smp_affinity to HOUSEKEEPING cores only (never the hot cores)
    - especially the NIC IRQs (Ch. 55): route them to housekeeping cores, or use RSS/affinity so the
      queue feeding the hot path is steered appropriately (Ch. 55)
-   - the hot core handles NO device IRQs; combined with nohz_full (Ch. 45) it takes no timer IRQ either
+   - the hot core handles NO device IRQs; combined with nohz_full (Ch. 45) the periodic tick stops while the hot
+     thread is the only runnable task (a residual <=1 Hz tick is offloaded to housekeeping CPUs on kernels >= 4.17;
+     armed hrtimers and TLB-shootdown/function-call IPIs can still land) — measure the remainder in /proc/interrupts (LOC)
 ```
 
 **Housekeeping vs hot cores — the partition.** The clean design splits the CPU into **housekeeping cores** (run the OS, kernel threads, IRQs, `irqbalance`-equivalent work, control/admin/logging threads — Ch. 41's blocking threads) and **hot/isolated cores** (run *only* the pinned busy-polling trading threads, no IRQs, no kernel work, no timer tick). Everything noisy goes on housekeeping; the hot cores are pristine. This partition is the heart of a low-latency box (Ch. 6, 45, Appendix C).
@@ -108,8 +110,49 @@ Read it the Ch. 1 way: **the median (p50) barely changes — pinning isn't about
 
 Pinning threads — the mechanisms and the discipline:
 
-- **`taskset` (launch-time / external).** `taskset -c 2 ./app` launches pinned to CPU 2; `taskset -c 2-3 ./app` to a set; `taskset -p MASK PID` repins a running process. Quick for whole-process pinning, scripts, and testing. For per-*thread* control within a multithreaded process, use the API.
-- **`sched_setaffinity(2)` / `pthread_setaffinity_np` (programmatic, per-thread).** The trading app pins *each* hot thread to its *specific* core from inside the program (during thread setup): build a `cpu_set_t`, `CPU_SET(core, &set)`, call `pthread_setaffinity_np(thread, ...)`. This is the production approach — the app *knows* its topology and pins the feed handler to core 2, strategy to core 3, etc. deterministically. Do it in the thread's startup (alongside FTZ/DAZ — Ch. 27, warming — Ch. 46).
+- **`taskset` (launch-time / external).** `taskset -c 2 ./app` launches pinned to CPU 2; `taskset -c 2-3 ./app` to a set; `taskset -p MASK TID` repins one running *thread* (for a multithreaded process it touches only the task whose id you give — `taskset -a -p MASK PID` repins all of them). Quick for whole-process pinning, scripts, and testing. For per-*thread* control within a multithreaded process, use the API.
+- **`sched_setaffinity(2)` / `pthread_setaffinity_np` (programmatic, per-thread).** The trading app pins *each* hot thread to its *specific* core from inside the program (during thread setup): build a `cpu_set_t` (`CPU_ZERO(&set); CPU_SET(core, &set);` — an uninitialised set has indeterminate bits, the silent "pin didn't apply" of §42.5), call `pthread_setaffinity_np(thread, sizeof set, &set)` and *check the return value*. This is the production approach — the app *knows* its topology and pins the feed handler to core 2, strategy to core 3, etc. deterministically. Do it in the thread's startup (alongside FTZ/DAZ — Ch. 27, warming — Ch. 46). The whole thing, compilable:
+
+```cpp
+// pin.cpp — pin the calling thread to one logical CPU, refusing an SMT sibling of a core already in use.
+// Build: g++ -O2 -std=c++20 pin.cpp -o pin -pthread     (_GNU_SOURCE is implied by g++/clang++ on Linux)
+#include <pthread.h>
+#include <sched.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <fstream>
+
+// The sibling list of a logical CPU, e.g. "2,18" on the reference box (Ch. 43: read it, never assume +N).
+static std::string siblings_of(int cpu) {
+    std::ifstream f("/sys/devices/system/cpu/cpu" + std::to_string(cpu) + "/topology/thread_siblings_list");
+    std::string s; std::getline(f, s); return s;
+}
+
+// Returns true on success. Call it first thing in each hot thread's body, before warming (Ch. 46).
+static bool pin_self(int cpu) {
+    cpu_set_t set;
+    CPU_ZERO(&set);                                        // an uninitialised cpu_set_t is garbage: ZERO it
+    CPU_SET(cpu, &set);
+    if (int err = pthread_setaffinity_np(pthread_self(), sizeof set, &set); err != 0) {
+        std::fprintf(stderr, "pin_self(%d): %s\n", cpu, std::strerror(err)); return false;   // EINVAL: CPU offline/not allowed
+    }
+    cpu_set_t got; CPU_ZERO(&got);                         // verify it took (a cpuset cgroup can narrow the mask)
+    pthread_getaffinity_np(pthread_self(), sizeof got, &got);
+    if (CPU_COUNT(&got) != 1 || !CPU_ISSET(cpu, &got)) { std::fprintf(stderr, "pin_self(%d): mask not applied\n", cpu); return false; }
+    std::fprintf(stderr, "pinned to CPU %d (SMT siblings: %s)\n", cpu, siblings_of(cpu).c_str());
+    return true;
+}
+
+int main(int argc, char** argv) {
+    int cpu = argc > 1 ? std::atoi(argv[1]) : 2;
+    if (!pin_self(cpu)) return 1;
+    std::printf("now running on CPU %d\n", sched_getcpu());  // the hot loop would start here
+    return 0;
+}
+```
+
 - **Pin to the *right* logical CPU (topology — §42.2).** Discover topology first (`lscpu -e`, `lstopo`, `/sys/devices/system/cpu/cpu*/topology/`): pin to a logical CPU on the **NUMA node** holding the thread's data and NIC (Ch. 16, 55), handle the **SMT sibling** (Ch. 43 — leave it idle or housekeeping-only), and **avoid core 0**. Hard-coding "core 2" without checking topology can land you on the wrong node or a busy sibling.
 - **`cpuset` cgroups (confinement).** A `cpuset` cgroup confines a *group* of threads/processes to a core set (and can move *all other* tasks off the hot cores — the inverse pin). Useful to corral everything-not-hot onto housekeeping cores, and to enforce the partition system-wide. Pairs with `isolcpus` (Ch. 45).
 - **Verify it stuck.** Check `/proc/<pid>/task/<tid>/status` (`Cpus_allowed`), `taskset -p`, or `perf stat -e cpu-migrations` (→ 0). A pin that didn't apply (wrong tid, overridden by cgroup) silently leaves the thread migratable.
@@ -119,7 +162,8 @@ Pinning threads — the mechanisms and the discipline:
 Routing interrupts away — the half people miss (§42.1, §42.2):
 
 - **Disable `irqbalance`.** `systemctl stop irqbalance && systemctl disable irqbalance` — stop the daemon that actively shuffles IRQs onto (potentially hot) cores. On a latency box, IRQ placement is *manual and fixed*, not balanced.
-- **Set each IRQ's `smp_affinity` to housekeeping cores.** Write a housekeeping-core mask to `/proc/irq/<N>/smp_affinity` (or `smp_affinity_list`) for every IRQ — so no device interrupt is ever handled on a hot core. Script it at boot (the IRQ numbers come from `/proc/interrupts`). The default (all cores) lets IRQs land on hot cores.
+- **Set each IRQ's `smp_affinity` to housekeeping cores.** Write a housekeeping-core mask to `/proc/irq/<N>/smp_affinity` (or `smp_affinity_list`) for every IRQ — so no device interrupt is ever handled on a hot core. Script it at boot (the IRQ numbers come from `/proc/interrupts`), and set `/proc/irq/default_smp_affinity` (or the `irqaffinity=<housekeeping>` kernel parameter) so IRQs allocated *later* start on housekeeping cores. The default (all cores) lets IRQs land on hot cores.
+- **Managed IRQs can't be moved from `/proc`.** Multi-queue devices — NVMe, and NIC drivers that allocate with `PCI_IRQ_AFFINITY` — get *managed* interrupts whose affinity the kernel owns: writing their `smp_affinity` fails with `EIO`, so "for every IRQ" cannot be done from `/proc` alone. Keep their vectors off the hot cores with `isolcpus=managed_irq,<cpus>` (Linux 5.6+; `nohz_full` CPUs are treated the same), and reduce the device's queue count (`ethtool -L eth0 combined <n>`) so its queues map onto housekeeping cores — a queue whose vector would land on an isolated CPU is otherwise still spread there. Check `/proc/irq/<N>/effective_affinity_list` to see where a managed vector actually lives.
 - **NIC IRQs specifically (Ch. 55).** The NIC fires an IRQ per packet-batch (the highest-rate, most hot-path-relevant interrupt). Route NIC IRQs to housekeeping cores; with **RSS** (multiple RX queues — Ch. 55) steer the queue feeding the strategy and pin *its* IRQ appropriately, or (with busy-polling/kernel-bypass — Ch. 55, 62) take the NIC out of the interrupt path entirely on the hot core.
 - **Move kernel threads and RCU callbacks off (Ch. 45).** Beyond IRQs, kernel work (`kworker`, RCU callbacks, the timer tick) lands on cores; `isolcpus`/`nohz_full`/`rcu_nocbs` (Ch. 45) and `cpuset` keep the hot core free of these. Pinning the *user* thread without isolating the core leaves kernel noise (§42.5).
 - **The housekeeping/hot partition (§42.2).** Concretely: reserve cores 0-1 (and the SMT siblings — Ch. 43) as housekeeping (OS, IRQs, `irqbalance`-disabled, control threads); isolate cores 2-N as hot (pinned trading threads, no IRQs, `nohz_full`). This partition, applied at boot (kernel cmdline — Ch. 45, Appendix C) plus runtime (IRQ affinity, `cpuset`), is the standard low-latency configuration.
@@ -160,7 +204,7 @@ Routing interrupts away — the half people miss (§42.1, §42.2):
 
 ## 42.7 References
 
-- The Linux man pages — `sched_setaffinity(2)`, `pthread_setaffinity_np(3)`, `taskset(1)`, `cpuset(7)`, and `Documentation/IRQ-affinity.txt` / `/proc/irq/*/smp_affinity` — the mechanisms of §42.4.
+- The Linux man pages — `sched_setaffinity(2)`, `pthread_setaffinity_np(3)`, `taskset(1)`, `cpuset(7)`, and `Documentation/core-api/irq/irq-affinity.rst` / `/proc/irq/*/smp_affinity` — the mechanisms of §42.4.
 - The `hwloc`/`lstopo`, `lscpu`, and `/sys/devices/system/cpu/` documentation — topology discovery for correct pinning (§42.2, §42.4.1; ties Ch. 6, 16, 43).
 - Red Hat *Low Latency Performance Tuning* and the kernel low-latency/RT documentation — the housekeeping/hot partition, IRQ routing, and `irqbalance` guidance (§42.4, consolidated in Appendix C).
 - The NIC vendor (Mellanox/Intel/Solarflare) tuning guides — NIC IRQ affinity, RSS, and steering for low latency (§42.4.2, ties Ch. 55).
@@ -171,7 +215,7 @@ Routing interrupts away — the half people miss (§42.1, §42.2):
 - The `cyclictest`/rt-tests and `tuned`/`tuned-adm` (low-latency profiles) documentation — measuring jitter and applying pinning/IRQ/isolation profiles (ties Ch. 45).
 - Jon Masters / kernel low-latency talks and the `nohz_full` documentation — eliminating per-CPU kernel noise.
 - Ch. 41 (*Context Switching*) — the migrations/preemptions/interrupts pinning eliminates; Ch. 43 (*SMT*) — the sibling of the pinned core; Ch. 45 (*RT Scheduling*) — `isolcpus`/`nohz_full`/RT priority/`cyclictest` that make pinning effective; Ch. 16 (*NUMA*) — pin to the right node; Ch. 55 (*NIC*) — NIC IRQs/RSS to route; Ch. 6 (*System Setup*) — topology and BIOS.
-- **Appendix C** (System Tuning Checklist) — the consolidated pinning/IRQ/isolation recipe; **Appendix E** — the jitter/interrupt-cost numbers.
+- **Appendix C** (System Tuning Checklist) — the consolidated pinning/IRQ/isolation recipe; **Appendix E** — the context-switch and page-fault rows that bound the tail; Ch. 45 §45.3 and Appendix C for the jitter figures themselves.
 
 ---
 

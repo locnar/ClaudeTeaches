@@ -10,7 +10,7 @@
 
 ## 44.1 Why it matters: pinning the core isn't enough if the cache is shared
 
-Ch. 42–43 gave the hot thread a *dedicated core* — pinned, IRQs steered away, the SMT sibling idle — and Ch. 45 will quiet it further with `isolcpus`, `nohz_full` and RT priority. But a pinned core is not an *isolated* core, because the one resource it still shares with every other core on the socket is the **last-level cache (L3)**. On a modern Xeon the L3 is a single shared pool, inclusive-ish, carved across all cores. So the housekeeping thread on core 1, the logging consumer (Ch. 71) on core 0, a capture writer (Ch. 75), even a stray `cron` job (Ch. 45) — anything running anywhere on the socket — allocates into the *same* L3 your hot path depends on, and can **evict your hot working set** (the order book, the strategy state, the decode tables — Ch. 25). That eviction is invisible to `taskset`: the core is yours, but the cache underneath it is a commons, and a noisy neighbor turns an L3 hit (~15–20 ns, Ch. 7) into a DRAM miss (~80–100 ns) at exactly the wrong moment (Ch. 1).
+Ch. 42–43 gave the hot thread a *dedicated core* — pinned, IRQs steered away, the SMT sibling idle — and Ch. 45 will quiet it further with `isolcpus`, `nohz_full` and RT priority. But a pinned core is not an *isolated* core, because the one resource it still shares with every other core on the socket is the **last-level cache (L3)**. On Skylake-SP and later Xeons — the Ice Lake-SP reference machine included — the L3 is a shared, **non-inclusive** victim-style cache distributed across per-core slices (a snoop filter tracks what the private L2s hold). What the hot path keeps in its private 1.25 MiB L2 largely survives neighbor traffic; what *spills* to L3 — the order book that doesn't fit L2, the cold half of the decode tables — is in the commons. So the housekeeping thread on core 1, the logging consumer (Ch. 71) on core 0, a capture writer (Ch. 75), even a stray `cron` job (Ch. 45) — anything running anywhere on the socket — allocates into the *same* L3 your hot path depends on, and can **evict your hot working set** (the order book, the strategy state, the decode tables — Ch. 25). That eviction is invisible to `taskset`: the core is yours, but the cache underneath it is a commons, and a noisy neighbor turns an L3 hit (~15–20 ns, Ch. 7) into a DRAM miss (~80–100 ns) at exactly the wrong moment (Ch. 1).
 
 This is the last, quietest source of tail latency on an otherwise-tuned box, and it is precisely the kind of jitter that *only* shows up under production load — when the housekeeping cores are actually busy — and never in a quiet lab (Ch. 76's test-vs-prod drift). The symptom is maddening: p50 is perfect, but p99.9 shows the hot path occasionally paying DRAM latency for data that *should* be resident, because something on another core reached into the shared L3 and knocked it out. Core isolation gave you the compute; it did nothing for the cache.
 
@@ -31,16 +31,21 @@ The Linux interface is the **`resctrl` pseudo-filesystem** (`/sys/fs/resctrl`), 
 
 ```
    /sys/fs/resctrl/
-     schemata            # default CLOS0: L3:0=fff;MB:0=100  (all 12 ways, 100% BW)
-     tasks / cpus        # who is in CLOS0
-     info/L3/            # num_closids, cbm_mask, min_cbm_bits
-     info/L3_MON/        # monitoring: max_rmid, mon_features
+     schemata            # default CLOS0, two LINES (one per resource):  L3:0=0ff   <- shrunk to the complement of hotpath's ways (§44.5)
+                         #                                                MB:0=100   (';' separates cache IDs/sockets WITHIN a line, e.g. L3:0=0ff;1=0ff)
+     tasks / cpus        # who is in CLOS0 (cpus is a HEX MASK; cpus_list takes a CPU list)
+     info/L3/            # num_closids, cbm_mask, min_cbm_bits, shareable_bits, sparse_masks
+     info/L3_MON/        # monitoring: num_rmids, mon_features, max_threshold_occupancy
+     info/last_cmd_status  # why the last write was rejected
      mon_data/           # per-group occupancy & bandwidth counters
      hotpath/            # a group YOU create (a CLOS)
-       schemata          #   L3:0=003;MB:0=100     (only the low 2 ways)
-       cpus              #   the hot core(s)
+       schemata          #   L3:0=f00   (the top 4 of 12 ways = 8 MiB, exclusively)
+                         #   MB:0=100
+       cpus_list         #   the hot core(s), e.g. "2"
        mon_data/         #   this group's L3 occupancy / BW
 ```
+
+One subtlety to carry into §44.3: CAT constrains *fills* (which ways a CLOS may allocate into), not *hits* — a line already resident in another CLOS's ways stays hittable until it is evicted from there, so a freshly re-partitioned box converges over the first few seconds of traffic, and occupancy (CMT) is the thing to watch while it does.
 
 The model to hold: **a CLOS is a lease on cache ways and bandwidth; you give the hot path an exclusive lease and everyone else a *different, non-overlapping* lease.** Two CLOSes whose bitmasks don't overlap cannot evict each other's lines — that's the isolation. Overlapping masks share ways (and defeat the purpose — §44.5). AMD's equivalent (L3 QoS / QoS Enforcement) exposes a very similar `resctrl` interface, so the mechanics transfer with different capacity granularity.
 
@@ -48,7 +53,7 @@ The model to hold: **a CLOS is a lease on cache ways and bandwidth; you give the
 
 *Toolchain and machine: Appendix L.3.*
 
-The effect to measure is **hot-path tail latency with and without a cache-thrashing neighbor, before and after partitioning.** Set up: the hot thread on an isolated core (Ch. 42) doing repeated lookups over a working set sized to fit L3 (an order book, Ch. 25); a "noisy neighbor" on another core streaming a large buffer (bigger than L3) to evict everything. Measure the hot path's latency distribution (HdrHistogram, Ch. 3) and its L3 miss rate (`perf`, Ch. 2) in three conditions. Representative shape (single-socket Xeon Gold 6326, Ice Lake-SP, 24 MiB L3 — 1.5 MiB/core × 16, 12-way, 2 MiB per way; figures pending real runs):
+The effect to measure is **hot-path tail latency with and without a cache-thrashing neighbor, before and after partitioning.** Set up: the hot thread on an isolated core (Ch. 42) doing repeated lookups over a working set sized to fit L3 (an order book, Ch. 25); a "noisy neighbor" on another core streaming a large buffer (bigger than L3) to evict everything. Measure the hot path's latency distribution (HdrHistogram, Ch. 3) and its L3 miss rate (`perf stat -C <hot> -e LLC-loads,LLC-load-misses,mem_load_retired.l3_miss`, Ch. 2) in three conditions; the partition for the third is the literal `mkdir /sys/fs/resctrl/hotpath; echo 'L3:0=f00' > /sys/fs/resctrl/hotpath/schemata; echo 'L3:0=0ff' > /sys/fs/resctrl/schemata; echo 2 > /sys/fs/resctrl/hotpath/cpus_list` of §44.4.1. (The benchmark source — a hot lookup loop plus a streaming neighbor thread under Appendix L's harness — is to be added with the real runs.) Representative shape (single-socket Xeon Gold 6326, Ice Lake-SP, 24 MiB L3 — 1.5 MiB/core × 16, 12-way, 2 MiB per way; figures pending real runs):
 
 | Condition | Hot-path L3 miss rate | p50 | p99.9 | Notes |
 |---|---|---|---|---|
@@ -71,9 +76,9 @@ The lessons:
 
 The core technique: carve the L3 so the hot path owns a private set of ways.
 
-- **Mount resctrl and inspect capabilities.** `mount -t resctrl resctrl /sys/fs/resctrl`; read `info/L3/cbm_mask` (the full mask — `fff` = 12 ways on the Xeon Gold 6326; a 20-way part shows `fffff`) and `info/L3/min_cbm_bits` (minimum contiguous ways per allocation) and `info/L3/num_closids` (how many CLOSes you have).
+- **Probe first, then mount.** `grep -o 'cat_l3\|cdp_l3\|mba\|cqm_llc\|cqm_mbm_total\|cqm_mbm_local' /proc/cpuinfo | sort -u` tells you which RDT features the CPU exposes (`cat_l3` for CAT, `cdp_l3` for CDP, `mba`, `cqm_*` for CMT/MBM); the kernel needs `CONFIG_X86_CPU_RESCTRL` (the `rdt=` command-line parameter forces features on/off), and CDP needs `mount -o cdp`. Then `mount -t resctrl resctrl /sys/fs/resctrl`; read `info/L3/cbm_mask` (the full mask — `fff` = 12 ways on the Xeon Gold 6326; a 20-way part shows `fffff`) and `info/L3/min_cbm_bits` (minimum contiguous ways per allocation) and `info/L3/num_closids` (how many CLOSes you have).
 - **Create a hot group and give it exclusive ways.** `mkdir /sys/fs/resctrl/hotpath`; write a bitmask to its `schemata` that reserves the ways *only it* uses, e.g. `L3:0=f00` (4 ways = 8 MiB of the 6326's 24 MiB). Then **shrink the default group** (`CLOS0`, everything else) to the *complementary* ways: `L3:0=0ff` — critically, the default mask must **not overlap** the hot mask, or the isolation is void (§44.5). Bitmasks in CAT must be **contiguous** (a single run of 1-bits — Intel parts with `info/L3/sparse_masks` = 0, which includes all Ice Lake-SP, reject anything else with `EINVAL`), which is why the hot ways go at one *end* of the mask so that both masks stay contiguous.
-- **Assign the hot core(s).** Write the hot CPU(s) to `hotpath/cpus` (CPU-based assignment — everything on that core uses the hot CLOS), or write the hot thread's TID to `hotpath/tasks` (task-based). CPU-based is simplest for a dedicated hot core (Ch. 42).
+- **Assign the hot core(s).** Write the hot CPU(s) to the group — `cpus` takes a **hexadecimal bitmask** (`echo 4 > hotpath/cpus` for CPU 2; `echo 5` would mean CPUs 0 *and* 2), so prefer the list form `echo 2 > hotpath/cpus_list` — for CPU-based assignment (everything on that core uses the hot CLOS), or write the hot thread's TID to `hotpath/tasks` (task-based). CPU-based is simplest for a dedicated hot core (Ch. 42). A rejected write says why in `info/last_cmd_status`.
 - **Size the partition to the working set.** Give the hot group *just enough* ways to hold its working set (order book + strategy state + decode tables — Ch. 25), measured via CMT occupancy (§44.3). Too few ways and the hot path evicts *itself* (§44.5); too many and you starve everyone else, which can bounce back as bandwidth pressure. Right-size with occupancy monitoring, don't guess.
 - **CDP for code/data split (optional).** If the hot path is also front-end-bound (Ch. 12), enable CDP and give its *code* ways protection from its own data streaming, keeping hot instructions resident.
 
@@ -89,7 +94,8 @@ Cache partitioning handles *capacity*; bandwidth and monitoring complete the pic
 
 Two higher-order uses that connect forward:
 
-- **Reserve ways for the NIC's DDIO region (ties Ch. 56).** DDIO lands received packets directly in a slice of L3 (Ch. 56). By default that DDIO region can *conflict* with your hot working set — the NIC's incoming data evicts your order book, or vice versa. CAT lets you *separate* the DDIO region from the hot data region so they don't fight — one of the most important combined uses, developed in Ch. 56. (You allocate ways for the NIC's write region and keep the hot path's ways disjoint.)
+- **Keep the hot ways disjoint from the NIC's DDIO region (ties Ch. 56).** DDIO lands received packets directly in a slice of L3 (Ch. 56). By default that DDIO region can *conflict* with your hot working set — the NIC's incoming data evicts your order book, or vice versa. On Intel parts up to and including Ice Lake-SP `resctrl` **cannot assign ways to the NIC**: DDIO ignores CLOS and writes into a fixed set of ways (two by default) chosen by the platform (the IIO LLC WAYS MSR / BIOS, which firmware may lock — Ch. 56). What CAT *can* do is keep the *core* groups' masks away from those ways: read `info/L3/shareable_bits` (the ways the hardware may share with I/O) and give the hot group a mask disjoint from it — developed in Ch. 56.
+- **Cache pseudo-locking (the most HFT-relevant RDT trick).** `resctrl` can *lock* a working set into a cache region: create a group, write `pseudo-locksetup` to its `mode`, give it a schemata of ways no other group uses, and the kernel pre-loads a memory region into those ways and exposes it as a character device (`/dev/pseudo_lock/<group>`) that you `mmap`; because no CLOS may allocate into the locked ways, the lines are never evicted — an L2/L3-resident buffer for the order book or decode tables by construction (Ch. 46's warming made permanent). Requires `pseudo_lock` in `info/L3/features`, a kernel built with it, and a contiguous mask; read `Documentation/filesystems/resctrl.rst` (§"Cache Pseudo-Locking") before relying on it.
 - **Multi-tenant / multi-strategy boxes.** When several strategies (or shards — Ch. 74) share a socket, CAT partitions the L3 *between* them so one strategy's working set can't evict another's — cache-level fault isolation to match the process-level isolation of Ch. 74. Each strategy gets a CLOS sized to its footprint.
 
 ## 44.5 Pitfalls & anti-patterns: over-partitioning and overlapping masks
@@ -98,7 +104,7 @@ Two higher-order uses that connect forward:
 - **Over-partitioning — starving the hot path of its own cache.** Give the hot group too few ways and it can't hold its working set, so it evicts *itself* on every pass — you've manufactured the miss you were trying to prevent. Size to the working set via CMT occupancy (§44.3), with headroom; a partition smaller than the footprint is worse than no partition.
 - **Starving everyone else into bandwidth pressure.** Give the hot group almost *all* the ways and the housekeeping cores thrash their tiny slice, miss constantly, and pound memory bandwidth (Ch. 16) — which bounces back as bandwidth contention on the hot path's own misses. Isolation is a balance: enough for the hot path, enough left for the rest. Watch total bandwidth (MBM).
 - **Forgetting bandwidth (CAT without MBA).** A neighbor that streams (capture, Ch. 75) may occupy few *ways* but saturate *bandwidth* — CAT won't stop it, only MBA will. If the hot path's misses get slower under a streaming neighbor despite CAT, it's bandwidth, not capacity (§44.4.2).
-- **Non-contiguous / invalid masks.** Most CAT implementations require **contiguous** bitmasks (a single run of 1-bits) and a minimum width (`min_cbm_bits`). A non-contiguous or too-narrow mask is rejected or silently clamped. Read `info/L3/` before writing masks.
+- **Non-contiguous / invalid masks.** Most CAT implementations require **contiguous** bitmasks (a single run of 1-bits) and a minimum width (`min_cbm_bits`). A non-contiguous or too-narrow mask is rejected with `EINVAL` — resctrl never clamps — and the reason (`Mask not contiguous`, `Need at least N bits in the mask`, `Mask out of range`) is in `/sys/fs/resctrl/info/last_cmd_status`. Read `info/L3/` before writing masks.
 - **Hyperthread and shared-L2 subtleties.** CAT partitions L3; two hyperthreads on a core still share L1/L2 (Ch. 43) regardless of CLOS — cache isolation between siblings needs L2 CAT (if supported) or, more simply, leaving the sibling idle (Ch. 43). Assigning two CLOSes to two siblings doesn't isolate their L1/L2.
 - **AMD/Intel and generational differences.** Way counts, granularity, L2 CAT availability, and MBA semantics vary by CPU (and AMD's QoS differs in detail). Probe `info/` at runtime; don't hard-code masks for one part (this is the Appendix A portability discipline applied to RDT).
 - **Not monitoring — flying blind.** Setting masks once and never checking CMT occupancy means you won't notice when a config drift, a new neighbor, or a working-set change breaks the isolation. Monitor in production (Ch. 76); the partition is a claim to *verify*, not a set-and-forget.
@@ -121,12 +127,12 @@ Two higher-order uses that connect forward:
 - [ ] **Bandwidth-hungry neighbors** (capture, logging, batch) are **MBA-throttled** so they can't saturate the memory controller (§44.4.2).
 - [ ] **CMT/MBM monitoring runs in production** (Ch. 76) — occupancy and bandwidth per group, alerting on the hot group losing ways or a neighbor spiking (§44.4.2, §44.5).
 - [ ] Masks respect the part's **contiguity/min-width** rules and are **probed at runtime** (`info/L3/`), not hard-coded across CPU generations (§44.5).
-- [ ] The **CAT/MBA policy is baked into box startup** (Appendix C) alongside pinning/isolation, and verified in the readiness check; combined with the DDIO region separation of Ch. 56 where a NIC is on the hot path (§44.4.3).
+- [ ] The **CAT/MBA policy is baked into box startup** alongside the Appendix C pinning/isolation knobs, and verified in the readiness check; combined with the DDIO region separation of Ch. 56 where a NIC is on the hot path (§44.4.3).
 
 ## 44.7 References
 
 - The **Intel RDT** documentation and the *Intel 64 and IA-32 Architectures Software Developer's Manual* (CAT/CDP/MBA/CMT/MBM chapters) — the authoritative feature reference (§44.2).
-- The Linux kernel **`resctrl`** documentation (`Documentation/arch/x86/resctrl.rst`) — the interface, schemata syntax, and monitoring groups (§44.2, §44.4).
+- The Linux kernel **`resctrl`** documentation (`Documentation/filesystems/resctrl.rst` on Linux 6.16+; `Documentation/arch/x86/resctrl.rst` on 6.5–6.15, `Documentation/x86/resctrl.rst` earlier) — the interface, schemata syntax, and monitoring groups (§44.2, §44.4).
 - The `intel-cmt-cat` toolkit (`pqos`) documentation — a userspace tool for CAT/MBA/monitoring, an alternative to raw `resctrl` (§44.4).
 - The **AMD64 QoS Extensions** (Platform QoS / L3 QoS Enforcement) documentation — the AMD analog and its `resctrl` support (§44.2, §44.5).
 - Ch. 7–8 (cache hierarchy — what CAT protects), Ch. 16 (memory bandwidth — what MBA governs), Ch. 42, 43, 45 (core isolation this completes), Ch. 56 (DDIO — the combined technique), Appendix C (tuning checklist).

@@ -464,6 +464,8 @@ What remains outside this review's reach:
 - **P2-2 part 1 (Ch. 0–26), 2026-11-09:** 154 fixed / 142 already fixed / 9 left — see the findings file header.
 
 ---
+- **P2-2 part 2 (Ch. 27–52), 2026-11-09:** 241 fixed / 175 already fixed / 5 left — see the findings file header.
+
 
 ## 10. Gap analysis — missing topics
 

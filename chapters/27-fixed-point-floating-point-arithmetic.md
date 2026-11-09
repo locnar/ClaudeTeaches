@@ -22,7 +22,7 @@ So the discipline is: **prices and money are scaled integers (exact, fast, tick-
 
 Three ways to represent a price, with very different properties:
 
-- **Binary floating-point (`float`/`double`, IEEE 754).** Fast hardware arithmetic, huge range — but **base-2**, so most decimal fractions (0.1, 0.01, a $0.05 tick) are *not* exactly representable; they round to the nearest binary fraction. Consequences: `0.1 + 0.2 == 0.30000000000000004`, accumulation drifts, exact equality is unreliable, and a price stored as `double` and back may not round-trip. `double` has 52 bits of mantissa (~15-16 decimal digits) — plenty of *precision*, but the *representability* problem is fundamental and unfixable. **Wrong for prices/money** (right for many other computations).
+- **Binary floating-point (`float`/`double`, IEEE 754).** Fast hardware arithmetic, huge range — but **base-2**, so most decimal fractions (0.1, 0.01, a $0.05 tick) are *not* exactly representable; they round to the nearest binary fraction. Consequences: `0.1 + 0.2 == 0.30000000000000004`, accumulation drifts, exact equality is unreliable, and a price stored as `double` and back may not round-trip. `double` has a 53-bit significand (52 stored fraction bits plus the implicit leading 1 — ~15.9 decimal digits) — plenty of *precision*, but the *representability* problem is fundamental and unfixable. **Wrong for prices/money** (right for many other computations).
 - **Scaled integers (fixed-point) — the price/money default.** Represent the value as an integer in units of a fixed scale: price × 10⁸ (or × tick) stored in `int64`. `$123.45` at scale 10⁴ is the integer `1234500`. Arithmetic is **exact** integer math (add/subtract/compare are trivial and fast — Ch. 28), tick alignment is natural (a price is an integer number of minimum units), and there's no representability error. You manage the scale explicitly (multiplication needs rescaling; division needs care — §27.4.1), and you must size the integer to avoid **overflow** (an `int64` at scale 10⁸ holds ~$92 billion — usually ample, but *check* — Ch. 72). This is what exchanges and serious systems use for prices, quantities, and notional.
 - **Decimal floating-point / decimal libraries.** Base-10 representations (IEEE 754 decimal, or libraries like `decNumber`, Boost.Multiprecision, intel DFP) represent decimal fractions *exactly* and round per decimal rules — *correct* for money, but **slow** (often software-emulated, no hardware decimal on mainstream x86) — fine for back-office/accounting, **too slow for the hot path**. Scaled integers give you decimal-exact behavior at integer speed, which is why they win on the tick-to-trade path.
 
@@ -46,13 +46,13 @@ The fix is two CPU flags in the **MXCSR** register (SSE/AVX control):
 - **FTZ (Flush To Zero):** results that would be denormal are flushed to zero instead.
 - **DAZ (Denormals Are Zero):** denormal *inputs* are treated as zero.
 
-With both set, denormals never occur on the hot path and the cliff disappears — at the cost of a tiny loss of near-zero precision (almost always irrelevant for trading math; you're not doing precision physics near 10⁻³⁰⁸). They're set per-thread via `_mm_setcsr`/`_MM_SET_FLUSH_ZERO_MODE` (or implied by `-ffast-math`), and you set them **once at thread startup** (§27.4.2). Crucially: **they're a thread-local CPU state you must explicitly establish** — a fresh thread defaults to denormals-on (slow), so every hot thread must set FTZ/DAZ in its setup, or it's one underflow away from a latency spike.
+With both set, denormals never occur on the hot path and the cliff disappears — at the cost of a tiny loss of near-zero precision (almost always irrelevant for trading math; you're not doing precision physics near 10⁻³⁰⁸). They're set per-thread via `_mm_setcsr`/`_MM_SET_FLUSH_ZERO_MODE` (or implied by `-ffast-math`), and you set them **once at thread startup** (§27.4.2). Crucially: **MXCSR is per-thread CPU state that a new thread *inherits from its creator* at creation** (Linux `clone()` copies the FPU state) — the initial thread starts denormals-on (MXCSR `0x1F80`), so threads created *before* `main` set FTZ/DAZ, threads created by code that lacks the setup (thread pools, third-party runtimes), and any thread that resets its FP environment run slow. Don't rely on inheritance: every hot thread asserts or sets FTZ/DAZ in its own setup, or it's one underflow away from a latency spike.
 
 ### 27.2.4 FP op latency/throughput; NaN/Inf traps
 
 The rest of the FP cost/correctness model (ties Ch. 11):
 
-- **Op latency/throughput varies enormously.** Add/multiply (and FMA) are cheap (~4-5 cycle latency, high throughput); **division and square root are expensive** (~10-40+ cycles, low throughput, often not pipelined). On a **dependency chain** (Ch. 11) a `div`/`sqrt` dominates — hoist it, replace with reciprocal-multiply (`a/b` → `a * (1/b)` computed once), or restructure so it's off the critical path. `fma` (fused multiply-add) does `a*b+c` in one op with one rounding — faster *and* more accurate (needs `-mfma`/`-march`, Ch. 22).
+- **Op latency/throughput varies enormously.** Add/multiply (and FMA) are cheap (~4-5 cycle latency, high throughput); **division and square root are expensive** (double `div`/`sqrt` ~13-22 cycles latency on Ice Lake-SP, up to ~40 on older cores; throughput one per ~4-8 cycles — poorly pipelined). On a **dependency chain** (Ch. 11) a `div`/`sqrt` dominates — hoist it, replace with reciprocal-multiply (`a/b` → `a * (1/b)` computed once), or restructure so it's off the critical path. `fma` (fused multiply-add) does `a*b+c` in one op with one rounding — faster *and* more accurate (needs `-mfma`/`-march`, Ch. 22).
 - **NaN/Inf propagation.** Any op with a NaN input produces NaN; `0.0/0.0`, `inf-inf`, `sqrt(-1)` make NaN; overflow makes Inf. NaN **poisons** a computation silently (it propagates through everything and `NaN != NaN`, so comparisons mislead). On the hot path, *guard inputs* (validate, clamp) rather than let a bad market value (a zero price, a garbage decode — Ch. 53) inject a NaN that corrupts a signal. FP exception *traps* (SIGFPE on NaN/overflow) are usually *disabled* (masked) on the hot path — you don't want a trap mid-tick — so bad values flow silently unless you check.
 - **Rounding mode and reassociation.** IEEE addition/multiplication aren't associative, so `(a+b)+c != a+(b+c)` in general; the compiler may not reorder FP without `-ffast-math` (Ch. 11, 22), and *enabling* reassociation changes results. The default rounding mode (round-to-nearest-even) is fine; changing it is rare and slow.
 - **Determinism.** The *same* FP source can produce *different* bits across compilers, optimization levels, `-ffast-math`, FMA-vs-separate-ops, and x87-vs-SSE — a problem for **bit-exact replay** (Ch. 75) and cross-machine agreement. Controlling determinism (§27.4.3) means pinning the FP environment.
@@ -64,9 +64,12 @@ The model: **FP ops differ wildly in cost (add cheap, div/sqrt expensive — kee
 Two measurements: the **denormal cliff** (the headline hazard) and the **latency of FP ops** (to know what to keep off dependency chains, Ch. 11). For denormals, run the same loop on normal vs denormal data, with FTZ/DAZ off vs on.
 
 ```cpp
-// fp.cpp — denormal slowdown, and FTZ/DAZ fix.  Also illustrates div latency.
+// fp.cpp — denormal slowdown, and FTZ/DAZ fix.
 // Build: g++ -O2 -std=c++20 -march=native fp.cpp -o fp   (NO -ffast-math, so FTZ isn't auto-set)
-// Run pinned:  taskset -c 2 ./fp normal | ./fp denormal | ./fp denormal-ftz
+// Run pinned, one mode at a time:
+//   for m in normal denormal denormal-ftz; do taskset -c 2 ./fp $m; done
+// The kernel is a throughput-bound elementwise multiply (GCC vectorizes it to 8-wide vmulps), NOT a
+// serial reduction: a `s += ...` chain would be bound by the 4-cycle vaddss latency and hide the cliff.
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -82,18 +85,19 @@ int main(int argc, char** argv) {
         _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
         _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
     }
-    constexpr int N = 4096, REPS = 200'000;
-    std::vector<float> a(N);
+    constexpr int N = 4096, REPS = 200'000;                // 16 KiB in, 16 KiB out: L1-resident
+    std::vector<float> a(N), b(N);
     float seed = denormal ? 1e-39f : 1.0f;               // 1e-39f is denormal (< ~1.2e-38)
     for (auto& x : a) x = seed;
 
     auto t0 = std::chrono::steady_clock::now();
-    float s = 0;
-    for (int r = 0; r < REPS; ++r)
-        for (int i = 0; i < N; ++i) s += a[i] * 0.5f;     // produces/uses denormals if seed tiny
+    for (int r = 0; r < REPS; ++r) {
+        for (int i = 0; i < N; ++i) b[i] = a[i] * 0.5f;   // consumes AND produces denormals if seed tiny
+        asm volatile("" : : "r"(b.data()) : "memory");    // keep the store loop alive (Ch. 3)
+    }
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
-    std::printf("%-13s s=%g  %.3f ns/op\n", mode, (double)s, ns/((double)REPS*N));
+    std::printf("%-13s b[0]=%g  %.3f ns/op\n", mode, (double)b[0], ns/((double)REPS*N));
     return 0;
 }
 ```
@@ -102,10 +106,12 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
 
 ```
                        ns / op        notes
-normal                 ~0.4 ns        normal floats: fast hardware path
-denormal               ~45 ns         denormal values: microcode assist  <- ~100x CLIFF
-denormal-ftz           ~0.4 ns        FTZ/DAZ flush denormals → back to fast path
+normal                 ~0.05 ns       8-wide vmulps from L1: ~0.15 cycle per element
+denormal               ~4.5 ns        one ~150-cycle microcode assist per vmulps (÷8 elements)  <- ~100x CLIFF
+denormal-ftz           ~0.05 ns       FTZ/DAZ flush denormals → back to fast path
 ```
+
+The ratio is what matters, and it is *kernel-shaped*: the assist costs ~150 cycles per *instruction*, so an 8-wide vector loop amortizes it to ~19 cycles per element, a scalar throughput-bound loop pays the full ~150 per element (several hundred ×), and a serial `s += a[i] * k` reduction — already bound by the 4-cycle `vaddss` latency chain — shows only ~5-10× because the baseline is slow to begin with. Run the kernel you actually ship.
 
 And FP op latencies (from Agner Fog / `llvm-mca`, Ch. 11), the numbers that drive "keep off the dependency chain":
 
@@ -126,7 +132,7 @@ Implement prices/quantities/money as scaled integers (§27.2.1) — the hot-path
 
 - **Pick a scale and stick to it.** A fixed scale (e.g. 10⁸, or "in ticks") in `int64`; document it, and ideally wrap it in a strong type (`struct Price { std::int64_t ticks; };` — a zero-cost abstraction, Ch. 19) so you can't accidentally mix a scaled and unscaled value or add a price to a quantity. The strong type also lets you *forbid* nonsensical ops (price × price) at compile time.
 - **Exact add/subtract/compare.** Same-scale add/subtract/compare are just integer ops — exact, fast (Ch. 28), branchless-friendly (Ch. 13). This covers the overwhelming majority of price math (book updates, spread = ask − bid, P&L = Σ(price × qty)).
-- **Multiply/divide need scale management.** `price × qty` (a price times a share count) is fine into a wider notional integer; multiplying two *scaled* values double-scales (divide back by the scale, with rounding); division needs explicit rounding (§27.2.2). Use `__int128` (or `_mul128`) for intermediate products that might overflow `int64` (notional = price × large qty), then rescale — and **check for overflow** (Ch. 72): a silent `int64` overflow in notional is a correctness/security bug.
+- **Multiply/divide need scale management.** `price × qty` (a price times a share count) is fine into a wider notional integer; multiplying two *scaled* values double-scales (divide back by the scale, with rounding); division needs explicit rounding (§27.2.2). Use `__int128` (GCC/Clang), or `__builtin_mul_overflow` for a checked 64-bit product, for intermediate products that might overflow `int64` (notional = price × large qty), then rescale — and **check for overflow** (Ch. 72): a silent `int64` overflow in notional is a correctness/security bug.
 - **Tick handling is integer rounding** (§27.2.2) — round to the tick grid with integer arithmetic and a compile-time tick table (Ch. 18, 25). Exact, no FP.
 - **Convert at the boundaries only.** Parse the wire price directly into scaled integer (Ch. 53's integer parsing — `from_chars`/branch-free), keep it integer through the hot path, and convert to `double`/string only for display/logging (off the hot path, Ch. 71). Don't round-trip through `double`.
 
@@ -134,10 +140,10 @@ Implement prices/quantities/money as scaled integers (§27.2.1) — the hot-path
 
 Eliminate the denormal cliff (§27.2.3, §27.3):
 
-- **Set FTZ and DAZ once per thread at startup.** `_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON)` and `_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON)` (from `<pmmintrin.h>`), or set the MXCSR bits directly, in each hot thread's setup — **not** `main` only, because MXCSR is **thread-local** and a new thread defaults to denormals-on. Make it part of the standard thread-init (alongside affinity — Ch. 42, and FP env).
+- **Set FTZ and DAZ once per thread at startup.** `_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON)` and `_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON)` (from `<pmmintrin.h>`), or set the MXCSR bits directly, in each hot thread's setup — **not** `main` only: MXCSR is **per-thread** state, inherited from the creating thread at `clone()` time, so a thread created *before* `main`'s setup, by a thread pool, or by a third-party runtime can arrive denormals-on. Make it part of the standard thread-init (alongside affinity — Ch. 42, and FP env) and *assert* it there rather than trusting inheritance.
 - **Know that `-ffast-math` sets it for you — with caveats.** `-ffast-math`/`-Ofast` (Ch. 22) enables FTZ/DAZ (via crt startup) *and* a host of other FP relaxations (reassociation, no-NaN assumptions) you may not want (§27.5, §27.6). If you want *only* FTZ/DAZ, set the flags explicitly rather than enabling all of fast-math.
 - **Accept the precision trade.** FTZ/DAZ lose gradual underflow (tiny near-zero values snap to zero). For trading math (prices are integers anyway; signals/risk don't need 10⁻³⁰⁸ precision) this is a non-issue; for the rare numerically-delicate computation, scope FTZ to the hot loop and restore for that calculation. Verify your specific math tolerates it.
-- **Document and test it.** A thread missing the FTZ/DAZ setup is a latent latency bug. Assert/log the MXCSR state in hot threads; include "FTZ/DAZ set" in the warm-up checklist (Ch. 46, Appendix C).
+- **Document and test it.** A thread missing the FTZ/DAZ setup is a latent latency bug. Assert/log the MXCSR state in hot threads; include "FTZ/DAZ set" in the per-thread setup checklist (Appendix C's per-process section; Ch. 42's thread-init).
 
 ### 27.4.3 Cross-build determinism on the hot path
 
@@ -152,10 +158,10 @@ When bit-exact reproducibility matters — **deterministic replay** (Ch. 75, 76)
 
 FP flags change *which instructions* the compiler emits, and that's verifiable. Snippets are **verified** Clang 18.1 output (Appendix L.3; `--target=x86_64-linux-gnu -march=x86-64-v3`).
 
-**FMA contraction (`a*b+c`).** With `-ffp-contract=fast` (or `-ffast-math`), the compiler fuses to one `vfmadd`; with `-ffp-contract=off`, it emits separate `mul` then `add` (one extra rounding — a *different result*):
+**FMA contraction (`a*b+c`).** Whenever `-march` enables FMA the compiler fuses `a*b+c` into one `vfmadd` **by default** (GCC's default is `-ffp-contract=fast`, even under `-std=c++20`; Clang's is `=on`, fusing within an expression); only `-ffp-contract=off` forces the separately-rounded `mul` then `add` (one extra rounding — a *different result*) — so replay-critical code must pass it explicitly:
 
 ```asm
-; a*b + c   with -ffp-contract=fast:        ONE op, one rounding
+; a*b + c   default (-ffp-contract=fast/on): ONE op, one rounding
         vfmadd213sd xmm0, xmm1, xmm2        ; xmm0 = xmm0*xmm1 + xmm2
 ; a*b + c   with -ffp-contract=off:         TWO ops, two roundings (deterministic-strict)
         vmulsd  xmm0, xmm0, xmm1
@@ -174,11 +180,12 @@ The two produce **different bits** — which is exactly the determinism knob of 
         vaddpd  ymm1, ymm1, [rdi + 8*rcx + 32]
 ```
 
-**Division → reciprocal (`-ffast-math` / `-freciprocal-math`).** Fast-math may replace a `divpd` with a (lower-latency, lower-precision) reciprocal-estimate sequence (`vrcpps` + Newton step) — relevant to the Ch. 11 "keep div off the chain" point:
+**Division → reciprocal (`-freciprocal-math`, part of `-ffast-math`).** `-freciprocal-math` lets the compiler rewrite `x/y` as `x*(1/y)` and hoist a loop-invariant reciprocal out of the loop — the Ch. 11 "keep div off the chain" transformation done for you. It does **not** by itself emit a reciprocal *estimate*: neither GCC 13 nor Clang 18 replaces `vdivss`/`vdivsd` with `vrcpss`/`vrcpps` + a Newton step unless you also pass `-mrecip` (verified: `-O2 -ffast-math -march=x86-64-v3` still emits `vdivsd`), and the estimate exists only for *single* precision at x86-64-v3 (`vrcp14pd` needs AVX-512), so a `double` division is never approximated there:
 
 ```asm
-; a / b  strict:   vdivsd (expensive, ~14-22 cyc)
-; a / b  fast:     vrcpps + refine (faster, approximate)   <- precision traded for latency
+; x / y  strict:                       vdivsd  (expensive, ~14-22 cyc, on the chain)
+; x / y  -freciprocal-math, y invariant: vdivsd once, then vmulsd per iteration (hoisted 1/y)
+; float x / y  -ffast-math -mrecip:    vrcpss + one Newton step (~1-2 ulp)   <- precision traded for latency
 ```
 
 The verification habits: **for FP hot code, disassemble and confirm (1) the instruction selection matches your flag intent** — FMA where you want it / separate ops where you need determinism; vectorized reduction only with reassociation enabled; **(2) FTZ/DAZ is actually in effect** (it's runtime MXCSR state, not an instruction — assert it at thread start, §27.4.2); **(3) `div`/`sqrt` aren't sitting on a dependency chain** (Ch. 11) where a reciprocal-multiply or hoist would help. When you enable `-ffast-math` for speed, *read the asm and re-check the numbers* — it changed both.
@@ -200,7 +207,7 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 
 **Exercises**
 
-1. **Reproduce the denormal cliff.** Build `fp.cpp`; run `normal`/`denormal`/`denormal-ftz` pinned. Confirm the ~100× slowdown on denormals and that FTZ/DAZ removes it. Then *forget* to set FTZ in a spawned `std::thread` and show the cliff returns (MXCSR is thread-local).
+1. **Reproduce the denormal cliff.** Build `fp.cpp`; run `normal`/`denormal`/`denormal-ftz` pinned. Confirm the ~100× slowdown on denormals and that FTZ/DAZ removes it. Then spawn the worker thread *before* `main` sets FTZ/DAZ (or have the worker call `_mm_setcsr(0x1F80)` to reset its FP environment) and show the cliff returns — demonstrating both that MXCSR is per-thread and that a thread *inherits* it from its creator (§27.2.3).
 2. **Scaled-integer price type.** Implement a `Price` strong type (scaled `int64`) with exact add/sub/compare, `price × qty` into `__int128` notional with overflow check, and tick rounding via a `constexpr` tick table (Ch. 18). Show `0.1+0.2`-style errors that `double` has and integers don't.
 3. **FMA/contraction determinism.** Compile `a*b+c` with `-ffp-contract=fast` vs `off`; diff the asm (§27.5) and the *result bits*. Build a tiny "replay" that recomputes a value and show it matches only with contraction off and matching flags (§27.4.3).
 4. **Div on the chain.** Write a latency-bound loop with a `div` in the carried dependency (Ch. 11); measure. Replace with reciprocal-multiply (hoist `1/b`); re-measure. Quantify using the op-latency table (§27.3).
@@ -209,7 +216,7 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 **Checklist — fixed/floating-point arithmetic**
 
 - [ ] Prices, quantities, and notional are **scaled integers** (`int64`/`__int128`), ideally **strong-typed** (Ch. 19) — never `double`; conversion to FP/string is at the **boundaries** only.
-- [ ] **FTZ + DAZ are set in every hot thread's startup** (thread-local MXCSR) — the denormal cliff (§27.3) can't occur; the state is asserted/logged (Ch. 46).
+- [ ] **FTZ + DAZ are set in every hot thread's startup** (thread-local MXCSR) — the denormal cliff (§27.3) can't occur; the state is asserted/logged (Appendix C; Ch. 42).
 - [ ] **No `==` on computed floats** (`-Wfloat-equal`); FP comparison uses tolerance, exactness uses integers.
 - [ ] **`div`/`sqrt` are off dependency chains** (Ch. 11) — hoisted/reciprocal-multiplied; FMA used where precision/perf allow.
 - [ ] **NaN/Inf are guarded at input boundaries** (Ch. 53); bad market values can't silently poison computations.
@@ -223,14 +230,14 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 - IEEE 754-2019 and the Intel *SDM* (MXCSR, FTZ/DAZ, SSE/AVX FP) and *Optimization Reference Manual* — the FP control state and denormal-handling behavior of §27.2.3/§27.4.2.
 - A. Fog, *Instruction Tables* and *Optimizing software in C++* — FP op latency/throughput (the §27.3 table) and the cost of denormals, div/sqrt, and reassociation.
 - The GCC/Clang documentation — `-ffast-math` and its components (`-ffinite-math-only`, `-fassociative-math`, `-freciprocal-math`), `-ffp-contract`, and `-Wfloat-equal` (§27.4.3, §27.5; ties Ch. 22, Appendix D).
-- Boost.Multiprecision / Intel Decimal Floating-Point and the C `_Decimal` proposals — decimal representations for off-hot-path exact money math (§27.2.1).
+- Boost.Multiprecision / Intel Decimal Floating-Point, the decimal floating types standardised (optionally) in C23 (`_Decimal64`, `__STDC_IEC_60559_DFP__`), and GCC's `std::decimal` (TR 24733, `<decimal/decimal>`) — decimal representations for off-hot-path exact money math (§27.2.1).
 
 ## 27.9 Additional Reading
 
 - The "fixed-point arithmetic" and "representing money" writeups (e.g. Martin Fowler's *Money* pattern, exchange protocol price encodings) — practical scaled-integer price design.
 - N. Maclaren / numerical-analysis notes on FP determinism and reproducibility — background for §27.4.3 and replay (Ch. 75).
 - Ch. 11 (*Pipelines*) — FP latency/dependency chains and reassociation; Ch. 28 (*Bit/Integer Tricks*) — the integer math scaled prices run on; Ch. 29 (*SIMD*) — FP vectorization and downclocking; Ch. 53 (*Wire Decoding*) — parsing prices to scaled integers; Ch. 75 (*Capture & Replay*) — deterministic FP; Ch. 72 (*Secure Programming*) — integer overflow in price math.
-- **Appendix D** (Compiler Flag Reference) — the FP/math flags consolidated; **Appendix E** — FP op latency numbers.
+- **Appendix D** (Compiler Flag Reference) — the FP/math flags consolidated; Agner Fog's *Instruction Tables* and uops.info (§27.8) — FP op latency/throughput numbers (Appendix E's table has no FP rows).
 
 ---
 

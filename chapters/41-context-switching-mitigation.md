@@ -10,7 +10,7 @@
 
 ## 41.1 Why it matters: a switch trashes the caches and TLB
 
-A context switch — the OS taking the CPU away from your thread to run another — looks cheap in isolation (the *direct* cost, saving/restoring registers and running the scheduler, is ~1-5 µs) but is *catastrophically* expensive in its *indirect* cost: when your thread is switched out and later switched back in, it returns to a **cold** core. The other thread that ran in the meantime evicted your working set from L1/L2 (Ch. 7), your code from the L1i (Ch. 12), your translations from the TLB (Ch. 15), and your history from the branch predictors (Ch. 13–14). So the first hundreds of memory accesses after you resume are cache misses, TLB misses, and mispredicts — *thousands* of cycles of cold-start penalty (Ch. 46) on top of the few-microsecond direct cost. A context switch on the hot path doesn't cost you 2 µs; it costs you 2 µs *plus* a cold restart that can be tens of microseconds of degraded execution. For a tick-to-trade path budgeted in hundreds of nanoseconds, **a single context switch is a complete latency blowout**, and it lands in the tail (Ch. 1) unpredictably.
+A context switch — the OS taking the CPU away from your thread to run another — looks cheap in isolation (the *direct* cost, saving/restoring registers and running the scheduler, is ~1-5 µs) but is *catastrophically* expensive in its *indirect* cost: when your thread is switched out and later switched back in, it returns to a **cold** core. The other thread that ran in the meantime evicted your working set from L1/L2 (Ch. 7), your code from the L1i (Ch. 12), your translations from the TLB (Ch. 15), and your history from the branch predictors (Ch. 13–14). So the first hundreds of memory accesses after you resume are cache misses, TLB misses, and mispredicts — *tens of thousands* of cycles, i.e. tens of microseconds, of cold-start penalty (Ch. 46 measures ~5 µs for a small working set; a large one costs more) on top of the few-microsecond direct cost. A context switch on the hot path doesn't cost you 2 µs; it costs you 2 µs *plus* a cold restart that can be tens of microseconds of degraded execution. For a tick-to-trade path budgeted in hundreds of nanoseconds, **a single context switch is a complete latency blowout**, and it lands in the tail (Ch. 1) unpredictably.
 
 This reframes the entire OS-scheduling question for low latency. The general-purpose OS is *designed* to context-switch constantly — that's how it shares a few cores among hundreds of threads fairly. But a latency-critical trading thread does *not* want to be a fair citizen sharing a core; it wants to **own a core completely and never be switched off it.** Every involuntary preemption (the scheduler deciding another thread should run), every migration (the scheduler moving your thread to a different core, instantly cold), every syscall that blocks (putting you to sleep and requiring a wake-up switch — Ch. 32), every interrupt handled on your core (Ch. 42) — each is a context switch or a cache-trashing event that the hot path must eliminate. This is the through-line of Part VII: **take a core away from the OS's general scheduling, pin the hot thread to it (Ch. 42), eliminate everything else that could run or interrupt there (Ch. 42, 45), and keep the thread running continuously — busy-polling rather than blocking (§41.4.2) — so it's never switched out and never goes cold.**
 
@@ -23,17 +23,17 @@ The companion cost is **syscalls**. A system call crosses from user space into t
 ```
    DIRECT cost (~1-5 µs): the switch mechanism itself
      - save outgoing thread's registers, run the scheduler, load incoming thread's registers
-     - (with KPTI / spec-exec mitigations — Ch. 6 — a page-table switch on kernel entry adds more)
+     - (with KPTI / spec-exec mitigations — Ch. 6 — a page-table switch on kernel entry adds more on Meltdown-affected CPUs)
 
    INDIRECT cost (often FAR larger): the cold restart when YOUR thread resumes
      - L1/L2 data cache evicted by the other thread       → hundreds of misses (Ch. 7)
      - L1i / µop cache evicted                            → front-end stalls (Ch. 12)
      - TLB flushed (or polluted)                          → page-walk storms (Ch. 15)
      - branch predictors polluted                         → mispredicts (Ch. 13-14)
-     → the resumed thread runs COLD for thousands of cycles (Ch. 46) — the real cost
+     → the resumed thread runs COLD for tens of thousands of cycles (Ch. 46) — the real cost
 ```
 
-The mental correction: **never think of a context switch as "a few microseconds." Think of it as "a few microseconds *plus* a cold-start that degrades the next ~10-100 µs of execution."** This is why even *infrequent* switches wreck the tail, and why eliminating them (not just minimizing them) is the goal.
+The mental correction: **never think of a context switch as "a few microseconds." Think of it as "a few microseconds *plus* a cold-start that costs another ~5-50 µs, depending on the working set (Ch. 46 measures ~5 µs for a small one)."** This is why even *infrequent* switches wreck the tail, and why eliminating them (not just minimizing them) is the goal.
 
 **Kinds of switches — what causes them:**
 
@@ -57,7 +57,9 @@ Measure the three costs: a **null syscall** (the kernel-crossing floor), a **con
 ```cpp
 // ctxsw.cpp — null syscall cost, and context-switch cost via a futex ping-pong.
 // Build: g++ -O2 -std=c++20 ctxsw.cpp -o ctxsw -pthread
-// Run pinned:  taskset -c 2,3 ./ctxsw
+// Run pinned to ONE core:  taskset -c 2 ./ctxsw      (both threads on the same CPU: a true same-core switch)
+// Two cores (taskset -c 2,3) measure something else — a cross-core wake-up: IPI + the idle core's C-state exit,
+// several µs with deep C-states (Ch. 6). Report the two separately.
 #include <cstdio>
 #include <cstdint>
 #include <atomic>
@@ -103,18 +105,21 @@ int main() {
 }
 ```
 
-Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), pinned, turbo off (illustrative; mitigations on/off changes the syscall number a lot — Ch. 6):
+Representative results (toolchain and machine: Appendix L.3) — reference machine **Xeon Gold 6326** (Ice Lake-SP), both threads pinned to one core, turbo off, C-states capped at C1, `mitigations=auto` — which on Ice Lake-SP means **no KPTI** (the CPU reports `RDCL_NO`, so Meltdown is "Not affected" and the page-table switch is never enabled; MDS/L1TF/TAA likewise) — illustrative:
 
 ```
-   null syscall (getpid)              ~50-100 ns      kernel crossing, mitigations=off; ~150-400 ns with KPTI on (Ch. 6)
-   context switch (direct, measured)  ~1-3 µs         the futex ping-pong round-trip / 2
+   null syscall (getpid)              ~50-100 ns      kernel crossing on Ice Lake-SP (no KPTI; mitigations=off moves it only modestly —
+                                                       eIBRS, VERW, retpolines). On Meltdown-affected cores (Skylake-SP and earlier) KPTI's
+                                                       page-table switch makes it ~150-400 ns, and mitigations=off a big win (Ch. 6)
+   context switch (direct, same core) ~1-3 µs         the futex ping-pong round-trip / 2, both threads on CPU 2
+   cross-core wake-up (taskset -c 2,3) ~3-10 µs       IPI + the idle core's C-state exit — a different quantity; depends on the C-state cap (Ch. 6)
    + cold-restart (indirect)          +5-50 µs        the resumed thread's working set is GONE (Ch. 7,12,15,46)
-                                                       (measure via cache-misses/cycles after resume)
+                                                       (measure via cache-misses/cycles after resume; Ch. 46: ~5 µs for a small working set)
 
    the hot path's budget is ~hundreds of ns → ANY of these is a blowout.
 ```
 
-Read it: a **null syscall** alone (~50-100 ns with mitigations off, ~150-400 ns with KPTI and the other spec-exec mitigations on — Ch. 6) already eats a large slice of a hot-path budget — which is why steady-state must be syscall-free. A **context switch** is ~1-3 µs of *direct* cost in this micro-measurement, but the micro-measurement *understates* it: in the ping-pong both threads stay roughly warm (tiny working set), so it hides the **indirect** cost — in a real system the resumed thread returns to a core whose caches/TLB/predictors were trashed by whatever ran in between, adding *tens of microseconds* of cold-start degradation (Ch. 46) that you see as a spike in `cache-misses`/`cycles` after resume, not in the switch count. The lesson the numbers force: **on a path budgeted in hundreds of nanoseconds, a syscall consumes most or all of the budget, and a switch or migration (direct cost + cold restart) is a 10-100× blowout — so the hot path must have *zero* of them in steady state.** Confirm it with `perf stat -e context-switches,migrations` on the hot thread: the target is **zero involuntary switches and zero migrations** during trading (Ch. 42, 45 deliver that). If you see non-zero, hunt down the cause (a hidden syscall, a stray IRQ, a missing pin).
+Read it: a **null syscall** alone (~50-100 ns on the reference Ice Lake-SP, where KPTI is never enabled; ~150-400 ns on a Meltdown-affected Skylake-era core with KPTI and the other spec-exec mitigations on — Ch. 6) already eats a large slice of a hot-path budget — which is why steady-state must be syscall-free. A **context switch** is ~1-3 µs of *direct* cost in this micro-measurement, but the micro-measurement *understates* it: in the ping-pong both threads stay roughly warm (tiny working set), so it hides the **indirect** cost — in a real system the resumed thread returns to a core whose caches/TLB/predictors were trashed by whatever ran in between, adding *tens of microseconds* of cold-start degradation (Ch. 46) that you see as a spike in `cache-misses`/`cycles` after resume, not in the switch count. The lesson the numbers force: **on a path budgeted in hundreds of nanoseconds, a syscall consumes most or all of the budget, and a switch or migration (direct cost + cold restart) is a 10-100× blowout — so the hot path must have *zero* of them in steady state.** Confirm it on the hot thread — `perf stat -t <tid> -e context-switches,cpu-migrations` — with the target **zero involuntary switches and zero migrations** during trading (Ch. 42, 45 deliver that). Note that perf's `context-switches` counts voluntary and involuntary switches *together*; to separate "it blocked" from "it was preempted" read `voluntary_ctxt_switches` / `nonvoluntary_ctxt_switches` in `/proc/<pid>/task/<tid>/status`. If you see non-zero, *attribute* it before guessing: `perf sched record -t <tid>` + `perf sched latency` shows who ran instead and for how long; the `sched:sched_switch` tracepoint (`perf trace -e sched:sched_switch -t <tid>`, or a one-line `bpftrace` probe — Ch. 61) names the next task and the switch reason; `strace -f -c` finds a hidden syscall; `/proc/interrupts` deltas find a stray IRQ on the core (Ch. 42). And cross-check `ctxsw.cpp` itself against `perf bench sched pipe -T` — the kernel's own ping-pong — before trusting its number.
 
 ## 41.4 Techniques
 
@@ -136,7 +141,7 @@ The second half: eliminate *voluntary* switches by **busy-polling instead of blo
 - **The cost: 100% CPU, always.** A busy-polling thread pegs its core at 100% forever (and burns power, generates heat — and on SMT affects the sibling — Ch. 43). That's an *accepted* cost for a dedicated hot core (you bought the core to do exactly this), but it means you can't busy-poll on a shared/general-purpose core without starving everything else.
 - **Block on cold/background paths.** Threads that are *not* latency-critical — control plane, admin, logging flush (Ch. 71), housekeeping — should **block** (`epoll_wait` — Ch. 47, condition variables), yielding their core to other work, exactly as a general server would. Busy-poll is *only* for the hot path; everything else blocks. Match the strategy to the thread's role (the hot/cold split of Ch. 1 at the scheduling level).
 - **`epoll`/io_uring with busy-poll modes (Ch. 47–48, 55).** Where you do use the kernel I/O stack on a latency path, Linux offers **busy-poll** socket options (`SO_BUSY_POLL`, `napi` busy-polling) and io_uring polled modes (Ch. 48) that *poll* for completions instead of sleeping+interrupt — a middle ground that avoids the block/wake switch while still using the kernel. Kernel bypass (Ch. 62) removes even that.
-- **Hybrid wait strategies (Ch. 37).** When a core *isn't* fully dedicated, a hybrid — spin for a short while, then block — caps the wasted spinning while keeping low latency for the common (work-arrives-soon) case. The Disruptor's wait strategies (Ch. 37.4.2) are exactly this knob.
+- **Hybrid wait strategies (Ch. 37).** When a core *isn't* fully dedicated, a hybrid — spin for a short while, then block — caps the wasted spinning while keeping low latency for the common (work-arrives-soon) case. The Disruptor's wait strategies (§37.4.2) are exactly this knob.
 
 ## 41.5 Pitfalls & anti-patterns: involuntary preemption, syscalls on the hot path
 
@@ -154,7 +159,7 @@ The second half: eliminate *voluntary* switches by **busy-polling instead of blo
 
 **Exercises**
 
-1. **Measure the costs.** Build `ctxsw.cpp` (pin to two cores); record null-syscall and context-switch costs. Then build with mitigations on vs off (`mitigations=off` boot param — Ch. 6, test box) and re-measure the syscall — how much do mitigations add (§41.3)?
+1. **Measure the costs.** Build `ctxsw.cpp`; run it pinned to *one* core (`taskset -c 2`) for the same-core switch, then to two (`taskset -c 2,3`) for the cross-core wake-up — explain the difference (IPI + C-state exit; vary the C-state cap — Ch. 6). Then boot with mitigations on vs off (`mitigations=off` kernel parameter — Ch. 6, test box) and re-measure the syscall — how much do mitigations add on *your* CPU (§41.3; little on Ice Lake-SP, a lot on Skylake-SP)?
 2. **See the indirect cost.** Pin a thread that streams a large array (working set > L2). Periodically force it off-core (run a cache-thrashing thread on the same core). Measure the latency *spike* right after each preemption (cold restart) with `perf` (cache-misses) — confirm the indirect cost dwarfs the direct (§41.2).
 3. **Zero switches.** Pin a busy-polling thread to a core; run `perf stat -e context-switches,cpu-migrations` for 10s. Now isolate the core (`isolcpus`/`nohz_full` — Ch. 45) and repeat. Get the involuntary switches and migrations to **zero** (§41.4.1).
 4. **Busy-poll vs block latency.** Build a producer→consumer where the consumer (a) `futex`-blocks waiting for work vs (b) busy-polls. Measure wake-to-process latency for each. Quantify the block/wake switch cost; confirm busy-poll wins on a dedicated core (§41.4.2, Ch. 32).
@@ -184,7 +189,7 @@ The second half: eliminate *voluntary* switches by **busy-polling instead of blo
 - The `cyclictest`/rt-tests documentation (ties Ch. 45) — measuring scheduling latency and jitter from preemption/interrupts.
 - Red Hat / kernel low-latency tuning guides — isolating cores, `nohz_full`, and eliminating switches (consolidated in Appendix C).
 - Ch. 42 (*Thread & Interrupt Pinning*) — the affinity/IRQ mechanisms; Ch. 43 (*SMT*) — the sibling's effect; Ch. 45 (*RT Scheduling*) — `isolcpus`/`nohz_full`/RT priority/`cyclictest`; Ch. 46 (*Warming*) — the cold-restart this chapter's switches cause; Ch. 47–48 (*epoll/io_uring*) — syscall/busy-poll I/O; Ch. 62 (*Kernel Bypass*) — removing the kernel from the hot path entirely.
-- **Appendix C** (System Tuning Checklist) — the `isolcpus`/`nohz_full`/IRQ/governor settings; **Appendix E** — context-switch and null-syscall latency numbers.
+- **Appendix C** (System Tuning Checklist) — the `isolcpus`/`nohz_full`/IRQ/governor settings; **Appendix E** — the null-syscall and context-switch rows (Appendix E's ~1-5 µs switch figure is this chapter's *direct* cost; the +5-50 µs cold restart of §41.3 is on top).
 
 ---
 

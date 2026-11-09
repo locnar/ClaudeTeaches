@@ -10,7 +10,7 @@
 
 ## 34.1 Why it matters: progress without locks
 
-A lock-free data structure lets multiple threads operate on shared data **without a lock** — no thread can be blocked by another thread holding a lock (because there is no lock to hold), so there's no lock contention (Ch. 32), no lock convoy, no priority inversion (Ch. 45), and — crucially for latency — **no thread can stall every other thread by being descheduled mid-critical-section** (the spinlock-preemption disaster of Ch. 32.5). For the low-latency data plane this is the decisive property: the channels between the shared-nothing stages of Ch. 31 (feed-handler → strategy → gateway) must hand off messages at nanosecond latency with a *bounded, predictable* cost on every operation, and a lock — with its tail-spiking contention and its dependence on the scheduler — can't deliver that. A lock-free **ring buffer** can: a push and a pop are each a handful of atomic operations with a fixed cost, no blocking, no syscall, no allocation (Ch. 23).
+A lock-free data structure lets multiple threads operate on shared data **without a lock** — no thread can be blocked by another thread holding a lock (because there is no lock to hold), so there's no lock contention (Ch. 32), no lock convoy, no priority inversion (Ch. 45), and — crucially for latency — **no thread can stall every other thread by being descheduled mid-critical-section** (the spinlock-preemption disaster of §32.5). For the low-latency data plane this is the decisive property: the channels between the shared-nothing stages of Ch. 31 (feed-handler → strategy → gateway) must hand off messages at nanosecond latency with a *bounded, predictable* cost on every operation, and a lock — with its tail-spiking contention and its dependence on the scheduler — can't deliver that. A lock-free **ring buffer** can: a push and a pop are each a handful of atomic operations with a fixed cost, no blocking, no syscall, no allocation (Ch. 23).
 
 The single most important lock-free structure in this domain is the **SPSC (single-producer, single-consumer) ring buffer** — and it's important precisely *because* it's the simplest. The shared-nothing pipeline architecture (Ch. 31, 37) is built from one-way handoffs between single-threaded stages, and a one-way handoff is *exactly* SPSC: one producer thread, one consumer thread, a fixed-size pre-allocated ring between them. SPSC is the workhorse because it needs **no CAS, no ABA handling, no reclamation** — just two atomic indices with acquire/release ordering (Ch. 30) — making it fast, simple, and *easy to get right*. Most of the lock-free structures a trading system actually runs on the hot path are SPSC rings; the more general (and more dangerous) MPMC queues, CAS loops, and dynamic lock-free structures are used *sparingly*, where the design genuinely needs many producers/consumers.
 
@@ -21,9 +21,11 @@ That ordering — simple-and-safe to complex-and-perilous — is the spine of th
 **The building block: compare-and-swap (CAS).** Lock-free algorithms are built on atomic **read-modify-write** primitives, chiefly `compare_exchange` (CAS): "atomically, if this location still equals the value I expected, set it to the new value; otherwise tell me it changed." The canonical lock-free update is a **CAS loop**: read the current value, compute the new value, CAS it in; if the CAS fails (someone else changed it), retry from the read:
 
 ```cpp
-T old = x.load(acquire);
-do { T desired = compute(old); }            // compute new state from observed old
-while (!x.compare_exchange_weak(old, desired, acq_rel, acquire));  // retry until we win
+T old = x.load(std::memory_order_acquire);
+T desired;
+do { desired = compute(old); }               // compute new state from observed old
+while (!x.compare_exchange_weak(old, desired, std::memory_order_acq_rel,
+                                std::memory_order_acquire));   // retry until we win (old is refreshed on failure)
 ```
 
 This makes progress *without a lock*: a thread that fails its CAS does so *because another thread succeeded* — the system as a whole advanced. That's the essence of lock-freedom.
@@ -49,7 +51,7 @@ The SPSC ring is the structure that matters most, so measure *it*: producer→co
 ```cpp
 // spsc.cpp — single-producer/single-consumer ring buffer; measure handoff throughput.
 // Build: g++ -O2 -std=c++20 -march=native spsc.cpp -o spsc -pthread
-// Run:  ./spsc   (producer + consumer pinned to two cores)
+// Run:  ./spsc   (producer pins itself to core 2, consumer to core 4 — two full cores, not SMT siblings)
 #include <atomic>
 #include <cstdio>
 #include <cstdint>
@@ -57,14 +59,27 @@ The SPSC ring is the structure that matters most, so measure *it*: producer→co
 #include <chrono>
 #include <new>
 #include <array>
+#include <pthread.h>
+#include <sched.h>
+
+#ifdef __cpp_lib_hardware_interference_size            // GCC 12+/libstdc++; Clang 19+ (Ch. 33, Appendix H)
+constexpr std::size_t kLine = std::hardware_destructive_interference_size;
+#else
+constexpr std::size_t kLine = 64;
+#endif
+
+static void pin_to(int core) {                           // Ch. 42
+    cpu_set_t s; CPU_ZERO(&s); CPU_SET(core, &s);
+    if (pthread_setaffinity_np(pthread_self(), sizeof s, &s) != 0) std::perror("pthread_setaffinity_np");
+}
 
 template <class T, std::size_t CAP>   // CAP must be a power of two (Ch. 28: index & (CAP-1))
 class SpscRing {
     static_assert((CAP & (CAP - 1)) == 0, "power of two");
     std::array<T, CAP> buf_{};   // fixed, pre-allocated storage. NOT std::vector<T> buf_{CAP}: for an integral T
                                  // that brace-init picks the initializer_list ctor -> a ONE-element vector holding CAP
-    alignas(std::hardware_destructive_interference_size) std::atomic<std::size_t> head_{0}; // producer writes
-    alignas(std::hardware_destructive_interference_size) std::atomic<std::size_t> tail_{0}; // consumer writes
+    alignas(kLine) std::atomic<std::size_t> head_{0}; // producer writes — own cache line (Ch. 33)
+    alignas(kLine) std::atomic<std::size_t> tail_{0}; // consumer writes — own cache line
 public:
     bool push(const T& v) {
         std::size_t h = head_.load(std::memory_order_relaxed);
@@ -87,9 +102,9 @@ SpscRing<std::uint64_t, 1024> ring;
 int main() {
     constexpr long N = 200'000'000;
     auto t0 = std::chrono::steady_clock::now();
-    std::thread prod([&]{ for (long i = 0; i < N; ) if (ring.push(i)) ++i; });   // (pin core A)
+    std::thread prod([&]{ pin_to(2); for (long i = 0; i < N; ) if (ring.push(i)) ++i; });
     std::uint64_t v, last = 0;
-    std::thread cons([&]{ for (long i = 0; i < N; ) if (ring.pop(v)) { last = v; ++i; } }); // (pin core B)
+    std::thread cons([&]{ pin_to(4); for (long i = 0; i < N; ) if (ring.pop(v)) { last = v; ++i; } });  // two full cores, not SMT siblings
     prod.join(); cons.join();
     auto t1 = std::chrono::steady_clock::now();
     double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
@@ -109,7 +124,7 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
    vs a std::mutex-protected queue:    ~10-20 Mmsg/s     (lock + futex under contention — Ch. 32)
 ```
 
-Read it: the padded SPSC ring hands off a message in ~7-12 ns — each operation touches the producer's `head` line and the consumer's `tail` line, plus the slot, with one cache-line transfer per direction (the inherent cost of moving data between cores, Ch. 7); no lock, no syscall, no allocation. **Putting `head` and `tail` on the same cache line (no padding) is 3-5× slower** — the exact false-sharing bug of Ch. 33 in the hottest structure, the most common SPSC mistake. **Batching** (reading the opposite index less frequently — caching it locally and only re-reading when the cached value says full/empty) amortizes the cross-core read and pushes throughput much higher. And the whole thing dwarfs a mutex-protected queue (Ch. 32). The lessons that carry: **pad head/tail (Ch. 33), use power-of-two capacity (Ch. 28: `& (CAP-1)`, no modulo), acquire/release ordering (Ch. 30: publish with release, observe with acquire), pre-allocate the buffer (no hot-path allocation — Ch. 23), and batch to amortize the cross-core index reads.** This SPSC ring — correct, padded, batched — is the data-plane primitive most of the system runs on.
+Read it: the padded SPSC ring *sustains* ~7-12 ns per message of **throughput** — inverse throughput, not the latency of one handoff. That figure is *below* a single cross-core cache-line transfer (~40-100 ns, Ch. 33 / Appendix E) because the transfers overlap: the producer's stores drain through its store buffer without waiting, the consumer pulls each slot line while the producer is already filling later slots, and the index lines move only when an end re-reads the other's index. The *latency* of one push→pop handoff — what a tick-to-trade path cares about — is a separate quantity, roughly one line transfer each way plus the consumer's polling granularity (~100-200 ns round trip on this box — measure it with a ping-pong variant of this listing under Appendix L's tail-latency harness), and its tail is what Ch. 1 asks you to watch. No lock, no syscall, no allocation either way. **Putting `head` and `tail` on the same cache line (no padding) is 3-5× slower** — the exact false-sharing bug of Ch. 33 in the hottest structure, the most common SPSC mistake. **Batching** (reading the opposite index less frequently — caching it locally and only re-reading when the cached value says full/empty) amortizes the cross-core read and pushes throughput much higher. And the whole thing dwarfs a mutex-protected queue (Ch. 32). The lessons that carry: **pad head/tail (Ch. 33), use power-of-two capacity (Ch. 28: `& (CAP-1)`, no modulo), acquire/release ordering (Ch. 30: publish with release, observe with acquire), pre-allocate the buffer (no hot-path allocation — Ch. 23), and batch to amortize the cross-core index reads.** This SPSC ring — correct, padded, batched — is the data-plane primitive most of the system runs on.
 
 ## 34.4 Techniques
 
@@ -127,7 +142,7 @@ The queue family, simplest to hardest — and the strong advice to stay as simpl
 
 The ring buffer is the concrete structure behind bounded queues, and the details matter:
 
-- **Power-of-two capacity (Ch. 28).** Size the ring to a power of two so index wrapping is `idx & (CAP-1)` (one AND) instead of `idx % CAP` (a division — Ch. 27). Use *monotonically increasing* indices (never wrap the counters themselves; wrap only when indexing) so `head - tail` gives the count and full/empty are unambiguous (avoids the "is it full or empty?" ambiguity of wrapped indices).
+- **Power-of-two capacity (Ch. 28).** Keep the capacity a *compile-time* power of two: with an unsigned index, `idx % CAP` and `idx & (CAP-1)` both compile to a single AND (the compiler does the mask trick for you — §28.4.3); it is a *runtime* capacity (or a signed index needing sign fix-up) that forces a ~15-40-cycle `div` (Ch. 11) into the hot loop. Use *monotonically increasing* indices (never wrap the counters themselves; wrap only when indexing) so `head - tail` gives the count and full/empty are unambiguous (avoids the "is it full or empty?" ambiguity of wrapped indices).
 - **Pad head and tail to separate cache lines (Ch. 33).** The single most important layout rule (§34.3): producer-written `head` and consumer-written `tail` on **separate** lines, or they false-share and you lose 3-5×.
 - **Cache the opposite index (batching).** The producer reads `tail` only to check fullness; instead of reading it (a cross-core load) every push, **cache** the last-seen `tail` and only re-read when the cache says "full" — most pushes then need no cross-core read. Symmetrically for the consumer and `head`. This batching is the big throughput lever (§34.3) and the Disruptor's core trick (Ch. 37).
 - **Pre-allocate the buffer (Ch. 23, 26).** The ring's storage is allocated once at startup, pre-faulted and `mlock`ed (Ch. 26), ideally huge-page-backed (Ch. 15) and NUMA-local (Ch. 16). The hot path never allocates. For IPC, the ring lives in shared memory (Ch. 26, 50) with indices as offsets (Ch. 26).
@@ -144,7 +159,7 @@ For the CAS-based structures that *do* manipulate pointers (MPMC, lock-free stac
 
 ## 34.5 Pitfalls & anti-patterns: livelock, lost wakeups
 
-- **Livelock under contention.** A CAS loop where threads keep failing and retrying (each invalidating the others' reads) can make *no* useful progress while burning CPU — lock-free in name, stuck in practice. Add **backoff** (Ch. 32.4.2) to CAS retries, reduce contention (shard — Ch. 31), or use a structure with less contention (SPSC). Watch for it under high load (§34.3 at high producer counts).
+- **Livelock under contention.** A CAS loop where threads keep failing and retrying (each invalidating the others' reads) can make *no* useful progress while burning CPU — lock-free in name, stuck in practice. Add **backoff** (§32.4.2) to CAS retries, reduce contention (shard — Ch. 31), or use a structure with less contention (SPSC). Watch for it under high load (Exercise 5's library MPMC queue at 4↔4 shows where the retries begin).
 - **Head/tail false sharing (the #1 ring bug).** Producer-written `head` and consumer-written `tail` on the same cache line → 3-5× slowdown (§34.3, Ch. 33). **Pad them.** The most common and most impactful lock-free-queue mistake.
 - **Wrong memory ordering.** Publishing the data with `relaxed` instead of `release` (or reading the index with `relaxed` instead of `acquire`) is a race that *works on x86 and fails on ARM* (Ch. 30). The consumer sees the index advance but reads stale/absent slot data. Use acquire/release correctly; test on ARM / model-check (Ch. 40).
 - **ABA in pointer-based structures.** A lock-free stack/queue that frees and reuses nodes without tags/reclamation hits ABA — a popped node re-pushed at the same address makes a stale CAS succeed, corrupting the structure (§34.2-§34.4.3). Use tags, DWCAS, reclamation (Ch. 36), or avoid reuse (indices).
@@ -188,7 +203,7 @@ For the CAS-based structures that *do* manipulate pointers (MPMC, lock-free stac
 - P. McKenney, *Is Parallel Programming Hard?* — lock-free design, ABA, and the reclamation problem (leads into Ch. 36).
 - J. Preshing's blog — lock-free programming, the ABA problem, and memory ordering, with clear examples.
 - Ch. 30 (*Atomics*) — the ordering foundation; Ch. 32 (*Spinlocks*) — the locking alternative and CAS backoff; Ch. 33 (*False Sharing*) — padding head/tail; Ch. 35 (*Seqlocks*) — single-writer publication; Ch. 36 (*Safe Reclamation*) — the hard part of dynamic lock-free; Ch. 37 (*Disruptor*) — the ring buffer productionized; Ch. 40 (*Concurrency Tooling*) — validating lock-free code; Ch. 50 (*IPC*) — rings in shared memory.
-- **Appendix A** — ARM weak ordering and DWCAS (`casp`) differences; **Appendix E** — cross-core handoff latency; **Appendix F** — ABA/wait-free/lock-free glossary.
+- **Appendix A** — ARM weak ordering and LSE atomics; **Appendix E** — cross-core (HITM) transfer latency, the floor under any handoff; **Appendix F** — ABA glossary entry.
 
 ---
 
