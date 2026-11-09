@@ -1,4 +1,4 @@
-# Appendix H — C++23/26 Feature Availability Matrix
+# Appendix H — Modern C++ (C++20/23/26) Feature Availability Matrix
 
 > **Consolidates:** the modern-C++ features this book reaches for across many chapters — `std::expected` (Ch. 20), `std::flat_map`/`std::flat_set` (Ch. 25), `<bit>` operations and `std::bit_cast`/`std::byteswap` (Ch. 28), `std::print`/`std::println` (Ch. 71), `std::span` (Ch. 4, 72) and `std::mdspan` (Ch. 29 is its natural home), `std::atomic_ref` (Ch. 35) and `std::jthread` (setup threads — Ch. 31), and `std::execution` senders/receivers (Ch. 39). This book's convention (stated in the Preface) is to use modern C++ where it helps and to **name the standard + toolchain support**. This appendix is where that support is named in one place, so a reader on an older toolchain knows what compiles, what to feature-test, and what to fall back to.
 
@@ -6,7 +6,7 @@
 
 ---
 
-## H.1 How to read the matrix (columns, library-vs-language, the golden rule)
+## H.1 How to read the matrix (columns, library-vs-language, feature-test gating)
 
 Three ideas govern every row below.
 
@@ -16,7 +16,7 @@ Three ideas govern every row below.
 
 **Column legend for H.2–H.5:** *Feature* · *Paper* · *GCC/libstdc++* (first release with usable support) · *Clang/libc++* · *`<version>` macro* · *Fallback*. "libc++ partial/late" is called out where Clang's library trails its compiler by a wide margin (it frequently does for C++23 library features).
 
-## H.2 Core library features
+## H.2 Core library features (`std::expected`, `std::span`, `std::mdspan`, `std::flat_map`/`flat_set`, `std::print`)
 
 The everyday modern-library types the book leans on hardest.
 
@@ -31,7 +31,7 @@ The everyday modern-library types the book leans on hardest.
 
 **Trading relevance.** `std::expected` is the one to prioritize adopting — it gives branch-predictable, allocation-free error handling on the decode/order path (Ch. 20) with none of the throw-path cost (Ch. 20's exception discussion). `std::flat_map`/`flat_set` matter for small ordered structures where node-based `std::map` cache-misses dominate (Ch. 25) — both mainstream libraries ship them now (libstdc++ 15, libc++ 20/21), but they landed recently enough that the `boost::container::flat_map` / sorted-`vector` fallback is still what most deployed toolchains need. `std::print` is strictly off-hot-path (Ch. 71) — its value is ergonomics and avoiding iostream overhead in setup/logging code, not tick-to-trade.
 
-## H.3 Language features
+## H.3 Language features (`consteval`/`constinit`, concepts, coroutines, `[[likely]]`, `[[assume]]`)
 
 Compiler front-end features; these are gated by *language* macros (predefined by the compiler, no `<version>` needed).
 
@@ -48,7 +48,7 @@ Compiler front-end features; these are gated by *language* macros (predefined by
 
 **Trading relevance.** `[[likely]]`/`[[unlikely]]` and `[[assume]]` are the direct hot-path levers (Ch. 12, 21) — but note the fallbacks are what the standard attributes lower to anyway: `__builtin_expect` is universal, while the assume fallback is compiler-specific (`__builtin_assume` on Clang, `__attribute__((assume))` on GCC 13+, else the `__builtin_unreachable()` idiom) — so portability here costs a one-line macro at most. `consteval`/`constinit` move work and initialization to compile time (Ch. 18) — high value for lookup tables and configuration baked at build time. Deducing `this` is a nicety that can replace some CRTP boilerplate (Ch. 19), but CRTP remains the portable, well-understood choice.
 
-## H.4 Concurrency & execution
+## H.4 Concurrency & execution (`std::atomic_ref`, `std::jthread`, `std::execution` senders/receivers)
 
 The threading/atomics and async surface (Part VI).
 
@@ -64,7 +64,7 @@ The threading/atomics and async surface (Part VI).
 
 **Trading relevance.** `std::atomic_ref` matters where you must apply atomic operations to a field inside an otherwise-non-atomic struct (Ch. 33 — e.g. a hot counter in a cache-line-padded control block) without making the whole object `std::atomic`; libc++ shipped it very late, so check. `std::execution` (P2300) is the big forward-looking one (Ch. 39) but is **not in either shipping standard library yet** — use stdexec if you want to experiment, but do not build a production hot path on it assuming stdlib availability. `std::jthread` is convenience for setup/control threads, not the hot path.
 
-## H.5 Numerics & bit manipulation
+## H.5 Numerics & bit manipulation (`std::bit_cast`, `<bit>`, `std::byteswap`, saturating arithmetic, `from_chars`/`to_chars`)
 
 The bit-twiddling and numeric-conversion surface (Part V, Ch. 28; parsing in Ch. 53).
 
