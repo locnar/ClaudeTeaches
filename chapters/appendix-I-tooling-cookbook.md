@@ -47,10 +47,10 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 11, 12).
    perf record -e ibs_op//  -c 100000 ./app; perf report                            # AMD IBS: precise op sampling (what perf mem/c2c use on Zen)
    perf record -e ibs_fetch// ./app                                                  # AMD IBS: front-end sampling (Ch. 12)
    perf stat -M PipelineL1 ./app                                                     # Zen 4 pipeline-utilization top-down (names: perf list metricgroup)
-   # --- what it costs the hot core, and the syscall-free alternative (Ch. 101 §101.4.4) ---
+   # --- what it costs the hot core, and the syscall-free alternative (Ch. 102 §102.4.4) ---
    perf record -C 5 -e cycles:u -c 2000000 --call-graph fp --overwrite --switch-output=signal -o perf.data -- sleep 36000 &   # bounded, fp, frozen on SIGUSR2
    cat /sys/bus/event_source/devices/cpu/rdpmc                                      # 1 = rdpmc allowed for mmap'd events (default), 2 = always, 0 = never
-   ./rdpmc                                                                           # Ch. 101 §101.4.4's listing: cycles + LLC misses per stage from the thread itself
+   ./rdpmc                                                                           # Ch. 102 §102.4.4's listing: cycles + LLC misses per stage from the thread itself
 ```
 
 **Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 12); **bad speculation** → branch mispredicts (Ch. 13); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 7, 11); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).

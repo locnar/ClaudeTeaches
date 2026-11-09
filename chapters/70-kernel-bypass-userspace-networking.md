@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 54 (the kernel stack this bypasses), Ch. 63 (NIC features / vendor stacks — ef_vi/Onload), Ch. 46, 48, 49, 51 (the dedicated/isolated/busy-polling cores bypass demands), Ch. 15/29 (huge pages / mmap — DPDK mempools), Ch. 60 (the decoder fed by the bypass RX path), Ch. 69 (AF_XDP — the standard-Linux middle ground).
 >
-> **Leads into:** Ch. 71 (RDMA — one-sided remote memory, the intra-DC extreme), Ch. 77 (FPGA — hardware bypass beyond software), Ch. 101 (the tick-to-trade path this completes). The lowest-latency *software* network path — the culmination of the kernel-networking progression (Ch. 54–69); the floor under everything in Part XI is the PCIe round-trip (Ch. 74).
+> **Leads into:** Ch. 71 (RDMA — one-sided remote memory, the intra-DC extreme), Ch. 77 (FPGA — hardware bypass beyond software), Ch. 102 (the tick-to-trade path this completes). The lowest-latency *software* network path — the culmination of the kernel-networking progression (Ch. 54–69); the floor under everything in Part XI is the PCIe round-trip (Ch. 74).
 
 ---
 
@@ -94,11 +94,11 @@ Replacing the kernel TCP you gave up (for the order path):
 
 ### 70.4.3 The tick-to-trade fast path
 
-Assembling the whole low-latency path (the book's culmination, ties Ch. 101):
+Assembling the whole low-latency path (the book's culmination, ties Ch. 102):
 
 - **The bypass fast path end to end.** Market-data multicast → NIC → DMA into huge-page buffer → **ef_vi/DPDK poll** (no kernel) → **zero-copy decode** (Ch. 60, parse in the DMA buffer) → **order book** (Ch. 28) → **strategy** (the deterministic state machine — Ch. 89) → order built → **bypass TX** (ef_vi/DPDK send, or a userspace TCP stack for TCP venues) → wire. **No kernel, no syscalls, no copies, no allocation (Ch. 26), no locks (Ch. 37–40)** — the entire tick-to-trade path is user-space, busy-polling, on dedicated isolated cores (Ch. 48, 49, 51), warm (Ch. 53).
 - **Single-threaded, run-to-completion on a pinned core.** The hottest path is often a *single* thread on a *single* isolated core (Ch. 34, 46) running the whole poll → decode → strategy → send loop with no handoffs — the lowest latency (no inter-thread/inter-process hops on the critical path). Heavier/parallel work (risk, journaling) is off this core (Ch. 34, Ch. 40 pipeline, Ch. 89 process topology).
-- **Hardware timestamps throughout (Ch. 63, 66).** Capture NIC hardware RX/TX timestamps (the bypass APIs expose them) for true wire-to-wire measurement (Ch. 66, 101) — the tick-to-trade latency, measured honestly.
+- **Hardware timestamps throughout (Ch. 63, 66).** Capture NIC hardware RX/TX timestamps (the bypass APIs expose them) for true wire-to-wire measurement (Ch. 66, 102) — the tick-to-trade latency, measured honestly.
 - **Warm and pre-faulted (Ch. 26, 53).** Buffers pre-faulted/`mlock`'d (Ch. 26, 29), connections pre-established and warm (Ch. 53), the path kept warm with shadow traffic (Ch. 53) so the first real message isn't cold. Bypass removes the kernel; warming removes the cold-start (Ch. 53) — together they make the *rare critical message* fast.
 - **The floor is now hardware (Ch. 74–77).** With software bypass, the remaining latency is the wire, the NIC, the **PCIe round-trip** (Ch. 74 — the floor under every host-device transfer), and your (cache-warm — Ch. 7, branch-predicted — Ch. 13) code. To go lower, you move work *into hardware* — **FPGA inline** on the NIC (Ch. 77), the next tier. Software bypass is the software floor; Part XI is beyond it.
 
@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
 
 3. **Transparent vs explicit.** Run an existing UDP/TCP sockets app under Onload (`onload ./app` — transparent bypass, no code change) vs a raw ef_vi/DPDK version; compare latency and effort. Quantify the transparent-vs-explicit floor difference (§70.4.4).
 4. **Lose the tooling.** With the NIC bypassed, try `tcpdump`/`netstat` — observe they don't see the traffic (§70.5). Add capture *in* the bypass path (Ch. 94). 
-5. **End-to-end fast path (ties Ch. 101).** Assemble bypass RX → zero-copy decode (Ch. 60) → book (Ch. 28) → strategy → bypass TX, single-threaded on an isolated warm core; measure the wire-to-wire tick-to-trade latency (hardware timestamps — Ch. 66). This is the book's culminating measurement (§70.4.3).
+5. **End-to-end fast path (ties Ch. 102).** Assemble bypass RX → zero-copy decode (Ch. 60) → book (Ch. 28) → strategy → bypass TX, single-threaded on an isolated warm core; measure the wire-to-wire tick-to-trade latency (hardware timestamps — Ch. 66). This is the book's culminating measurement (§70.4.3).
 
 **Checklist — kernel bypass & userspace networking**
 
@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
 
 - The DPDK and Onload performance-tuning guides — production bypass configuration (cores, mempools, NUMA).
 - Talks on building HFT tick-to-trade fast paths with ef_vi/ExaNIC — real-world sub-µs software paths.
-- Ch. 54 (*Linux Native I/O*) — the stack bypassed; Ch. 63 (*NIC*) — the NIC/vendor stacks; Ch. 69 (*AF_XDP*) — the standard-Linux middle ground; Ch. 46–53 (*Scheduling/Warming*) — the isolated, warm cores bypass needs; Ch. 60 (*Decoding*) — the zero-copy decode; Ch. 66 (*PTP*) — hardware timestamps; Ch. 71 (*RDMA*) — one-sided remote memory; Ch. 74 (*PCIe*) — the round-trip floor under bypass; Ch. 77 (*FPGA*) — the hardware tier below software bypass; Ch. 101 (*End-to-End*) — the tick-to-trade path.
+- Ch. 54 (*Linux Native I/O*) — the stack bypassed; Ch. 63 (*NIC*) — the NIC/vendor stacks; Ch. 69 (*AF_XDP*) — the standard-Linux middle ground; Ch. 46–53 (*Scheduling/Warming*) — the isolated, warm cores bypass needs; Ch. 60 (*Decoding*) — the zero-copy decode; Ch. 66 (*PTP*) — hardware timestamps; Ch. 71 (*RDMA*) — one-sided remote memory; Ch. 74 (*PCIe*) — the round-trip floor under bypass; Ch. 77 (*FPGA*) — the hardware tier below software bypass; Ch. 102 (*End-to-End*) — the tick-to-trade path.
 - Ch. 56 (*Zero-Copy & the Modern Kernel Fast Path*) — the kernel-retaining middle ground below full bypass; Ch. 65 (*Flow Steering*) — `rte_flow` steering feeds to cores on the bypass path.
 - **Appendix E** — kernel-stack vs bypass vs FPGA RX rows (the AF_XDP/Onload/DPDK/ef_vi ladder itself is §70.3); **Appendix C** — bypass/core/NIC tuning.
 

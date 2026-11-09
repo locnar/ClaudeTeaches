@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 89 §89.2.2 (the deterministic state machine — `apply(state, input)`; this chapter produces the single ordered input stream it presupposes) and §89.3 (single-host restart time — the baseline a replica beats), Ch. 94 (the journal and snapshot + replay catch-up — the sequenced stream *is* the journal), Ch. 40–41 (one-ring broadcast with sequence barriers; the hop-cost model — the sequencer is one more hop), Ch. 57 and Ch. 61 (shm rings and reliable multicast — the two fan-out transports; A/B arbitration is what the sequencer's feed input has already done), Ch. 42 (the slow-replica policy), Ch. 47 §47.2.3 (timer fires as events), Ch. 66 (hardware timestamps — how the added hop is measured), Ch. 73 §73.4.1 (Aeron Cluster — the off-the-shelf comparison), Ch. 90–91 (the gate decisions and order transitions that become sequenced events).
 >
-> **Leads into:** Ch. 98 (spike forensics — a replica's divergence digest is the first forensic input), Ch. 99–100 (the sequencer's own health is a host and network telemetry concern), Ch. 101 (the capstone's architecture gains the sequencer and a replica). Not in this chapter: leader leases, fencing tokens and split-brain prevention on the *order path* — that is a separate failover topic (Appendix F defines *fencing token*); this chapter scopes to producing one order, consuming it identically in many places, and standing a replica up in place of a dead primary.
+> **Leads into:** Ch. 98 (spike forensics — a replica's divergence digest is the first forensic input), Ch. 99–100 (the sequencer's own health is a host and network telemetry concern), Ch. 102 (the capstone's architecture gains the sequencer and a replica). Not in this chapter: leader leases, fencing tokens and split-brain prevention on the *order path* — that is a separate failover topic (Appendix F defines *fencing token*); this chapter scopes to producing one order, consuming it identically in many places, and standing a replica up in place of a dead primary.
 
 ---
 
@@ -97,7 +97,7 @@ replica that consults rdtsc() inside apply():  digest 1d887fa021e774e8   → DIV
 
 Reading it:
 
-- **The price of one truth is one hop.** Against Ch. 41 §41.3's point-to-point rows, the sequencer inserts one ring hop between producer and consumer: ~450 ns here, ~100–150 ns on the reference machine with both ends spinning on the same socket (Ch. 89 §89.2.1's per-hop figure), and the sequencer's own work (a 40-byte copy and a release store) is invisible inside it. For the single-process build of Ch. 101 §101.3 that is ~10 % of the software budget; for the process-per-role topology it is one more of the "~3 shm hops" already being paid, and it *replaces* the strategy→gateway and gateway→risk rings rather than adding to them — the sequencer's fan-out is how those roles talk.
+- **The price of one truth is one hop.** Against Ch. 41 §41.3's point-to-point rows, the sequencer inserts one ring hop between producer and consumer: ~450 ns here, ~100–150 ns on the reference machine with both ends spinning on the same socket (Ch. 89 §89.2.1's per-hop figure), and the sequencer's own work (a 40-byte copy and a release store) is invisible inside it. For the single-process build of Ch. 102 §102.3 that is ~10 % of the software budget; for the process-per-role topology it is one more of the "~3 shm hops" already being paid, and it *replaces* the strategy→gateway and gateway→risk rings rather than adding to them — the sequencer's fan-out is how those roles talk.
 - **Replication is exact and cheap to verify.** Two replicas on two cores and a cold replay from the log agree to the bit over 400 001 events; the digest costs two multiplies per event. This is the measurement Ch. 89 §89.4.6 asked for and the one a production monitor publishes every *k* events (Ch. 86).
 - **Catch-up is ~3 ns per event** for a state that fits in cache: a warm standby a minute behind at 100 k events/s replays in ~20 ms; a cold restore's replay of a full day (50 M events) is ~150 ms before warm-up — against Ch. 89 §89.3's single-host restart, the state-rebuild term disappears into the session-takeover term. Real `apply` functions (a book update, a gate decision) cost 20–100 ns, so scale accordingly: still sub-second for a day.
 - **Determinism is fragile and the digest proves it.** One `rdtsc()` in `apply` — the mildest possible impurity — produced a different digest on the first run. Ch. 89 §89.2.2's rule is not advice; it is the precondition for everything in this chapter, and the digest comparison is how it is enforced in production rather than hoped for.
@@ -157,7 +157,7 @@ The sequencer's wrap gate (Ch. 40) blocks the *sequencer* when the slowest reade
 
 ### 96.4.6 Reducing what the other chapters carry
 
-Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's point-to-point rings remain the *minimal* topology and this chapter is the alternative when more than one consumer must agree; Ch. 94's journal becomes the sequenced log's persistence; Appendix J.6's glossary line now points at a chapter; Ch. 101's architecture diagram gains the sequencer and a replica (§101.2 and §101.3's hop note).
+Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's point-to-point rings remain the *minimal* topology and this chapter is the alternative when more than one consumer must agree; Ch. 94's journal becomes the sequenced log's persistence; Appendix J.6's glossary line now points at a chapter; Ch. 102's architecture diagram gains the sequencer and a replica (§102.2 and §102.3's hop note).
 
 ## 96.5 Pitfalls & anti-patterns
 
@@ -172,7 +172,7 @@ Ch. 89 §89.2.2's "a single ordered log" is produced here; Ch. 89 §89.4.1's poi
 - **Hash-map iteration in `apply`.** Iteration order depends on insertion history and allocation; two replicas with different histories (one restarted from a snapshot) differ. Flat arrays and explicit orders (Ch. 28).
 - **Snapshots at arbitrary points.** A snapshot taken mid-batch or at a wall-clock time is not comparable across replicas; snapshot at a `seq`.
 - **One copy of the journal.** The log is the system's memory; it is shipped (warm standby) and persisted (Ch. 94) from a dedicated reader, not from the sequencer's loop.
-- **Treating the sequencer's hop as free.** It is one ring hop (§96.3); budget it (Ch. 101 §101.3) and keep both ends on one socket.
+- **Treating the sequencer's hop as free.** It is one ring hop (§96.3); budget it (Ch. 102 §102.3) and keep both ends on one socket.
 
 ## 96.6 Exercises & checklist
 

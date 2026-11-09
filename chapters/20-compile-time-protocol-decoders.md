@@ -270,7 +270,7 @@ The compile-time decoder resolves everything that is *fixed* in the schema. Two 
 
 ### 20.4.5 Keeping the build-time cost bounded
 
-§20.3 priced a message type at 4–6 ms of front-end time per instantiating TU. Three habits keep that from compounding: instantiate each venue's `Message<…>` set in *one* decoder translation unit and expose a small non-template interface (or `extern template` the instantiations — Ch. 25 §25.4.2); keep the `consteval` parser's complexity linear in the schema length (the duplicate-name check above is O(n²) in field count, which is fine at 60 fields and would not be at 6,000 — SBE schemas with thousands of fields want a sorted check); and watch `-ftime-trace`'s `InstantiateFunction` rows in CI the way Ch. 101 watches a latency percentile — a decoder header that goes from 300 ms to 3 s is a regression even though no runtime number moved.
+§20.3 priced a message type at 4–6 ms of front-end time per instantiating TU. Three habits keep that from compounding: instantiate each venue's `Message<…>` set in *one* decoder translation unit and expose a small non-template interface (or `extern template` the instantiations — Ch. 25 §25.4.2); keep the `consteval` parser's complexity linear in the schema length (the duplicate-name check above is O(n²) in field count, which is fine at 60 fields and would not be at 6,000 — SBE schemas with thousands of fields want a sorted check); and watch `-ftime-trace`'s `InstantiateFunction` rows in CI the way Ch. 102 watches a latency percentile — a decoder header that goes from 300 ms to 3 s is a regression even though no runtime number moved.
 
 ### 20.4.6 The C++26 reflection form (unverified: no shipping compiler implements it)
 

@@ -2,7 +2,7 @@
 
 > **Consolidates:** Ch. 6 (system setup), Ch. 15 (TLB/huge pages), Ch. 46 (context switching), Ch. 48 (thread/IRQ pinning), Ch. 49 (SMT), Ch. 50 (cache allocation / RDT), Ch. 51 (RT scheduling / kernel tuning), Ch. 53 (warming), Ch. 58 (socket/TCP tuning), Ch. 63 (NIC features), Ch. 65 (flow steering / receive scaling). This is the *operational* companion to those chapters: an ordered, copy-paste-oriented checklist for turning a stock Linux x86-64 box into a quiet, deterministic, low-jitter trading machine. Each item links to the chapter that explains **why**.
 
-**How to use this:** work top-down — BIOS first (C.1), then kernel cmdline (C.2, requires reboot), then runtime knobs (C.3), then per-process (C.4), then *verify* (C.5). Lower layers gate higher ones: there's no point tuning `sysctl` if C-states still fire in firmware. **Measure before and after every change** (Ch. 3) — this checklist is a starting point, not a guarantee; the verification pass (C.5) is what proves the box is actually quiet. Values shown are sensible defaults for a single-socket trading box; adapt core numbers to your topology (`lscpu`, `lstopo`). Treat this as a template to version-control alongside the application, not a one-time ritual (Ch. 101 — tuning is defended continuously).
+**How to use this:** work top-down — BIOS first (C.1), then kernel cmdline (C.2, requires reboot), then runtime knobs (C.3), then per-process (C.4), then *verify* (C.5). Lower layers gate higher ones: there's no point tuning `sysctl` if C-states still fire in firmware. **Measure before and after every change** (Ch. 3) — this checklist is a starting point, not a guarantee; the verification pass (C.5) is what proves the box is actually quiet. Values shown are sensible defaults for a single-socket trading box; adapt core numbers to your topology (`lscpu`, `lstopo`). Treat this as a template to version-control alongside the application, not a one-time ritual (Ch. 102 — tuning is defended continuously).
 
 ---
 
@@ -65,13 +65,13 @@ Applied when launching the trading process(es) (Ch. 48, 51, 16). **Why:** pin th
 
 ## C.5 Verification pass (`cyclictest`, jitter measurement)
 
-**Never trust the checklist — measure that the box is actually quiet** (Ch. 3, 51, 101). This pass is what turns "I set the knobs" into "the box is deterministic."
+**Never trust the checklist — measure that the box is actually quiet** (Ch. 3, 51, 102). This pass is what turns "I set the knobs" into "the box is deterministic."
 
 - [ ] **`cyclictest`** (Ch. 51): the canonical jitter measurement. Run pinned to a hot core, RT priority, for a meaningful duration under representative load: `cyclictest -m -p 80 -a 2 -t 1 -i 200 -d 0 -D 1h`. Read the **max** latency (the tail — Ch. 1), not the avg. A well-tuned isolated core should show single-digit-microsecond (often sub-µs avg, low-µs max) wake-up latency with a *tight* distribution; a fat max means residual jitter to hunt (an SMI, a missed isolation, a stray IRQ). Compare against an *un*-tuned core to see the improvement.
 - [ ] **Hunt residual jitter sources** (Ch. 46, 51, 52): if `cyclictest` max is high, find the culprit — `rtla osnoise`/`timerlat` with stop-on-threshold tracing and the kernel noise catalog (Ch. 52), `perf sched`, `ftrace`, the `hwlat` detector (catches SMIs and hardware latency the OS can't see — Ch. 6's hidden firmware jitter), check `/proc/interrupts` for IRQs landing on hot cores (C.3), check for stray processes (`ps -eLo psr,...` to see what's on each core). Iterate until the tail is flat.
 - [ ] **Verify the settings actually took:** C-states (`cpupower idle-info`), frequency/governor (`cpupower frequency-info`), isolation (`cat /sys/devices/system/cpu/isolated`, `/proc/cmdline`), IRQ affinity (`/proc/irq/*/smp_affinity`), huge pages (`/proc/meminfo` HugePages_*), THP (`/sys/kernel/mm/transparent_hugepage/enabled`), NUMA (`numactl -H`, `numastat`, `/proc/sys/kernel/numa_balancing` = 0), cache partition (`/sys/fs/resctrl/*/schemata`, `cpus_list`), mitigations (`/sys/devices/system/cpu/vulnerabilities/*`). A setting you *meant* to apply but didn't (a typo'd cmdline, a service that reset it) is the most common "why is it still jittery."
-- [ ] **Measure the application's own tail** (Ch. 3, 101): `cyclictest` proves the *box* is quiet; the real test is the *application's* tick-to-trade distribution (Ch. 101) under a microburst (Ch. 60) — run the §101.3 decomposition and confirm the per-stage tails are flat. The box being quiet is necessary, not sufficient.
-- [ ] **Re-verify after every change** (Ch. 101): a kernel update, a BIOS update, a config drift, a new background agent can silently re-introduce jitter. Bake this verification into a continuous sampler (Ch. 99 — the isolation counters diffed every second from a housekeeping core) and into the pre-trading-day readiness gate (Appendix M) — tuning is defended continuously, not set once.
+- [ ] **Measure the application's own tail** (Ch. 3, 102): `cyclictest` proves the *box* is quiet; the real test is the *application's* tick-to-trade distribution (Ch. 102) under a microburst (Ch. 60) — run the §102.3 decomposition and confirm the per-stage tails are flat. The box being quiet is necessary, not sufficient.
+- [ ] **Re-verify after every change** (Ch. 102): a kernel update, a BIOS update, a config drift, a new background agent can silently re-introduce jitter. Bake this verification into a continuous sampler (Ch. 99 — the isolation counters diffed every second from a housekeeping core) and into the pre-trading-day readiness gate (Appendix M) — tuning is defended continuously, not set once.
 
 ## C.6 Configuration as code and drift detection
 
@@ -97,7 +97,7 @@ Applied when launching the trading process(es) (Ch. 48, 51, 16). **Why:** pin th
 ## C.8 Additional Reading
 
 - The Red Hat *Low Latency Performance Tuning* and *Realtime* guides, and the CERN/CMS and trading-community tuning write-ups — real deployed checklists (C.1-C.5).
-- Talks on building deterministic Linux boxes for trading (e.g. the Carl Cook / Mechanical Sympathy material — Ch. 101) — the *why* behind the knobs.
+- Talks on building deterministic Linux boxes for trading (e.g. the Carl Cook / Mechanical Sympathy material — Ch. 102) — the *why* behind the knobs.
 - **Appendix A** (ARM/Graviton) — the ARM-server analogs of these knobs (often fewer: fixed frequency, no SMT — A.5-A.6); **Appendix D** (Compiler Flag Reference) — the *build-side* counterpart to this *system-side* checklist; **Appendix E** (Latency Numbers) — the costs (page fault, context switch, C-state wake-up) these knobs eliminate.
 
 ---
