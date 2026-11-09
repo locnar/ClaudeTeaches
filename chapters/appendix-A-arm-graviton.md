@@ -116,4 +116,4 @@ The strategic question: **does ARM-in-the-cloud belong in a latency-sensitive tr
 
 ---
 
-*Next: Appendix B — Beyond C++: Alternative Languages for Low-Latency, surveying Rust, C, Zig, and the case against managed runtimes (Java/C#/Go GC pauses and JIT warm-up) on the hot path — FFI with a C++ core, what transfers from this book and what doesn't, and matching language to the latency tier.*
+*Next: Appendix B — Beyond C++: Alternative Languages for Low-Latency, the two-page summary of Part XII's measured findings — Rust at parity with C++, the cross-language call ladder, what a GC and a JIT do to the hot thread — and the tier table in brief; what transfers from this book and what doesn't, and matching language to the latency tier.*

@@ -201,14 +201,25 @@ Before believing a benchmark number — the questions Ch. 3 says to ask, in orde
 
 Passing this checklist is what turns "this is faster" into *evidence* — the standard every performance claim in this book is held to.
 
-## L.5 References
+## L.5 Benchmarking across languages (the Ch. 77 protocol)
+
+Everything above is C++; Ch. 77 §77.2.3 extends it to a cross-language comparison, and the extension is four rules on top of L.1–L.4:
+
+1. **Same box, same core, same frequency state, nothing else running** — including the previous language's build daemon (`dotnet build-server shutdown`); the Appendix C quiet box, `taskset -c N`, governor and turbo fixed.
+2. **Same replayed capture, same work, same digest** — every implementation reads the same capture (Ch. 85) and folds every result into a 64-bit digest it prints; unequal digests void the row (Ch. 77 §77.4.6).
+3. **Warm and cold in separate windows** — pass 1 split at 1 k / 10 k / 100 k / 1 M messages, passes 2–3 whole; report the cold window and the steady state side by side and never compare one language's steady state with another's warm-up (a JIT's first hundred calls are 350× its steady state — Ch. 76 §76.3).
+4. **Each toolchain's sink and its asm** — `benchmark::DoNotOptimize`/`asm volatile("" : "+r"(x))` (C++, Ch. 73 §73.2.3), `std::hint::black_box` (Rust), `std.mem.doNotOptimizeAway` (Zig), JMH `Blackhole.consume` (Java), BenchmarkDotNet `Consumer`/`GC.KeepAlive` (.NET), a package-level sink (Go), `Sys.opaque_identity` (OCaml); and the per-toolchain "verify the codegen" step of Appendix I.11, so a deleted, hoisted or differently-inlined loop is caught before the number is believed.
+
+Report medians of *R* runs per row with the toolchain versions and flags in the header (Ch. 77 §77.3 is the worked example: nine toolchains, one kernel, one table), add the L.2 tail-latency variant for any row whose runtime can pause (Ch. 76), and state the box — numbers from a VM are not the reference machine's.
+
+## L.6 References
 
 - **Google Benchmark** documentation and User Guide — `benchmark::State`, `DoNotOptimize`/`ClobberMemory`, arguments/ranges, reporters and JSON output (L.1).
 - **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `HdrHistogram_c` libraries) — the basis of L.2; `hdr_histogram.h` documents the record-and-back-fill semantics of `hdr_record_corrected_value` and the false-return-on-out-of-range behaviour of `hdr_record_value` that L.2 relies on.
 - Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 17 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 47 (warming) — the warm-vs-cold discipline in L.3.
 - The `perf`, `taskset`, `chrt`, `cpupower`, `numactl` man pages (Appendix I) — the environment controls of L.3.
 
-## L.6 Additional Reading
+## L.7 Additional Reading
 
 - **Appendix I** (Tooling Command Cookbook) — the `perf stat`/pinning/`objdump` commands to run *alongside* a benchmark so the counters explain the timing.
 - **Appendix C** (System Tuning Checklist) — the box-level setup (isolation, governor, C-states) that makes a benchmark host quiet enough to trust.

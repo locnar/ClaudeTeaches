@@ -275,7 +275,7 @@ The verification habits:
 
 - CppCon talks on exception cost, `std::expected`, and "zero-overhead exceptions" — including asm-level walkthroughs of the throw path and unwinding tables.
 - Ch. 19 (*Zero-Cost Abstractions*) — the abstractions that *are* free, the counterweight to this chapter; Ch. 12 (*Code Layout*) — where landing pads / cold unwinding code belong; Ch. 54 (*Zero-Copy Parsing*) — hot-path error handling on untrusted input with `expected`; Ch. 81 (*Secure Programming*) — UB and error handling as a vulnerability class; Ch. 22 (*Build Toolchain*) — `-fno-exceptions`/`-fno-rtti` in context.
-- **Appendix D** (Compiler Flag Reference) — `-fno-exceptions`/`-fno-rtti` and their costs; **Appendix B** (B.1–B.2) — error handling in Rust (`Result`/`?`) and Zig (error unions): the value-based model without exceptions.
+- **Appendix D** (Compiler Flag Reference) — `-fno-exceptions`/`-fno-rtti` and their costs; **Ch. 74 §74.4.5** and **Ch. 75 §75.4.3** — error handling in Rust (`Result`/`?`) and Zig (error unions), and what exceptions and panics may not do at a C ABI boundary; **Appendix B** (B.3): the value-based model without exceptions.
 
 ---
 

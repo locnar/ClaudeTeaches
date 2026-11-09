@@ -133,7 +133,7 @@ Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRP
 
 - Talks on Aeron in production trading systems, and the Aeron Cluster / Raft consensus material (external — the Aeron docs; Ch. 83 covers the single-process deterministic state machine that Aeron Cluster replicates) — the full messaging + clustering stack (§67.4.1).
 - The datacenter-transport research line (Homa, NDP, pFabric, DCTCP — Ch. 66) — receiver-driven flow, priorities, and incast (§67.4.3).
-- **Appendix B** (*Beyond C++*) — Chronicle (off-heap Java messaging) and cross-language transports; Ch. 59 (*Flow Steering*) — getting these transports' packets to the right core; Ch. 66 (*Lossless Ethernet*) — the fabric under RDMA-based transports; **Appendix F** — HOL-blocking / receiver-driven / reliable-UDP glossary; **Appendix G** — the eRPC/Homa/Aeron bibliography.
+- **Ch. 76 §76.4.1** (*Managed Runtimes*) — Chronicle/Aeron (off-heap, garbage-free Java messaging) and **Ch. 75 §75.4.4** — cross-language shared-memory transports; Ch. 59 (*Flow Steering*) — getting these transports' packets to the right core; Ch. 66 (*Lossless Ethernet*) — the fabric under RDMA-based transports; **Appendix F** — HOL-blocking / receiver-driven / reliable-UDP glossary; **Appendix G** — the eRPC/Homa/Aeron bibliography.
 
 ---
 

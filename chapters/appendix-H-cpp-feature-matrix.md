@@ -122,7 +122,7 @@ The pattern that makes all of the above portable across the toolchain spread.
 ## H.8 Additional Reading
 
 - **Appendix D** (Compiler Flag Reference) — the `-std=`/`-stdlib=` flags (D.4) that select these standards and libraries.
-- **Appendix B** (Beyond C++) — where a feature's *absence* (or a whole missing capability) is an argument for another language; and how `constexpr`, `std::expected`, coroutines and `bit_cast`-style punning compare with their Rust/Zig counterparts (B.1–B.2).
+- **Part XII** (Ch. 74 §74.4.5, Ch. 77 §77.4.3) and **Appendix B** (B.3) — where a feature's *absence* (or a whole missing capability) is an argument for another language; and how `constexpr`, `std::expected`, coroutines and `bit_cast`-style punning compare with their Rust/Zig counterparts (B.1–B.2).
 - **Appendix G** (Annotated Bibliography) — the standards-committee and library-design background reading.
 - The `<version>` header, `__has_include`, and Godbolt (Ch. 4) — the fastest way to answer "does *my* toolchain have it?" for real, which no static table can.
 

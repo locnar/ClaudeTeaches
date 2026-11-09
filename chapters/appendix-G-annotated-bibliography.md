@@ -56,6 +56,10 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **`perf-record(1)`, `perf-intel-pt(1)`, `perf-script(1)` and `Documentation/trace/ftrace.rst`.** Overwrite/snapshot/`--switch-output`/`--control` modes, `-k CLOCK_MONOTONIC`, `trace_clock x86-tsc`, per-CPU rings — the always-on-frozen-on-trigger recipes of **Ch. 86 §86.4.3** and the uncore/IBS/RAPL/`msr` event syntax of **Ch. 2 §2.4.4**; `perf_event_open(2)`'s mmap page for `rdpmc` (**Ch. 89 §89.4.4**).
 
 
+- **GCC manual, *Extended Asm*, *Constraints for asm Operands*, *x86 Operand Modifiers*; Clang *Inline Assembly* extensions.** The normative contract behind every `asm` statement in the book — operands, clobbers, `volatile`, `asm goto` — **Ch. 73**.
+- **System V ABI, AMD64 Processor Supplement; Itanium C++ ABI; Drepper, *How to Write Shared Libraries*.** Registers, stack, struct passing and return, name mangling, the PLT/GOT and symbol visibility — the C waist of **Ch. 75** and the hand-written functions of **Ch. 73**.
+- **JEP 442/454 (Foreign Function & Memory API), JEP 439 (Generational ZGC), JEP 318 (Epsilon), JEP 483 (AOT Class Loading & Linking); the HotSpot GC Tuning Guide; the .NET GC/tiered-compilation/NativeAOT documentation; the Go GC Guide; the OCaml manual's runtime and C-interface chapters; the Rust Reference and rustc codegen options; the Zig language reference.** The primary documentation behind **Ch. 74–77**'s measurements and Appendix B's tables.
+
 ## G.3 Books
 
 - **★ Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* (6th ed., 2017).** The foundational architecture text — pipelines, caches, ILP, memory systems, multiprocessors. The "why" beneath **Part II** (Ch. 7–17) and the quantitative mindset of the whole book.
@@ -74,6 +78,10 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Raj Jain, *The Art of Computer Systems Performance Analysis* (1991).** Ch. 2's catalogue of measurement mistakes — comparing unconverted or mis-aligned measurements chief among them — is the methodological footing of the one-timeline rule in **Ch. 86 §86.2.2**.
 
 
+- **Mara Bos, *Rust Atomics and Locks* (O'Reilly, 2023).** The Rust memory model and its x86/ARM codegen — the companion to Ch. 30 for **Ch. 74** (§74.2.3, §74.4.3).
+- **Nicholas Nethercote, *The Rust Performance Book*; Jon Gjengset, *Rust for Rustaceans*.** Bounds-check elision, allocation avoidance, `unsafe` abstraction and FFI engineering — **Ch. 74**, **Ch. 75**.
+- **Konrad Kokosa, *Pro .NET Memory Management*; Minsky, Madhavapeddy & Hickey, *Real World OCaml* (memory representation, GC chapters).** The .NET and OCaml runtimes at the depth **Ch. 76** (§76.4.4, §76.4.6) can only summarise.
+
 ## G.4 Influential talks & blogs
 
 - **★ Carl Cook, "When a Microsecond Is an Eternity" (CppCon 2017).** The canonical HFT-C++ talk — keeping the hot path warm, branch-free, allocation-free, and measured. Touches Ch. 1, 13, 23–24, 47, and the end-to-end mindset of **Ch. 89**.
@@ -86,7 +94,10 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **Jeff Preshing, *Preshing on Programming*.** Lucid, example-driven posts on acquire/release, memory ordering, the ABA problem and lock-free patterns — the companion blog to **Ch. 30**, Ch. 34 and Ch. 35 (getting the seqlock fences right).
 - **Dmitry Vyukov, *1024cores.net* (and the Relacy Race Detector).** Bounded MPMC queues, SPSC rings and lock-free design patterns — the practical source behind **Ch. 34** (§34.4.1), the ring foundations of Ch. 37 and the shared-memory rings of Ch. 51; Relacy is the model checker of Ch. 40 (§40.4.3).
 - **Scott Meyers, "CPU Caches and Why You Care" (talk).** An accessible bridge from the cache hierarchy (Ch. 7) to layout decisions — **Ch. 8**.
-- **Cliff Click (and others) on JVM internals, JIT and GC behaviour.** Why managed runtimes' tails look the way they do and what HFT Java shops do about it — **Appendix B** (B.3–B.4); cited there, not by a C++ chapter.
+- **Cliff Click (and others) on JVM internals, JIT and GC behaviour.** Why managed runtimes' tails look the way they do and what HFT Java shops do about it — **Ch. 76** (§76.2.3, §76.5) and Appendix B; cited there, not by a C++ chapter.
+- **Gil Tene, "How NOT to Measure Latency" (Strange Loop 2015).** The hiccup method, coordinated omission and why a sleeping meter sees what the application sees — **Ch. 76 §76.3**, Ch. 3.
+- **Stefanus Du Toit, "Hourglass Interfaces for C++ APIs" (CppCon 2014).** The pattern and its name — **Ch. 75 §75.2.1**.
+- **Dave Cheney, "cgo is not Go"; Austin Clements, non-cooperative goroutine preemption proposal.** Why a Go→C call costs 50 ns and how Go preempts a hot loop — **Ch. 75 §75.3**, **Ch. 76 §76.4.5**.
 - **Brendan Gregg's blog** (flame graphs, eBPF, latency heatmaps) — the practical companion to his books (G.3) for **Ch. 2, 63, 89**.
 - **Josh Poimboeuf and others, LWN coverage of SFrame and deferred user-space unwinding (2023–2025).** Where stack capture without frame pointers or DWARF is heading in the kernel — **Ch. 22 §22.4.4, Ch. 84 §84.4.2**.
 - **Steven Rostedt, "Finding Origins of Latencies Using Ftrace" (Linux Plumbers / ELC).** The stop-on-threshold technique that Ch. 46's recipe and **Ch. 86**'s frozen kernel ring build on.
@@ -114,6 +125,12 @@ This is a *map*, not a syllabus: you don't read it front to back. When a chapter
 - **`tshark(1)` and the pcapng specification (`if_tsresol`).** The tap-side half of the per-packet ledger — **Ch. 79 §79.4.6**.
 
 
+- **rustc `--emit asm` / `cargo-show-asm`; `zig build-obj -femit-asm`; HotSpot `-XX:+PrintCompilation`/`-XX:+PrintAssembly` with hsdis and Chris Newland's JITWatch; `DOTNET_JitDisasm`; `go tool objdump` and `-gcflags=-m`/`-S`/`-d=ssa/check_bce`; `ocamlopt -S`.** The "verify the codegen" step for every toolchain in Part XII — **Ch. 74 §74.5**, **Ch. 76 §76.5**, **Ch. 77 §77.2.3**, Appendix I.11.
+- **JMH, BenchmarkDotNet, Criterion.rs, Go `testing.B`, `core_bench`.** The per-language microbenchmark harnesses and their `Blackhole`/`Consumer`/`black_box` sinks — **Ch. 77 §77.2.3**, Appendix L.5.
+- **nanobind and pybind11; `bindgen`/`cbindgen`/`cxx`; `zig translate-c`; `jextract`; libabigail (`abidiff`).** Binding generators and ABI diffing for the waist — **Ch. 75 §75.4.6**, **Ch. 85 §85.4.6**.
+- **Agrona, Chronicle Queue, Aeron; jHiccup.** The garbage-free Java toolkit and the pause meter — **Ch. 76 §76.4.1**, §76.3.
+- **Apache Arrow / Parquet (pyarrow), DuckDB, Polars; kdb+, ClickHouse, QuestDB documentation.** Columnar tick storage and the research tier — **Ch. 85 §85.4.7**.
+
 ## G.6 How this maps to the Parts
 
 For quick navigation, the heaviest sources per Part:
@@ -129,6 +146,7 @@ For quick navigation, the heaviest sources per Part:
 - **Part IX (Market Data, NIC & Fabric):** the exchange protocol specs, NIC-vendor and DDIO material, `rte_flow`/flow-steering docs, the PTP/IEEE-1588 references, the IGMP/snooping/SSM RFCs, and low-latency switch/fabric guides (Ch. 54–62).
 - **Part X (Kernel Bypass, RDMA & Transport):** bpftrace/XDP, DPDK, the Solarflare/ef_vi SDKs, the InfiniBand/RoCE and DCQCN references, and Aeron/eRPC/Homa (Ch. 63–67).
 - **Part XI (Heterogeneous/Accelerators):** the PCIe spec, CUDA/MPI docs, the FPGA toolchain and HFT-FPGA literature, the BlueField/DOCA/P4 docs (Ch. 68–72).
+- **Part XII (Beyond C++):** the GCC extended-asm manual, the SysV/Itanium ABIs and the Intel SDM's instruction references (Ch. 73); the Rust reference, Bos and Nethercote (Ch. 74); the ABI documents, JEP 442/454, the JNI/cgo/OCaml interface docs and nanobind/pybind11 (Ch. 75); Tene, the HotSpot/.NET/Go/OCaml GC documentation, JITWatch, Agrona/Chronicle/Aeron and Kokosa (Ch. 76); JMH/BenchmarkDotNet/Criterion and the compile-time sections of the three language references (Ch. 77) (Ch. 73–77).
 - **Part XIII (Observability/Operations):** NanoLog, the crash-only paper, the LMAX/event-sourcing material, Gregg's *BPF Performance Tools*, Tene/HdrHistogram and the Prometheus histogram docs, the SRE books (SLOs and alerting), the kernel's counter and tracer documentation, the regulatory record-keeping and market-access rules; the venue timestamp specifications and RTS 25 (Ch. 79), the signal/core-dump man pages, the SDM's XSAVE chapter and Breakpad/Crashpad (Ch. 84), the ftrace/`perf` PT documentation, Rostedt and magic-trace (Ch. 86), the gdb non-stop/Python manual (Ch. 5 §5.4.4) (Ch. 78–89, Appendices M–N).
 - **Appendices:** the Arm ARM and Graviton guides (A), the Rust/Zig/JVM references (B), the kernel/vendor tuning guides (C), the GCC/Clang/BOLT docs (D), the latency-measurement tools (E), cppreference/the protocol specs (F), the libstdc++/libc++ status tables and cppreference compiler-support pages (H), the `perf`/`bpftrace`/`ethtool` man pages and tool docs (I), Harris and the exchange specs (J), exchange colocation/connectivity documentation (K), and the Google Benchmark / HdrHistogram docs (L).
 

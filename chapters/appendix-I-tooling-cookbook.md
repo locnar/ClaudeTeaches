@@ -257,7 +257,51 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 84, Ch. 86 and Appendix N.
 
 **Interpreting:** the crash record (Ch. 84 §84.4.1) usually names the bug before the core is opened — `si_code`, `si_addr` and the fault error code against the registers; `addr2line` on `frame0` is the second step, the core the third. For a live process the rule is *never an all-stop attach to a process with a hot thread*: `set non-stop on` before `attach`, and interrupt only the housekeeping thread you need (Ch. 5 §5.4.4 measured the all-stop attach at a quarter of a second on the hot thread); `process_vm_readv`/`/proc/PID/mem` of a seqlock-versioned snapshot costs the target nothing. For a spike, the order is Ch. 86 §86.4.4's: the ftrace ring in the window first (did the thread leave the CPU? an IRQ? a shootdown? an empty gap?), the host and network samples second, `perf`/PT decode last and never on the trading host.
 
-## I.11 References
+## I.11 Other toolchains: asm, runtime logs and the C-ABI waist
+
+The "verify the codegen" step and the runtime's own diagnostics for the languages of Part XII (Ch. 73–77), plus the one-liners for a C ABI boundary (Ch. 75).
+
+```
+   # --- inline / hand-written asm (Ch. 73)
+   g++ -O2 -S -masm=intel x.cpp -o - | grep -n -A12 '#APP'    # GCC brackets every asm statement with #APP/#NO_APP: read what is live around it
+   nasm -f elf64 f.asm -o f.o && objdump -d -M intel f.o        # assemble + check a hand-written function; readelf -S f.o | grep -i gnu-stack (no exec stack)
+   timeout 5 ./prog; echo "exit=$?"                              # 124 = the loop never ended: an undeclared clobber (Ch. 73 §73.6)
+   # --- Rust (Ch. 74)
+   rustc --edition 2021 -C opt-level=3 -C target-cpu=native -C panic=abort --emit asm k.rs -o k.s   # whole-crate asm (AT&T); add --crate-type cdylib + #[no_mangle] for readable symbols
+   cargo asm --rust crate::module::function                      # cargo-show-asm: one function, source interleaved (cargo install cargo-show-asm)
+   grep -c 'panic_bounds_check\|call' k.s                       # bounds checks and calls left in a hot body (0 is the target — Ch. 74 §74.5)
+   cargo rustc --release -- -C target-cpu=native -C force-frame-pointers=yes   # frame pointers for perf/the Ch. 22 unwinders
+   readelf -SW target/release/app | grep -E 'eh_frame|gcc_except'   # unwind-table sizes: panic=abort alone barely moves them (Ch. 74 §74.3)
+   # --- Zig (Ch. 75, 77)
+   zig build-obj -O ReleaseFast -fomit-frame-pointer -femit-asm=k.s k.zig     # asm; zig translate-c api.h > api.zig (C header → Zig externs)
+   zig cc -target aarch64-linux-gnu -O2 -c api.c                 # the C side of the waist, cross-compiled (Appendix A)
+   # --- JVM (Ch. 76)
+   java -Xms2g -Xmx2g -XX:+AlwaysPreTouch -Xlog:gc*,safepoint:file=gc.log App         # pauses AND time-to-safepoint; -Xlog:gc+phases for ZGC
+   java -XX:+PrintCompilation App | grep -E 'Hot::method|made not entrant'                # tiers (3 = C1, 4 = C2), % = OSR, deoptimisations
+   java -XX:+UnlockDiagnosticVMOptions -XX:+PrintAssembly -XX:CompileCommand=print,Hot::method App   # needs the hsdis plugin; or feed -XX:+LogCompilation to JITWatch
+   java -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -Xms4g -Xmx4g -XX:+AlwaysPreTouch App    # prove a session is garbage-free: OOM = a failed test
+   # --- .NET (Ch. 76)
+   DOTNET_gcServer=1 DOTNET_GCgen0size=0x4000000 dotnet app.dll          # server GC, 64 MiB gen0; DOTNET_GCHeapAffinitizeMask to keep GC threads off the hot core
+   DOTNET_JitDisasm=Apply DOTNET_JitStdOutFile=jit.txt dotnet app.dll    # tier-0 and tier-1 asm of one method; DOTNET_TieredCompilation=0 for the final tier only
+   dotnet publish -c Release -p:PublishReadyToRun=true      # precompiled starting tier;  -p:PublishAot=true for NativeAOT (no JIT, no warm-up curve)
+   dotnet build-server shutdown                             # before benchmarking anything else on the box (Ch. 77 §77.2.3)
+   # --- Go (Ch. 76)
+   GODEBUG=gctrace=1 ./app                                  # one line per GC cycle: STW/concurrent phase times, heap before→after→live
+   GOGC=off GOMEMLIMIT=4GiB ./app                           # collect only at the limit (then runtime.GC() at a quiet moment)
+   go build -gcflags='-m -m' ./... 2>&1 | grep 'escapes'    # every heap escape in the hot loop;  -gcflags=-d=ssa/check_bce/debug=1 lists surviving bounds checks
+   go tool objdump -s 'main\.\(\*Book\)\.apply' ./app      # disassemble one method of the shipped binary
+   # --- OCaml (Ch. 76)
+   ocamlopt -O3 -unboxed-types -S k.ml && grep -c 'caml_alloc\|caml_call_gc' k.s   # allocation sites in the hot function (-O3 needs a flambda switch)
+   OCAMLRUNPARAM='s=4M,v=0x400' ./app                       # minor heap 4M words; v=0x400 prints GC statistics at exit
+   # --- the C-ABI waist (Ch. 75)
+   nm -D --defined-only libbook.so                          # exactly the exported waist, nothing else (-fvisibility=hidden + explicit default)
+   abidiff libbook-1.0.so libbook-1.1.so                    # libabigail: did the ABI change? (CI gate)
+   python3 -c 'import ctypes; L=ctypes.CDLL("./libbook.so"); print(L.book_new())'   # the cheapest smoke test of the waist from the research tier
+```
+
+**Interpreting:** every toolchain can show you its machine code; the questions are the same ones Ch. 4 asks of C++ — is the hot method one block of loads and arithmetic, with no call to an allocator, no barrier, no type check, no bounds-check branch to a panic — and for the managed runtimes, the runtime's own log is the second instrument beside the hot thread's clock (Ch. 76 §76.3): read time-to-safepoint and deoptimisations, not only pause time.
+
+## I.12 References
 
 - The **`perf`** documentation — `perf-stat`, `perf-record`, `perf-report`, `perf-annotate`, `perf-c2c`, `perf-mem` man pages, and the kernel `tools/perf` docs (I.1–I.3).
 - **Brendan Gregg's** `perf` examples and *BPF Performance Tools* / `bpftrace` reference (I.5), and the `bcc`/`bpftrace` repositories.
@@ -265,7 +309,7 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 84, Ch. 86 and Appendix N.
 - The `hwloc`/`lstopo`, `numactl`, `ethtool`, `pahole` (dwarves), `chrt`, `taskset`, `objdump`, and `llvm-bolt`/`perf2bolt` man pages and docs (I.6–I.9).
 - `core(5)`, `coredumpctl(1)`, `eu-stack(1)`, `eu-unstrip(1)`, `addr2line(1)`, the gdb manual's *Non-Stop Mode* and *Debugging Programs with Multiple Threads* chapters, `perf-record(1)` (`--overwrite`, `--switch-output`, `--snapshot`), `perf-intel-pt(1)`, and `Documentation/trace/ftrace.rst` (I.10).
 
-## I.12 Additional Reading
+## I.13 Additional Reading
 
 - **Appendix C** (System Tuning Checklist) — where many of these commands are applied as *configuration* (IRQ pinning, ring sizing, governor) rather than one-off *observation*.
 - **Appendix D** (Compiler Flag Reference) — the build flags behind I.9 (`-fno-omit-frame-pointer`, LTO/PGO/BOLT, sanitizers).

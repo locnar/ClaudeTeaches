@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 19–20 (zero-cost abstractions and their cost — the bar this must clear), Ch. 38 (C++20 coroutines and async models — the sibling mechanism), Ch. 31 (threading), Ch. 37 (the Disruptor pipeline — a hand-built version of what senders express), Ch. 42 (pinning — where a scheduler must place work), Ch. 49 (io_uring — an async source to plug in), Ch. 4 (reading codegen — to prove it compiles away).
 >
-> **Leads into:** Ch. 40 (concurrency correctness tooling — testing the async pipelines this chapter builds), Appendix B (B.1 — how Rust's `async`/`await` and its library runtimes draw the same sender/scheduler line). The newest C++ mechanism in the book, closing out the concurrency toolkit: the C++26 standard async model, evaluated by the one question that matters for the hot path — does it compile down to what you'd write by hand?
+> **Leads into:** Ch. 40 (concurrency correctness tooling — testing the async pipelines this chapter builds), Ch. 74 §74.4.5 (how Rust's `async`/`await` and its library runtimes draw the same sender/scheduler line). The newest C++ mechanism in the book, closing out the concurrency toolkit: the C++26 standard async model, evaluated by the one question that matters for the hot path — does it compile down to what you'd write by hand?
 
 ---
 
@@ -141,7 +141,7 @@ The discipline (Ch. 19–20, one last time): **the abstraction is only zero-cost
 
 - The structured-concurrency literature (senders/receivers, and the broader "structured concurrency" idea from other languages) — lifetime and cancellation as first-class (§39.2, §39.4.2).
 - `stdexec` performance and codegen studies as the implementations mature — whether it hits the zero-cost target in practice (§39.3, §39.5).
-- Ch. 38 (*Coroutines*) — the other modern async model; Ch. 37 (*Disruptor*) — the hand-written pipeline senders express; Ch. 5 (*Debugging*) — debugging async control flow; **Appendix B** (*Beyond C++*, B.1) — Rust `async`/`await` and library runtimes vs senders/schedulers; **Appendix F** — sender/receiver/scheduler glossary; **Appendix H** — the `std::execution` availability row.
+- Ch. 38 (*Coroutines*) — the other modern async model; Ch. 37 (*Disruptor*) — the hand-written pipeline senders express; Ch. 5 (*Debugging*) — debugging async control flow; **Ch. 74 §74.4.5** (*Rust for the Hot Path*, B.1) — Rust `async`/`await` and library runtimes vs senders/schedulers; **Appendix F** — sender/receiver/scheduler glossary; **Appendix H** — the `std::execution` availability row.
 
 ---
 

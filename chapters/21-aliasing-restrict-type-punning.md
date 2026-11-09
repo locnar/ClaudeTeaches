@@ -244,7 +244,7 @@ to_bits(float):                ; std::bit_cast<uint32_t>(f)  AND  memcpy(&u,&f,4
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — vectorization blockers (aliasing, alignment) and how to read the compiler's vectorization diagnostics.
 - Chris Lattner / LLVM blog posts on undefined behavior ("What Every C Programmer Should Know About Undefined Behavior") — why strict-aliasing UB miscompiles and how to avoid it (ties Ch. 81).
 - Ch. 29 (*SIMD & Vectorization*) — where `restrict` most often pays; Ch. 9 (*Object Layout/Alignment*) — the alignment half of clean SIMD; Ch. 54 (*Zero-Copy Wire Decoding*) — safe struct/byte-buffer punning in feed handlers; Ch. 81 (*Secure Programming*) — UB as a vulnerability class; Ch. 11 (*Pipelines*) — dependencies the compiler must assume when it can't disprove aliasing.
-- **Appendix D** (Compiler Flag Reference) — `-fstrict-aliasing`/`-fno-strict-aliasing` and vectorization flags; **Appendix B** (B.1) — aliasing (`&mut` as checked `noalias`) and `unsafe` punning in Rust (`transmute` vs `from_ne_bytes`) for the cross-language reader.
+- **Appendix D** (Compiler Flag Reference) — `-fstrict-aliasing`/`-fno-strict-aliasing` and vectorization flags; **Ch. 74 §74.2.5 and §74.4.1** — aliasing (`&mut` as checked `noalias`, with the vectorizer's overlap check shown present in C++ and absent in Rust) and punning in Rust (`transmute` vs `from_ne_bytes`) for the cross-language reader.
 
 ---
 

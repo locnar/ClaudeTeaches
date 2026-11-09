@@ -52,6 +52,7 @@ Two things to measure, and they pull against each other: **hot-path impact** (ca
 | **Synchronous write to disk** (`write()`/`fwrite` on the path) | **µs–ms** (syscall + I/O stall, Ch. 48) | only if disk keeps up (it won't) | ✗ destroys the hot path |
 | **App-level: copy raw bytes + seq to SPSC ring** (§85.4.1-2) | **~5–20 ns** for a ≤64 B message record (a few stores, Ch. 34); ~50–150 ns for a full MTU-sized datagram — the copy scales with bytes, so capture per message where the hot path pays it | depends on ring size + writer speed (§85.4.3) | ✓ the in-process capture path |
 | **Off-NIC / off-host capture** (tap, mirror port, SmartNIC — §85.4.1, Ch. 72) | **~0 on the application** (capture happens *below/beside* the app) | depends on the capture appliance | ✓ best for compliance/lossless wire capture |
+| **Off-path ETL: journal → columnar dataset** (§85.4.6–§85.4.7; the research tier's read of the capture) | **0** — runs on the research host from the finished journal | n/a | ✓ measured on the 4-vCPU test VM (Appendix L.2): the production decoder bound into Python turns 1 M 32-byte records into six NumPy columns in 17.6 ms (17.6 ns/msg, zero-copy hand-off) vs 264 ns/msg for a `struct.unpack` reimplementation; Parquet (zstd, 128 k-row groups) writes at ~224 MB/s raw-in and a 10 k-row time-range read of 4 columns from the 1 M-row file takes 74 ms; a 32-level depth sum over a zero-copy NumPy view of the live C++ book is 7.5 µs vs 33 ms copied through Python objects |
 
 **Sustained throughput & loss** — drive the worst burst and measure (a) whether the ring ever fills (→ drop or back-pressure, §85.5), (b) the writer's sustained MB/s vs the burst's peak, (c) end-to-end durability latency (event → durably on disk). Harness: a producer thread enqueueing fixed-size records at a controlled burst rate into the SPSC ring, the §85.4.3 writer draining with `io_uring` (`io_uring_prep_write_fixed`, registered buffers, one `io_uring_submit` per batch) onto an `O_DIRECT`, preallocated file; record the ring's high-water mark and drop count per burst, the writer's MB/s from the completion offsets, and event → completion latency (`rdtscp` in the record vs the CQE time) as a histogram (Ch. 3); `iostat -x 1` for device queue depth. Representative shape (NVMe, Linux 6.x, liburing 2.5, io_uring, batched — figures pending real runs): sequential batched writes sustain **multiple GB/s**, enough for a full normalized feed, *if* the ring is large enough to absorb the burst peak above the disk's sustained rate while the writer catches up in the troughs.
 
@@ -150,6 +151,67 @@ A capture is only useful if it's **complete and ordered** — and manageable ove
 ### 85.4.5 Feeding captures into replay, simulation and backtests
 
 Capture's payoff is replaying it through the deterministic core (Ch. 83) — for debugging (Ch. 5), regression gating, backtesting and compliance — and the *consumers* of a capture are **Ch. 89's** subject: deterministic replay and performance bisection (§89.4.2), simulation harnesses that model the venue's reactions where an open-loop replay cannot (§89.4.3), and the CI latency-regression gate (§89.4.1). What the capture side owes them is this section's content. **Seekability:** a file layout that can seek by *time* and by *sequence* (§85.2's time index), so a replay can start at 09:31:42 or at sequence 1 048 576 without scanning the day. **The replay clock:** captured timestamps (Ch. 60) drive the replayer's notion of time — never the wall clock — so timing-dependent paths (timeouts, warming, the reorder window of Ch. 54) behave as they did live, and the replayer can run faster than real time without changing the outcome. **Two altitudes, labelled:** a wire-level capture (§85.4.1) replays through the whole stack (decode → decision) while an application-level capture replays only the core, and the file header must say which it is so a replayer never feeds one to the other. **Completeness:** the gap-free, sequenced persistence of §85.4.4 is what makes bit-for-bit replay (Ch. 83.2.2) possible at all — a capture with a hole is a replay that diverges.
+
+### 85.4.6 Research to production: one decoder, two bindings
+
+Every firm has the **two-language problem**: the production feed handler and book are C++ (Ch. 54, 25), the research that decides what to trade is Python (or Julia — Ch. 77 §77.2.4), and the research code *reimplements* the decode and the book — in `struct.unpack`, in pandas, in a notebook — so that the backtest's book and the production book drift apart in exactly the places that matter: rounding of a scaled price (Ch. 27), the order of a cancel against a partially filled level, a venue's corner-case message. Ch. 77 §77.3 measured the reimplementation at 70× slower; the worse cost is that it is *different*. The fix is Ch. 75's hourglass applied to the research seam: **the production `decode()`/`Book` is compiled into a Python extension, and the backtest runs the production decode** — one library, two bindings (the C++ engine and the Python module), no second implementation to drift.
+
+Three mechanics make the seam fast enough to use, all measured in §85.3 (nanobind 3.1, pybind11 3.1, CPython 3.13, pyarrow 26 on the Appendix L.2 test VM). **Batch, never call per message**: Ch. 75 §75.3 put a Python→C++ call at 340–474 ns, so the module exposes `decode_soa(buffer)` — the whole capture decoded in one call into six **structure-of-arrays** columns (Ch. 8) — and `Book.apply_all(buffer)`; 17.6 ns per message, i.e. the C++ loop plus the column stores. **Hand the columns to NumPy without a copy**: nanobind's `nb::ndarray<nb::numpy, T>` wraps the C++ `std::vector<T>`'s storage and an owner capsule that frees it when the array dies — the buffer protocol, no `memcpy`, 24 MiB of columns handed over at the cost of six pointer exchanges. **Let research *look at* the live book as a view**: `Book::levels()` returns the `Level` array and the module exposes `bid_qty_view()` as a strided NumPy array (`strides=(16,)`, `owndata=False`) over the C++ `Level[65536].qty` column in place — `reference_internal` ties its lifetime to the `Book`; a 32-level depth sum over the view is a 7.5 µs NumPy reduction where converting the same slice to Python objects first costs 33 ms.
+
+```cpp
+// tickmod.cpp — the research seam over the production kernel (nanobind). Build: g++ -O2 -std=c++23 -march=native -shared -fPIC -I<python> -I$NB/include tickmod.cpp $NB/src/nb_combined.cpp -o tickmod$(EXT_SUFFIX)
+#include "kernel.hpp"                       // Ch. 77's production decode() and Book — the SAME header the feed handler compiles
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+namespace nb = nanobind;
+using U8 = nb::ndarray<const std::uint8_t, nb::ndim<1>, nb::c_contig>;
+
+template <class T> static nb::ndarray<nb::numpy, T, nb::ndim<1>> own(std::vector<T>* v) {          // zero-copy hand-off: NumPy owns the vector via a capsule
+    nb::capsule owner(v, [](void* p) noexcept { delete static_cast<std::vector<T>*>(p); });
+    return nb::ndarray<nb::numpy, T, nb::ndim<1>>(v->data(), {v->size()}, owner);
+}
+static auto decode_soa(U8 buf) {                                                                    // whole-capture, columnar: the batched call
+    const std::size_t n = buf.size() / 32; const std::uint8_t* p = buf.data();
+    auto *seq = new std::vector<std::uint64_t>(n), *id = new std::vector<std::uint64_t>(n);
+    auto *qty = new std::vector<std::uint32_t>(n), *px = new std::vector<std::uint32_t>(n);
+    auto *type = new std::vector<std::uint8_t>(n), *side = new std::vector<std::uint8_t>(n);
+    for (std::size_t i = 0; i < n; ++i) { Msg m = decode(p + i * 32); (*seq)[i] = m.seq; (*id)[i] = m.id; (*qty)[i] = m.qty; (*px)[i] = m.px; (*type)[i] = m.type; (*side)[i] = m.side; }
+    return std::make_tuple(own(seq), own(id), own(qty), own(px), own(type), own(side));
+}
+struct PyBook {
+    Book b; std::uint64_t h = 0;
+    std::uint64_t apply_all(U8 buf) { for (std::size_t i = 0, n = buf.size() / 32; i < n; ++i) h = fold(h, b.apply(decode(buf.data() + i * 32))); return h; }
+    nb::ndarray<nb::numpy, const std::int64_t, nb::ndim<1>> bid_qty_view() {                           // a VIEW of the live book: stride 16 B (Level = {qty, count, pad}), no owner
+        return nb::ndarray<nb::numpy, const std::int64_t, nb::ndim<1>>(&b.levels(true)->qty, {Book::kLevels}, nb::handle(), {2});
+    }
+};
+NB_MODULE(tickmod, m) {
+    m.def("decode_soa", &decode_soa);
+    nb::class_<PyBook>(m, "Book").def(nb::init<>()).def("apply_all", &PyBook::apply_all)
+        .def_prop_ro("best_bid", [](const PyBook& s) { return s.b.best_bid(); })
+        .def("bid_qty_view", &PyBook::bid_qty_view, nb::rv_policy::reference_internal);           // the view cannot outlive the Book
+}
+```
+
+```python
+# research.py — parity test and the seam in use
+seq, oid, qty, px, typ, side = tickmod.decode_soa(buf)                       # 1 M records → 6 columns, 17.6 ms, zero-copy
+ref = [REC.unpack_from(raw, i * 32) for i in range(200_000)]                 # the research-tier reimplementation (264 ns/msg) — kept ONLY as the parity oracle
+assert all(r[6] == seq[i] and r[7] == oid[i] and r[3] == qty[i] and r[4] == px[i] for i, r in enumerate(ref)), "PARITY FAILURE"
+book = tickmod.Book(); digest = book.apply_all(buf)                          # digest 6af21b1e1b6ba796 == the C++ engine's over the same capture (Ch. 77 §77.4.6)
+view = book.bid_qty_view()                                                   # numpy view, strides (16,), owndata=False
+depth = view[book.best_bid - 31 : book.best_bid + 1].sum()                   # 7.5 µs over the live C++ book; .tolist() first: 33 ms
+```
+
+The **parity test** is the point of keeping a reference implementation at all: the Python `struct.unpack` decode runs over the first 200 k records of every capture in CI and must agree field-for-field with `decode_soa`, and the module's `Book` must produce the same digest the C++ engine printed for that capture (Ch. 77 §77.4.6; Ch. 89 §89.4.1's golden gate). The GIL is held during these calls — fine for a research process, and the reason the module exposes *batches*: a `nb::gil_scoped_release` inside `decode_soa` lets a notebook decode on one thread while plotting on another. pybind11 is interchangeable here (Ch. 75 §75.3: within 2 % per call; its `py::buffer` protocol is the same zero-copy); nanobind's smaller binaries and `ndarray` API are why it is the default for new code. For Julia the same `libbook.so` is one `ccall` away (Ch. 77 §77.2.4).
+
+### 85.4.7 Columnar tick storage: from the journal to Arrow and Parquet
+
+The journal of §85.4.2 is the *system of record* — raw wire bytes, sequence-complete, nanosecond-stamped, compact — and it is the wrong shape for research, which reads a few fields across millions of rows (every price for one instrument over a day; every message in a 10 ms window) rather than every field of one message. The research tier wants **columnar** storage, and the §85.4.4 compaction step is where to produce it, **off the hot path**, from the finished journal: run the production decoder (§85.4.6's `decode_soa`) over each journal segment, assemble an **Apache Arrow** table — one typed, contiguous buffer per column, the in-memory interchange format every research tool reads without conversion — and write it as **Parquet**. The measured step (§85.3): 1 M records → 7 columns → a zstd-compressed Parquet file of 9 MiB from 30 MiB of wire bytes in 143 ms (224 MB/s raw-in, single-threaded), and reading it back into Arrow and then NumPy is a zero-copy `to_numpy()` on the Arrow buffer.
+
+Four layout decisions make the file fast for the time-range scans research actually does. **Timestamps as `INT64` nanoseconds** (Arrow `timestamp[ns]`; the §85.4.1 capture stamps and Ch. 60's PTP-disciplined clock survive intact — never a `double` or a `datetime` string). **Row groups sized to the scan** (`row_group_size=131072` here: ~1 s of a busy feed); Parquet keeps min/max statistics per row group per column, so a `ts_ns BETWEEN …` filter prunes every group outside the window before reading it — the 10 k-row read in §85.3 touched one row group of eight. **Encodings that match the data**: dictionary encoding for the low-cardinality columns (`type`, `side`, instrument), delta encoding for `seq` and `ts_ns` (monotone), plain for `qty`/`px`; zstd over all of it. **Partition by date and instrument** (`dataset/date=2026-11-09/symbol=XYZ/part-0.parquet`), so a day's research reads only its directory and a replay (§85.4.5) still goes to the journal, not to Parquet. The pipeline is ordinary pyarrow (`pq.write_table(table, path, compression="zstd", row_group_size=131072, use_dictionary=[...])`, `pq.read_table(path, filters=[("ts_ns", ">=", t0), ("ts_ns", "<", t1)], columns=[...])`) or the C++ Arrow library in the compaction process itself.
+
+Where a database belongs: a Parquet dataset on a filesystem is the cheapest and most portable research store, and DuckDB or Polars query it directly. Firms that need *interactive* time-series analytics over years of ticks run a **columnar time-series database** on top: **kdb+/q** (the incumbent in finance — in-memory columnar tables, splayed/partitioned on-disk tables, a query language built around time-ordered joins such as as-of joins, and a licence cost to match), **ClickHouse** (open-source columnar OLAP: `MergeTree` tables ordered by `(symbol, ts)`, codecs like `DoubleDelta`/`Gorilla` for timestamps and prices, SQL with `ASOF JOIN`) and **QuestDB** (open-source, time-series-first: designated timestamp columns, `SAMPLE BY`, `ASOF JOIN`, ingestion over InfluxDB line protocol). All three ingest from the same Arrow/Parquet output, none of them is on the C++ hot path, and the choice is the research team's; the book's rule is only that **the journal is the source of truth and the columnar store is derived from it by the production decoder**, so that a bug found in research can be replayed (Ch. 89 §89.4.2) against the bytes that actually arrived.
 
 ## 85.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 

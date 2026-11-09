@@ -1145,6 +1145,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 85.4.3 Getting bytes to disk off the hot path (async, io_uring, `O_DIRECT`, NVMe, batching)
   - 85.4.4 Sequencing and gap-free persistence; retention and compaction
   - 85.4.5 Feeding captures into replay, simulation and backtests
+  - 85.4.6 Research to production: one decoder, two bindings (pybind11/nanobind, zero-copy NumPy views, parity tests, Arrow)
+  - 85.4.7 Columnar tick storage: from the journal to Arrow and Parquet (kdb+/ClickHouse/QuestDB tier)
 - 85.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 - 85.6 Exercises & checklist
 
@@ -1221,11 +1223,9 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - A.7 Where Graviton in the cloud fits (and where bare-metal still wins)
 
 ### [Appendix B — Beyond C++: Alternative Languages for Low-Latency](appendix-B-beyond-cpp.md)
-- B.1 Rust (ownership, `unsafe`, no GC, fearless concurrency)
-- B.2 C and Zig
-- B.3 The case against managed runtimes (Java/C#/Go GC pauses and JIT warm-up)
-- B.4 Taming the JVM: allocation-free Java, off-heap, Azul/Zing, GraalVM native-image
-- B.5 FFI/interop with a C++ core; when a rewrite pays off
+- B.1 The findings in one table (Rust/C++ parity, where it breaks, asm vs intrinsic, the call ladder, what a GC and a JIT do, `constexpr`/`const fn`/`comptime`, where Python belongs — each row pointing at its Part XII measurement)
+- B.2 The tier table in brief (hot / hot-inherited / warm / cold / below software, with conditions)
+- B.3 What it is called elsewhere (the Part III–VI constructs in Rust, Zig and Java/.NET, with the chapter that measures each)
 
 ### [Appendix C — System Tuning Checklist](appendix-C-system-tuning-checklist.md)
 - C.1 BIOS/firmware (C-states, P-states/turbo, SMT, NUMA/snoop mode)
@@ -1288,6 +1288,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - I.8 Network & NIC (`ethtool`, `ss`, `tcpdump`, PTP)
 - I.9 Codegen, binaries & sanitizers (`objdump`, Godbolt, BOLT, ASan/UBSan/TSan)
 - I.10 Crash, core-dump, live-introspection & incident one-liners (`coredumpctl`, `eu-stack`, gdb non-stop, `perf record --snapshot`, Intel PT, the ftrace freeze, the bundle)
+- I.11 Other toolchains: asm, runtime logs and the C-ABI waist (rustc/cargo asm, zig, `-Xlog:gc*,safepoint`/`PrintCompilation`/hsdis, `DOTNET_JitDisasm`, `gctrace`/`-gcflags`, `ocamlopt -S`, `nm -D`/`abidiff`)
 
 ### [Appendix J — HFT Market-Structure & Protocol Primer](appendix-J-market-structure-primer.md)
 - J.1 Market microstructure: exchanges, matching engines, price-time priority
@@ -1312,6 +1313,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - L.2 Tail-latency capture with HdrHistogram (and avoiding coordinated omission)
 - L.3 Making a run repeatable (environment & isolation)
 - L.4 The pre-trust checklist
+- L.5 Benchmarking across languages (the Ch. 77 protocol: same box/core/capture, digest parity, warm vs cold windows, each toolchain's sink and asm)
 
 ### [Appendix M — Pre-Open Readiness Gate & Market-Open Playbook](appendix-M-readiness-gate-market-open.md)
 - M.1 The readiness state machine (cold → warming → syncing → reconciled → armed → trading → disarmed; one predicted branch on the order path)

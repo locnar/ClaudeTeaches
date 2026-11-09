@@ -252,7 +252,7 @@ main:                                ; GCC -O2, the same loop
 - Raymond Chen's coroutine series and various CppCon coroutine talks — practical patterns and the allocation/HALO realities.
 - Ch. 23–24 (*Memory*) — the allocation hazard and pool frames; Ch. 48 (*epoll*) and Ch. 49 (*io_uring*) — the async I/O coroutines drive; Ch. 37/41 (*Disruptor / Context Switching*) — the busy-poll alternative on the hot path; Ch. 54 (*Wire Decoding*) — FIX session state machines as coroutines; Ch. 19 (*Zero-Cost*) — the inlining HALO depends on.
 - Ch. 39 (*std::execution: Senders/Receivers & Structured Async*) — the C++26 standard async model, the sender/receiver alternative to raw coroutines, and how to verify it compiles away.
-- **Appendix B** (B.1, B.3) — async models in other languages (Rust `async`/`await` and its zero-cost futures, Go goroutines) for the cross-language reader; **Appendix E** — the context-switch cost a coroutine resume avoids.
+- **Ch. 74 §74.4.5** and **Ch. 76 §76.4.5** — async models in other languages (Rust `async`/`await` state machines with a library executor; Go's goroutines and their runtime scheduler), with **Appendix B** (B.3) as the one-line map; **Appendix E** — the context-switch cost a coroutine resume avoids.
 
 ---
 

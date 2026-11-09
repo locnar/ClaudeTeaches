@@ -47,7 +47,7 @@ A handler interrupts the thread at an arbitrary instruction — possibly inside 
 The faults a trading process meets, with what `si_code` says about each:
 
 ```
-   signal   si_code                   typical cause in a Part XII system                                  si_addr
+   signal   si_code                   typical cause in a Part XIII system                                  si_addr
    ──────── ───────────────────────── ───────────────────────────────────────────────────────────────── ─────────────
    SIGSEGV  SEGV_MAPERR               stale pointer / use-after-unmap (Ch. 26), null deref, stack        the address
             SEGV_ACCERR               write to PROT_NONE guard page (Ch. 5 §5.4.5), to .rodata, to a     the address
