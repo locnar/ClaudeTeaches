@@ -44,4 +44,4 @@ TODO
 
 ---
 
-*Next: Ch. 77 — Zero-Overhead Logging.*
+*Next: Ch. 77 — Choosing a Language per Latency Tier.*

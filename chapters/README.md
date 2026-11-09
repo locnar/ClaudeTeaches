@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 88 chapters are grouped into thirteen Parts; fourteen appendices (A–N) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 89 chapters are grouped into thirteen Parts; fourteen appendices (A–N) follow.
 
 ---
 
@@ -697,7 +697,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 54.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 55)
   - 54.4.4 Tuning RX ring sizes, managing UDP reordering in software ring buffers, detecting hardware packet drops
 - 54.5 Verify the codegen: parse loop
-- 54.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 80)*
+- 54.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 81)*
 - 54.7 Exercises & checklist
 
 ### [55. Reliable Multicast & Feed Recovery](55-reliable-multicast-feed-recovery.md)
@@ -961,197 +961,206 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 76.5 Pitfalls & anti-patterns: TODO
 - 76.6 Exercises & checklist
 
+### [77. Choosing a Language per Latency Tier](77-choosing-a-language-per-latency-tier.md)
+- 77.1 Why it matters: TODO
+- 77.2 Mental model: TODO
+- 77.3 Measure it: TODO
+- 77.4 Techniques
+  - 77.4.1 TODO
+- 77.5 Pitfalls & anti-patterns: TODO
+- 77.6 Exercises & checklist
+
 ## Part XIII — Observability & Operations in Production
 
 *Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology, crash handling, capture/replay, latency-spike forensics, host and network health, and the end-to-end case study.*
 
-### [77. Zero-Overhead Logging](77-zero-overhead-logging.md)
-- 77.1 Why it matters: logging must never stall the hot path
-- 77.2 Mental model: deferred formatting; binary logging
-- 77.3 Measure it: log-call cost on the hot path
-- 77.4 Techniques
-  - 77.4.1 Async/lock-free loggers
-  - 77.4.2 Binary logging with offline formatting
-  - 77.4.3 `std::print`/`std::println` for off-hot-path output
-- 77.5 Verify the codegen: the hot-path log call is a few stores
-- 77.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O
-- 77.7 Exercises & checklist
-
-### [78. In-Band Latency Tracing & Budget Attribution](78-in-band-latency-tracing-budget-attribution.md)
-- 78.1 Why it matters: the budget you cannot attribute
-- 78.2 Mental model
-  - 78.2.1 The trace header: a correlation ID and a vector of stage stamps
-  - 78.2.2 In-band vs out-of-band carriage
-  - 78.2.3 Causality across processes: tick → decision → order
-  - 78.2.4 Three clocks on one message
-- 78.3 Measure it: what the stamp and the header cost
+### [78. Zero-Overhead Logging](78-zero-overhead-logging.md)
+- 78.1 Why it matters: logging must never stall the hot path
+- 78.2 Mental model: deferred formatting; binary logging
+- 78.3 Measure it: log-call cost on the hot path
 - 78.4 Techniques
-  - 78.4.1 The trace header and the stamping points
-  - 78.4.2 Carrying the header through rings, Disruptor slots and shm segments
-  - 78.4.3 Contention-free correlation IDs and the tick → order link
-  - 78.4.4 Off-path aggregation: from stamps to per-stage histograms
-  - 78.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
-  - 78.4.6 The per-packet ledger: joining a tap capture to the host's stamps
-- 78.5 Verify the codegen: a stage boundary is a counter read and a store
-- 78.6 Pitfalls & anti-patterns
+  - 78.4.1 Async/lock-free loggers
+  - 78.4.2 Binary logging with offline formatting
+  - 78.4.3 `std::print`/`std::println` for off-hot-path output
+- 78.5 Verify the codegen: the hot-path log call is a few stores
+- 78.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O
 - 78.7 Exercises & checklist
 
-### [79. Zero-Overhead Application Telemetry](79-zero-overhead-application-telemetry.md)
-- 79.1 Why it matters: the counter that has to leave a busy-poll process
+### [79. In-Band Latency Tracing & Budget Attribution](79-in-band-latency-tracing-budget-attribution.md)
+- 79.1 Why it matters: the budget you cannot attribute
 - 79.2 Mental model
-  - 79.2.1 Counter, gauge, high-water mark, histogram — and what each may cost
-  - 79.2.2 Percentiles are not additive: merge histograms, never average percentiles
-  - 79.2.3 Interval vs cumulative, windows and minimum samples
-  - 79.2.4 Coordinated omission in production
-- 79.3 Measure it: per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence
+  - 79.2.1 The trace header: a correlation ID and a vector of stage stamps
+  - 79.2.2 In-band vs out-of-band carriage
+  - 79.2.3 Causality across processes: tick → decision → order
+  - 79.2.4 Three clocks on one message
+- 79.3 Measure it: what the stamp and the header cost
 - 79.4 Techniques
-  - 79.4.1 The shared-memory telemetry segment
-  - 79.4.2 What a trading process must expose
-  - 79.4.3 The off-core scraper and export
-  - 79.4.4 From metrics to SLOs, alerts and triggers
-- 79.5 Verify the codegen: the instrumentation is a few stores
-- 79.6 Pitfalls & anti-patterns: shared counters, averaged percentiles, service time, the scraper on the sibling
+  - 79.4.1 The trace header and the stamping points
+  - 79.4.2 Carrying the header through rings, Disruptor slots and shm segments
+  - 79.4.3 Contention-free correlation IDs and the tick → order link
+  - 79.4.4 Off-path aggregation: from stamps to per-stage histograms
+  - 79.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
+  - 79.4.6 The per-packet ledger: joining a tap capture to the host's stamps
+- 79.5 Verify the codegen: a stage boundary is a counter read and a store
+- 79.6 Pitfalls & anti-patterns
 - 79.7 Exercises & checklist
 
-### [80. Secure Programming for Low-Latency Systems](80-secure-programming-low-latency.md)
-- 80.1 Why it matters: security as a hot-path concern
+### [80. Zero-Overhead Application Telemetry](80-zero-overhead-application-telemetry.md)
+- 80.1 Why it matters: the counter that has to leave a busy-poll process
 - 80.2 Mental model
-  - 80.2.1 Market-data/order-entry messages as untrusted input
-  - 80.2.2 Undefined behavior as a vulnerability class
-  - 80.2.3 The hardening-vs-latency trade-off
-- 80.3 Measure it: hot-path cost of hardening options
+  - 80.2.1 Counter, gauge, high-water mark, histogram — and what each may cost
+  - 80.2.2 Percentiles are not additive: merge histograms, never average percentiles
+  - 80.2.3 Interval vs cumulative, windows and minimum samples
+  - 80.2.4 Coordinated omission in production
+- 80.3 Measure it: per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence
 - 80.4 Techniques
-  - 80.4.1 Bounds/length validation on variable-length fields and zero-copy parses
-  - 80.4.2 Memory safety in zero-allocation/arena designs; bounds checks that compile away
-  - 80.4.3 Integer/arithmetic safety in price/quantity math
-  - 80.4.4 Stack protector, `_FORTIFY_SOURCE`, PIE/ASLR, CFI, CET shadow stacks
-  - 80.4.5 Secret handling and secure wiping; keeping secrets out of logs
-  - 80.4.6 Privilege reduction (`seccomp`, capabilities, namespaces)
-  - 80.4.7 Build/supply-chain integrity; reproducible and signed builds
-  - 80.4.8 Fuzzing message parsers (libFuzzer/AFL++); ASan/UBSan/MSan
-- 80.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
-- 80.6 Exercises & checklist
+  - 80.4.1 The shared-memory telemetry segment
+  - 80.4.2 What a trading process must expose
+  - 80.4.3 The off-core scraper and export
+  - 80.4.4 From metrics to SLOs, alerts and triggers
+- 80.5 Verify the codegen: the instrumentation is a few stores
+- 80.6 Pitfalls & anti-patterns: shared counters, averaged percentiles, service time, the scraper on the sibling
+- 80.7 Exercises & checklist
 
-### [81. Hot Reload & Live Reconfiguration](81-hot-reload-live-reconfiguration.md)
-- 81.1 Why it matters: change strategy/config without dropping a tick
-- 81.2 Mental model: atomic pointer swaps and double-buffering
-- 81.3 Measure it: reload-induced tear/stall test
+### [81. Secure Programming for Low-Latency Systems](81-secure-programming-low-latency.md)
+- 81.1 Why it matters: security as a hot-path concern
+- 81.2 Mental model
+  - 81.2.1 Market-data/order-entry messages as untrusted input
+  - 81.2.2 Undefined behavior as a vulnerability class
+  - 81.2.3 The hardening-vs-latency trade-off
+- 81.3 Measure it: hot-path cost of hardening options
 - 81.4 Techniques
-  - 81.4.1 Seqlock-/RCU-published config snapshots read lock-free
-  - 81.4.2 Versioned configuration and safe reclamation
-  - 81.4.3 Shared-memory config segments; validation-before-swap
-  - 81.4.4 Draining vs instantaneous cutover; dynamic-library/strategy reload with warm-up
-- 81.5 Pitfalls & anti-patterns: torn config, stalls during cutover
+  - 81.4.1 Bounds/length validation on variable-length fields and zero-copy parses
+  - 81.4.2 Memory safety in zero-allocation/arena designs; bounds checks that compile away
+  - 81.4.3 Integer/arithmetic safety in price/quantity math
+  - 81.4.4 Stack protector, `_FORTIFY_SOURCE`, PIE/ASLR, CFI, CET shadow stacks
+  - 81.4.5 Secret handling and secure wiping; keeping secrets out of logs
+  - 81.4.6 Privilege reduction (`seccomp`, capabilities, namespaces)
+  - 81.4.7 Build/supply-chain integrity; reproducible and signed builds
+  - 81.4.8 Fuzzing message parsers (libFuzzer/AFL++); ASan/UBSan/MSan
+- 81.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
 - 81.6 Exercises & checklist
 
-### [82. Process Topology & The Deterministic State Machine](82-process-topology-deterministic-state-machine.md)
-- 82.1 Why it matters: contain a crash, keep the venue session up
-- 82.2 Mental model
-  - 82.2.1 Process-per-role vs monolith (feed handler / strategy / order gateway / risk)
-  - 82.2.2 The Deterministic State Machine Pattern: pure, side-effect-free core decoupled from I/O for exact replayability
-  - 82.2.3 Fault domains and blast radius
-  - 82.2.4 Crash-only design
-- 82.3 Measure it: failover/restart time and its tail
+### [82. Hot Reload & Live Reconfiguration](82-hot-reload-live-reconfiguration.md)
+- 82.1 Why it matters: change strategy/config without dropping a tick
+- 82.2 Mental model: atomic pointer swaps and double-buffering
+- 82.3 Measure it: reload-induced tear/stall test
 - 82.4 Techniques
-  - 82.4.1 Shared-memory data planes between isolated processes
-  - 82.4.2 Single-writer-per-segment discipline
-  - 82.4.3 Supervisor/watchdog, heartbeats and liveness
-  - 82.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
-  - 82.4.5 Symbol/venue sharding (core dumps → Ch. 83)
-  - 82.4.6 Divergence forensics and determinism auditing
-- 82.5 Pitfalls & anti-patterns: shared fate, cascading restarts
+  - 82.4.1 Seqlock-/RCU-published config snapshots read lock-free
+  - 82.4.2 Versioned configuration and safe reclamation
+  - 82.4.3 Shared-memory config segments; validation-before-swap
+  - 82.4.4 Draining vs instantaneous cutover; dynamic-library/strategy reload with warm-up
+- 82.5 Pitfalls & anti-patterns: torn config, stalls during cutover
 - 82.6 Exercises & checklist
 
-### [83. Crash Handling, Core Dumps & Post-Mortem Diagnostics](83-crash-handling-core-dumps-post-mortem.md)
-- 83.1 Why it matters: the fault at 09:30:01 with four hundred working orders
+### [83. Process Topology & The Deterministic State Machine](83-process-topology-deterministic-state-machine.md)
+- 83.1 Why it matters: contain a crash, keep the venue session up
 - 83.2 Mental model
-  - 83.2.1 From the faulting instruction to the core file
-  - 83.2.2 Async-signal safety, and the faults you will see
-  - 83.2.3 The order of business: safety, evidence, dump
-  - 83.2.4 Why dumps stall the box, and what controls their size
-- 83.3 Measure it: a signal's cost, a stack capture's cost, a dump versus its size
+  - 83.2.1 Process-per-role vs monolith (feed handler / strategy / order gateway / risk)
+  - 83.2.2 The Deterministic State Machine Pattern: pure, side-effect-free core decoupled from I/O for exact replayability
+  - 83.2.3 Fault domains and blast radius
+  - 83.2.4 Crash-only design
+- 83.3 Measure it: failover/restart time and its tail
 - 83.4 Techniques
-  - 83.4.1 The async-signal-safe fault handler
-  - 83.4.2 Pre-warming, and choosing the stack-capture mechanism
-  - 83.4.3 The kill-switch handoff and the flight recorder
-  - 83.4.4 Dumps that do not stall the box: `coredump_filter`, `MADV_DONTDUMP`, the pipe handler, systemd-coredump and minidumps
-  - 83.4.5 Post-mortem: joining the core, the crash record, the trace record and the capture
-- 83.5 Pitfalls & anti-patterns
+  - 83.4.1 Shared-memory data planes between isolated processes
+  - 83.4.2 Single-writer-per-segment discipline
+  - 83.4.3 Supervisor/watchdog, heartbeats and liveness
+  - 83.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
+  - 83.4.5 Symbol/venue sharding (core dumps → Ch. 84)
+  - 83.4.6 Divergence forensics and determinism auditing
+- 83.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 - 83.6 Exercises & checklist
 
-### [84. Capture, Persistence & Replay Storage](84-capture-persistence-replay-storage.md)
-- 84.1 Why it matters: deterministic replay, research, and compliance
-- 84.2 Mental model: append-only/WAL journals; time-indexed storage
-- 84.3 Measure it: capture throughput and hot-path impact
+### [84. Crash Handling, Core Dumps & Post-Mortem Diagnostics](84-crash-handling-core-dumps-post-mortem.md)
+- 84.1 Why it matters: the fault at 09:30:01 with four hundred working orders
+- 84.2 Mental model
+  - 84.2.1 From the faulting instruction to the core file
+  - 84.2.2 Async-signal safety, and the faults you will see
+  - 84.2.3 The order of business: safety, evidence, dump
+  - 84.2.4 Why dumps stall the box, and what controls their size
+- 84.3 Measure it: a signal's cost, a stack capture's cost, a dump versus its size
 - 84.4 Techniques
-  - 84.4.1 Lossless line capture and nanosecond packet timestamps
-  - 84.4.2 Compact binary log formats
-  - 84.4.3 Getting bytes to disk off the hot path (async, io_uring, `O_DIRECT`, NVMe, batching)
-  - 84.4.4 Sequencing and gap-free persistence; retention and compaction
-  - 84.4.5 Feeding captures into replay, simulation and backtests
-- 84.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
+  - 84.4.1 The async-signal-safe fault handler
+  - 84.4.2 Pre-warming, and choosing the stack-capture mechanism
+  - 84.4.3 The kill-switch handoff and the flight recorder
+  - 84.4.4 Dumps that do not stall the box: `coredump_filter`, `MADV_DONTDUMP`, the pipe handler, systemd-coredump and minidumps
+  - 84.4.5 Post-mortem: joining the core, the crash record, the trace record and the capture
+- 84.5 Pitfalls & anti-patterns
 - 84.6 Exercises & checklist
 
-### [85. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](85-latency-spike-forensics-anomaly-triggered-diagnostics.md)
-- 85.1 Why it matters: the book can say it happened; this chapter says why
-- 85.2 Mental model
-  - 85.2.1 From one outlier to a mechanism: the forensic loop
-  - 85.2.2 One timeline across clocks
-  - 85.2.3 Suspects and fingerprints
-  - 85.2.4 Always-on, frozen on trigger
-- 85.3 Measure it: the always-on record, the freeze, and the clock alignment
+### [85. Capture, Persistence & Replay Storage](85-capture-persistence-replay-storage.md)
+- 85.1 Why it matters: deterministic replay, research, and compliance
+- 85.2 Mental model: append-only/WAL journals; time-indexed storage
+- 85.3 Measure it: capture throughput and hot-path impact
 - 85.4 Techniques
-  - 85.4.1 Reconstructing the timeline
-  - 85.4.2 The flight recorder: always-on, frozen by a swap
-  - 85.4.3 Kernel and hardware capture on the same trigger: ftrace, `perf record` in overwrite mode, Intel PT snapshots
-  - 85.4.4 Testing the suspects: the decision table in practice
-  - 85.4.5 From spike to incident: the bundle and the reproduction
-- 85.5 Pitfalls & anti-patterns
+  - 85.4.1 Lossless line capture and nanosecond packet timestamps
+  - 85.4.2 Compact binary log formats
+  - 85.4.3 Getting bytes to disk off the hot path (async, io_uring, `O_DIRECT`, NVMe, batching)
+  - 85.4.4 Sequencing and gap-free persistence; retention and compaction
+  - 85.4.5 Feeding captures into replay, simulation and backtests
+- 85.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 - 85.6 Exercises & checklist
 
-### [86. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](86-host-health-telemetry.md)
-- 86.1 Why it matters: the quiet box decays
-- 86.2 Mental model: isolation as a live invariant
-  - 86.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
-  - 86.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
-  - 86.2.3 Drift: how a tuned box untunes itself
-  - 86.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
-- 86.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
+### [86. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](86-latency-spike-forensics-anomaly-triggered-diagnostics.md)
+- 86.1 Why it matters: the book can say it happened; this chapter says why
+- 86.2 Mental model
+  - 86.2.1 From one outlier to a mechanism: the forensic loop
+  - 86.2.2 One timeline across clocks
+  - 86.2.3 Suspects and fingerprints
+  - 86.2.4 Always-on, frozen on trigger
+- 86.3 Measure it: the always-on record, the freeze, and the clock alignment
 - 86.4 Techniques
-  - 86.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
-  - 86.4.2 Frequency, thermal, power and SMIs — read from the right core
-  - 86.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
-  - 86.4.4 Baseline, drift audit, and wiring into the pipeline
-- 86.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
+  - 86.4.1 Reconstructing the timeline
+  - 86.4.2 The flight recorder: always-on, frozen by a swap
+  - 86.4.3 Kernel and hardware capture on the same trigger: ftrace, `perf record` in overwrite mode, Intel PT snapshots
+  - 86.4.4 Testing the suspects: the decision table in practice
+  - 86.4.5 From spike to incident: the bundle and the reproduction
+- 86.5 Pitfalls & anti-patterns
 - 86.6 Exercises & checklist
 
-### [87. Network Health Telemetry & Drop Forensics](87-network-health-telemetry-drop-forensics.md)
-- 87.1 Why it matters: a silent drop at the open is a wrong book and a lost race
-- 87.2 Mental model: the counter hierarchy, by the layer that dropped
-  - 87.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
-  - 87.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
-  - 87.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
-- 87.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
+### [87. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](87-host-health-telemetry.md)
+- 87.1 Why it matters: the quiet box decays
+- 87.2 Mental model: isolation as a live invariant
+  - 87.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
+  - 87.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
+  - 87.2.3 Drift: how a tuned box untunes itself
+  - 87.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
+- 87.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
 - 87.4 Techniques
-  - 87.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
-  - 87.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
-  - 87.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
-  - 87.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
-  - 87.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
-- 87.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
+  - 87.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
+  - 87.4.2 Frequency, thermal, power and SMIs — read from the right core
+  - 87.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
+  - 87.4.4 Baseline, drift audit, and wiring into the pipeline
+- 87.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
 - 87.6 Exercises & checklist
 
-### [88. Production Profiling & End-to-End Case Study](88-production-profiling-end-to-end-case-study.md)
-- 88.1 Why it matters: tying the whole book together
-- 88.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
-- 88.3 Measure it: a full tick-to-trade walkthrough
+### [88. Network Health Telemetry & Drop Forensics](88-network-health-telemetry-drop-forensics.md)
+- 88.1 Why it matters: a silent drop at the open is a wrong book and a lost race
+- 88.2 Mental model: the counter hierarchy, by the layer that dropped
+  - 88.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
+  - 88.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
+  - 88.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
+- 88.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
 - 88.4 Techniques
-  - 88.4.1 Regression detection and latency-regression gates in CI
-  - 88.4.2 Deterministic replay of captured market data
-  - 88.4.3 Simulation harnesses
-  - 88.4.4 Profiling the live system safely
-- 88.5 Pitfalls & anti-patterns: drift between test and production
+  - 88.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
+  - 88.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
+  - 88.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
+  - 88.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
+  - 88.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
+- 88.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
 - 88.6 Exercises & checklist
+
+### [89. Production Profiling & End-to-End Case Study](89-production-profiling-end-to-end-case-study.md)
+- 89.1 Why it matters: tying the whole book together
+- 89.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
+- 89.3 Measure it: a full tick-to-trade walkthrough
+- 89.4 Techniques
+  - 89.4.1 Regression detection and latency-regression gates in CI
+  - 89.4.2 Deterministic replay of captured market data
+  - 89.4.3 Simulation harnesses
+  - 89.4.4 Profiling the live system safely
+- 89.5 Pitfalls & anti-patterns: drift between test and production
+- 89.6 Exercises & checklist
 
 ## Appendices
 
@@ -1271,7 +1280,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - N.1 What a bundle is for: alignable, attributable, checkable (and bounded)
 - N.2 Provenance: build IDs, recorded compiler flags, load bases, configuration hash, kernel/firmware/microcode, host fingerprint, NIC settings
 - N.3 Clocks and anchors: TSC↔MONOTONIC sandwiches, PHC cross-timestamps, PTP journal and steps, the clock each ring used
-- N.4 The evidence, per layer: application (trace record, frozen flight recorder, binary log, telemetry snapshot, crash record, venue-stamp series), kernel ring (ftrace, `perf.data`, Intel PT, journal), host (Ch. 86 samples, `/proc`, RAS), network (Ch. 87 samples, counters, membership, bypass stacks), capture and tap slices
+- N.4 The evidence, per layer: application (trace record, frozen flight recorder, binary log, telemetry snapshot, crash record, venue-stamp series), kernel ring (ftrace, `perf.data`, Intel PT, journal), host (Ch. 87 samples, `/proc`, RAS), network (Ch. 88 samples, counters, membership, bypass stacks), capture and tap slices
 - N.5 The collection script (skeleton): bounded by `taskset`/`nice`/`ionice`/`timeout`, per-group logs, manifest and checksums
 - N.6 The ten-minute first look (cheap exonerations first)
 - N.7 Retention, pattern analysis and what to scrub

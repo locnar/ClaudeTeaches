@@ -42,6 +42,7 @@ STEPS = [
     ("insert", 73),  # Ch. 74 rust-for-the-hot-path
     ("insert", 74),  # Ch. 75 language-interop-abi-boundaries
     ("insert", 75),  # Ch. 76 managed-runtimes-measured
+    ("insert", 76),  # Ch. 77 choosing-a-language-per-latency-tier
     # INSERT_STEPS_END
 ]
 def old2new(n):
