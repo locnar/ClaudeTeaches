@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 67 (wire handling, the binary overlay, and §67.3's FIX decode measurement — the baseline this chapter beats), Ch. 34 (scaled-integer prices — the target type of every price parse), Ch. 35 (bit tricks — SWAR is bit tricks applied to bytes), Ch. 36 (SIMD — `pcmpeqb`/`movemask`/`pmaddubsw`), Ch. 14 (branch mispredicts — what a per-byte loop pays), Ch. 20 §20.4.2 (`constexpr` tables — the digit-pair table), Ch. 3 (a parse of the *same* message 20 M times measures nothing).
 >
-> **Leads into:** Ch. 100 §100.4.2 (the gateway's template encoder — §68.4.6 is its arithmetic), Ch. 95 (malformed input as an attack: every parser here rejects at the gate), Ch. 89 (deferred formatting for logs — the opposite discipline from an order encode that cannot be deferred), Ch. 112 §112.3's "order encode → TX" stage. Ch. 67 §67.4.1 is now a pointer to this chapter.
+> **Leads into:** Ch. 100 §100.4.2 (the gateway's template encoder — §68.4.6 is its arithmetic), Ch. 95 (malformed input as an attack: every parser here rejects at the gate), Ch. 92 (deferred formatting for logs — the opposite discipline from an order encode that cannot be deferred), Ch. 112 §112.3's "order encode → TX" stage. Ch. 67 §67.4.1 is now a pointer to this chapter.
 
 ---
 
@@ -16,7 +16,7 @@ Ch. 67's verdict stands — the hot *market-data* feed is binary (ITCH/SBE: 2–
 
 ### 68.2.1 Where text sits on the hot path, and its budget
 
-Inbound: a FIX execution report or reject on the order session (the fill that updates position before the next decision — Ch. 99), a text market-data feed, a FAST-decoded stream. Outbound: every NewOrderSingle, cancel and replace on a FIX session, which the gateway (Ch. 100) sends synchronously — the encode cannot be deferred to a background thread the way a log line can (Ch. 89), because the bytes *are* the order. The budget for both is the tens of nanoseconds that the binary paths cost, and the chapter's result is that a text message can be brought to ~60 ns inbound and ~27 ns outbound when its layout is known.
+Inbound: a FIX execution report or reject on the order session (the fill that updates position before the next decision — Ch. 99), a text market-data feed, a FAST-decoded stream. Outbound: every NewOrderSingle, cancel and replace on a FIX session, which the gateway (Ch. 100) sends synchronously — the encode cannot be deferred to a background thread the way a log line can (Ch. 92), because the bytes *are* the order. The budget for both is the tens of nanoseconds that the binary paths cost, and the chapter's result is that a text message can be brought to ~60 ns inbound and ~27 ns outbound when its layout is known.
 
 ### 68.2.2 The cost of a text field: scan, convert, validate — per field, not per byte
 
@@ -129,7 +129,7 @@ Integers in, integer out, the scale a compile-time constant of the instrument (C
 
 ### 68.4.3 `UTCTimestamp` to nanoseconds and back
 
-`YYYYMMDD-HH:MM:SS.sss` (21 bytes, fixed width; FIX 4.4+ allows `.ssssss` and `.sssssssss` — the same code with a longer fraction). Parse: `parse8_swar` on the date, three digit pairs and three digits for the time (`d2(p) = (p[0]−'0')·10 + (p[1]−'0')`), then **days-from-civil** (Hinnant's algorithm: shift the year so March is month 0, compute the era and the day-of-era with four integer divisions by constants — which the compiler turns into multiplies — and no month table), giving `((days·86400 + hh·3600 + mm·60 + ss)·1000 + ms)·10⁶` ns: ~8–10 ns in §68.3, entirely integer, no `struct tm`, no `timegm` (which takes a lock in glibc and is not reentrant-fast). Format: `civil_from_days` (the inverse, also branch-free except one `mp < 10` select) and six `put2()` digit-pair copies into fixed positions — 5–10 ns. Two cautions: the venue's `SendingTime` is the *venue's* clock, compared against the local one only after Ch. 70's PTP offset is known (Appendix J.5's venue-timestamp table says what each venue's timestamp means); and the sequence-number and timestamp fields are the ones a resend (Ch. 100 §100.4.3) must *re-format*, which is why the template encoder keeps them fixed-width.
+`YYYYMMDD-HH:MM:SS.sss` (21 bytes, fixed width; FIX 4.4+ allows `.ssssss` and `.sssssssss` — the same code with a longer fraction). Parse: `parse8_swar` on the date, three digit pairs and three digits for the time (`d2(p) = (p[0]−'0')·10 + (p[1]−'0')`), then **days-from-civil** (Hinnant's algorithm: shift the year so March is month 0, compute the era and the day-of-era with four integer divisions by constants — which the compiler turns into multiplies — and no month table), giving `((days·86400 + hh·3600 + mm·60 + ss)·1000 + ms)·10⁶` ns: ~8–10 ns in §68.3, entirely integer, no `struct tm`, no `timegm` (which takes a lock in glibc and is not reentrant-fast). Format: `civil_from_days` (the inverse, also branch-free except one `mp < 10` select) and six `put2()` digit-pair copies into fixed positions — 5–10 ns. Two cautions: the venue's `SendingTime` is the *venue's* clock, compared against the local one only after Ch. 74's PTP offset is known (Appendix J.5's venue-timestamp table says what each venue's timestamp means); and the sequence-number and timestamp fields are the ones a resend (Ch. 100 §100.4.3) must *re-format*, which is why the template encoder keeps them fixed-width.
 
 ### 68.4.4 Tag scanning and dispatch: SIMD delimiter find, jump-table switch, bitmask tokenising, layout-pinned parsing
 
@@ -226,7 +226,7 @@ Sixteen instructions, one load, zero branches, zero memory stores — the 1.5 ns
 - **The bitmask tokeniser on short messages.** It lost by 15–30 % at 145 bytes (§68.3); measure before adopting a technique from a different message size.
 - **Layout pinning without a fallback.** A venue that adds or reorders a field on a Sunday breaks a parser that *asserts* the layout; the pinned parser *expects* it and falls back (§68.4.4) — and logs the fallback count (Ch. 94), because a sustained fallback is a slow path that nobody chose.
 - **Hand-rolled digit pairs beating `to_chars` — a belief, not a measurement.** `to_chars` already is one (§68.3); the win is fixed width and the template, not the table.
-- **`snprintf`/`std::format` for the order message.** 100+ ns, a `double` on the price path, and a length that changes; the template (§68.4.6) or, for logs, Ch. 89's deferred formatting.
+- **`snprintf`/`std::format` for the order message.** 100+ ns, a `double` on the price path, and a length that changes; the template (§68.4.6) or, for logs, Ch. 92's deferred formatting.
 - **Parsing the same message in the benchmark.** Both compilers hoist it (§68.3's preamble; Ch. 3); a ring of different messages and a barrier on the output.
 
 ## 68.7 Exercises & checklist

@@ -10,7 +10,7 @@
 
 ## 28.1 Why it matters: rules enforced by vigilance are not enforced
 
-The preceding twenty-seven chapters state rules: no allocation on the hot path (Ch. 29), no syscall (Ch. 48), no `virtual`/`std::function` dispatch where a static call will do (Ch. 15), no throw (Ch. 23), structs that cross a cache line or a process boundary have a pinned layout (Ch. 10, 61), atomics that are actually lock-free (Ch. 38), windows that are powers of two (Ch. 35), floating-point that contracts the same way on every box (Ch. 37). Every one of them is enforced today by the person who read the chapter remembering it in review, and every one of them is broken in production by a `std::string` copy in a range-for, a `reserve()` that moved to the wrong side of a refactor, a `std::map` that someone found convenient, or a struct that grew a timestamp. The dynamic tools (Ch. 50) catch some of these *when the test hits them*; a latency regression gate (Ch. 110) catches the ones that are large enough to show above the noise. What is missing is the layer that catches them **at build time, on every commit, with the rule written down as code**: a linter configured for the hot path, custom checks that encode the book's own rules, a `static_assert` table that pins every invariant a measurement established, and a link step that cannot succeed if a hot translation unit imports `malloc`.
+The preceding twenty-seven chapters state rules: no allocation on the hot path (Ch. 29), no syscall (Ch. 51), no `virtual`/`std::function` dispatch where a static call will do (Ch. 15), no throw (Ch. 23), structs that cross a cache line or a process boundary have a pinned layout (Ch. 10, 64), atomics that are actually lock-free (Ch. 38), windows that are powers of two (Ch. 35), floating-point that contracts the same way on every box (Ch. 37). Every one of them is enforced today by the person who read the chapter remembering it in review, and every one of them is broken in production by a `std::string` copy in a range-for, a `reserve()` that moved to the wrong side of a refactor, a `std::map` that someone found convenient, or a struct that grew a timestamp. The dynamic tools (Ch. 50) catch some of these *when the test hits them*; a latency regression gate (Ch. 110) catches the ones that are large enough to show above the noise. What is missing is the layer that catches them **at build time, on every commit, with the rule written down as code**: a linter configured for the hot path, custom checks that encode the book's own rules, a `static_assert` table that pins every invariant a measurement established, and a link step that cannot succeed if a hot translation unit imports `malloc`.
 
 This chapter builds that layer and, in keeping with the book, *calibrates* it: §28.3 measures what the copies the linter flags actually cost (2 ns, 11 ns, or nothing), because a lint that cries wolf gets suppressed and a lint that is calibrated gets obeyed.
 
@@ -68,7 +68,7 @@ The calibration: a flagged copy of a type with a non-trivial destructor costs 2�
    hot.cpp:20:9:  std::function-call-on-hot-path                     cb(o)              — Ch. 15
    hot.cpp:21:25: throw-on-hot-path                                  throw ...          — Ch. 23
    hot.cpp:25:15: new-on-hot-path                                    new Order{...}     — Ch. 29
-   hot.cpp:32:5:  syscall-or-malloc-on-hot-path                      ::write(fd, ...)   — Ch. 48
+   hot.cpp:32:5:  syscall-or-malloc-on-hot-path                      ::write(fd, ...)   — Ch. 51
 
    $ nm -u -C hot.o | grep -E 'operator new|malloc|write|__cxa_throw|__throw'           # link-time truth (§28.4.4)
    U operator new(unsigned long)    U __cxa_allocate_exception    U __cxa_throw    U write
@@ -110,7 +110,7 @@ match functionDecl(hasAttr("attr::Hot"), forEachDescendant(cxxMemberCallExpr(cal
       unless(callee(cxxMethodDecl(hasAttr("attr::Final"))))).bind("virtual-call-on-hot-path")))                         # Ch. 15
 match functionDecl(hasAttr("attr::Hot"), forEachDescendant(cxxOperatorCallExpr(callee(cxxMethodDecl(ofClass(hasName("::std::function"))))).bind("std::function-call-on-hot-path")))
 match functionDecl(hasAttr("attr::Hot"), forEachDescendant(callExpr(callee(functionDecl(matchesName(
-      "^::(write|read|send|recv|clock_gettime|nanosleep|malloc|calloc|realloc|free)$")))).bind("syscall-or-malloc-on-hot-path")))   # Ch. 48
+      "^::(write|read|send|recv|clock_gettime|nanosleep|malloc|calloc|realloc|free)$")))).bind("syscall-or-malloc-on-hot-path")))   # Ch. 51
 match functionDecl(hasAttr("attr::Hot"), forEachDescendant(cxxForRangeStmt(hasLoopVariable(varDecl(unless(hasType(referenceType())),
       hasType(cxxRecordDecl(hasMethod(cxxDestructorDecl(unless(isTrivial())))))))).bind("range-for-copies-a-non-trivial-type")))
 ```
@@ -136,8 +136,8 @@ Ch. 20 §20.4.1's "compile-time validation" bullet, grown into the pattern:
 // contracts_test.cpp — one line per invariant a chapter measured; compiled with -fsyntax-only in CI (GCC and Clang)
 LAYOUT_CONTRACT(Order, 32, 8);     POWER_OF_TWO(sizeof(Order));                    // Ch. 32: two orders per line
 LAYOUT_CONTRACT(Level, 16, 4);                                                     // Ch. 32: four levels per line
-FITS_ONE_LINE(Bbo);                SHM_SAFE(Bbo);                                  // Ch. 43, 61: seqlock-published, memcpy'd
-SHM_SAFE(Slot);                    POWER_OF_TWO(4096);                             // Ch. 61: ring slots cross processes
+FITS_ONE_LINE(Bbo);                SHM_SAFE(Bbo);                                  // Ch. 43, 64: seqlock-published, memcpy'd
+SHM_SAFE(Slot);                    POWER_OF_TWO(4096);                             // Ch. 64: ring slots cross processes
 LOCK_FREE(std::uint64_t);
 #ifdef __cpp_lib_hardware_interference_size
 static_assert(std::hardware_destructive_interference_size == 64);                  // Ch. 38, 41 (absent under Clang + libstdc++ 13: §28.3)
@@ -148,7 +148,7 @@ static_assert(sizeof(Ring<4096>) % 64 == 0);                                    
 ```
 
 - **The layout contract** (`sizeof`/`alignof`/`offsetof` — Ch. 10 §10.3 developed the `offsetof` form for wire structs; Ch. 22 generates them for decoders) pins what a measurement chose; the message says "re-measure", not "fix", because the right response to a grown struct may be to accept the new size *after* re-running the chapter's benchmark.
-- **The shared-memory contract** (`is_trivially_copyable` + `is_standard_layout`) is what makes a `memcpy` into a ring slot or a shm segment (Ch. 61) defined behaviour; add `has_unique_object_representations_v` when the bytes are hashed or compared.
+- **The shared-memory contract** (`is_trivially_copyable` + `is_standard_layout`) is what makes a `memcpy` into a ring slot or a shm segment (Ch. 64) defined behaviour; add `has_unique_object_representations_v` when the bytes are hashed or compared.
 - **The concurrency contract**: `is_always_lock_free` for every atomic on the hot path (Ch. 38 §38.6 made it a checklist item; here it is a build error), the interference size pinned to what the padding assumed (Ch. 41), and `has_single_bit` for every capacity that is masked (Ch. 35, 42).
 - **The exception contract**: `static_assert(noexcept(expr))` for the hot calls — and because `noexcept(f(args))` is *false* if any callee in the expression is not `noexcept`, one assert per hot entry point transitively checks the chain the front end can see (Ch. 23 §23.4.1).
 - **The folding contract**: a `consteval`-built table referenced in a `static_assert` is proved to be a compile-time constant (a runtime value is a hard error); `if consteval` (C++23) selects the folded form in the function itself. What the contract cannot prove is that the *optimiser* kept the fold — that is §28.4.4's `objdump` check and Ch. 20 §20.5.
@@ -165,11 +165,11 @@ The front end sees patterns; the linker sees facts. Three facts worth asserting:
 
 ### 28.4.5 Runtime assertions in test builds
 
-For what the test *executes*: the `operator new` counter wrapping the timed region (Ch. 29 §29.5; Ch. 32 §32.3 reports it as a column); `SECCOMP_MODE_STRICT` (`prctl(PR_SET_SECCOMP, SECCOMP_MODE_STRICT)`) entered just before the hot loop in a test binary, so that *any* syscall but `read`/`write`/`_exit`/`sigreturn` kills the process (§28.3: `Killed`, exit 137) — the kernel's own no-syscall assertion, zero overhead, and a `clock_gettime` that quietly fell back from the vDSO to a syscall (Ch. 19) is caught by it; `strace -c` and `bpftrace`'s syscall count on the hot thread (Ch. 48, 73) for the softer form; and the replay hash (Ch. 37 §37.4.6) for bit-exactness. These belong in Ch. 109's test suite and run in Ch. 110's CI next to the sanitizers (Ch. 50).
+For what the test *executes*: the `operator new` counter wrapping the timed region (Ch. 29 §29.5; Ch. 32 §32.3 reports it as a column); `SECCOMP_MODE_STRICT` (`prctl(PR_SET_SECCOMP, SECCOMP_MODE_STRICT)`) entered just before the hot loop in a test binary, so that *any* syscall but `read`/`write`/`_exit`/`sigreturn` kills the process (§28.3: `Killed`, exit 137) — the kernel's own no-syscall assertion, zero overhead, and a `clock_gettime` that quietly fell back from the vDSO to a syscall (Ch. 19) is caught by it; `strace -c` and `bpftrace`'s syscall count on the hot thread (Ch. 51, 77) for the softer form; and the replay hash (Ch. 37 §37.4.6) for bit-exactness. These belong in Ch. 109's test suite and run in Ch. 110's CI next to the sanitizers (Ch. 50).
 
 ### 28.4.6 Reviewing for latency: the checklist
 
-The static layer does not read a design. A hot-path review asks, in order: (1) **is this on the hot path** (which TU, which attribute, which core — Ch. 43's topology), because everything after depends on it; (2) **allocation**: every container pre-sized, every string an `std::string_view`/`FixedString` (Ch. 24), every `std::function` a template parameter; (3) **dispatch**: every `virtual` through a `final` or a `variant`, every indirect call justified (Ch. 15); (4) **control flow**: the rare path marked `[[unlikely]]` and *measured* rare, no `throw`, `noexcept` on the entry points (Ch. 14, 23); (5) **layout**: every new field in a hot struct accounted against the line budget, the contract table updated (Ch. 10, §28.4.3); (6) **sharing**: nothing written by two cores, nothing read by the hot core that a cold core writes without a seqlock/RCU (Ch. 41, 43); (7) **time**: no clock inside the deterministic core, every timeout a deadline on an input timestamp (Ch. 37, 49); (8) **the measurement**: the benchmark that justifies the change, run A/A (Ch. 110 §110.4.1), with the numbers in the PR. Appendix O's catalogue is the long form, sorted by where the sin lives.
+The static layer does not read a design. A hot-path review asks, in order: (1) **is this on the hot path** (which TU, which attribute, which core — Ch. 46's topology), because everything after depends on it; (2) **allocation**: every container pre-sized, every string an `std::string_view`/`FixedString` (Ch. 24), every `std::function` a template parameter; (3) **dispatch**: every `virtual` through a `final` or a `variant`, every indirect call justified (Ch. 15); (4) **control flow**: the rare path marked `[[unlikely]]` and *measured* rare, no `throw`, `noexcept` on the entry points (Ch. 14, 23); (5) **layout**: every new field in a hot struct accounted against the line budget, the contract table updated (Ch. 10, §28.4.3); (6) **sharing**: nothing written by two cores, nothing read by the hot core that a cold core writes without a seqlock/RCU (Ch. 41, 43); (7) **time**: no clock inside the deterministic core, every timeout a deadline on an input timestamp (Ch. 37, 52); (8) **the measurement**: the benchmark that justifies the change, run A/A (Ch. 110 §110.4.1), with the numbers in the PR. Appendix O's catalogue is the long form, sorted by where the sin lives.
 
 ## 28.5 Pitfalls & anti-patterns
 

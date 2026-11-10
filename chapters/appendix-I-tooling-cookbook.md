@@ -243,7 +243,7 @@ Inspecting and tuning the RX/TX path (Ch. 65, 67, 71, 72).
 
 ## I.9 Codegen, binaries & sanitizers
 
-Verifying what the compiler produced, and catching bugs before production (Ch. 4, 26, 50, 95).
+Verifying what the compiler produced, and catching bugs before production (Ch. 4, 26, 50, 95); the static checks and link-time assertions of Ch. 28 are in I.12.
 
 ```
    objdump -d -M intel --no-show-raw-insn ./app          # disassemble (Intel syntax; Ch. 4)
@@ -371,6 +371,13 @@ Profiling and policing the build (Ch. 27), checking that an attribute fired (App
    clang++ -ftime-trace -c hot.cpp -o hot.o                 # per-TU build profile → hot.json (headers, instantiations, passes; Ch. 27 §27.4.1)
    ClangBuildAnalyzer --all build/ out.bin && ClangBuildAnalyzer --analyze out.bin   # aggregate: most expensive headers/templates across a build
    g++ -ftime-report -c hot.cpp                              # GCC per-pass times (no per-header view)
+   # --- enforcing the hot-path rules (Ch. 28):
+   run-clang-tidy -p build -checks='-*,performance-*,bugprone-exception-escape,misc-const-correctness' -warnings-as-errors='performance-*' src/hot/   # scoped lint as a merge gate (§28.4.1)
+   clang-query-18 -f hotrules.cq src/hot/feed.cpp -- -std=c++20            # the book's rules as AST matchers; hasAttr("attr::Hot") scopes them (§28.4.2)
+   nm -u -C build/hot/*.o | grep -E 'operator new|malloc|__cxa_throw|__throw_|pthread_mutex|write$|clock_gettime'   # a hot TU importing any of these fails CI (§28.4.4)
+   ld -r -o hot_wrapped.o build/hot/*.o --wrap=malloc --wrap=_Znwm --wrap=_Znam   # partial link with the allocator wrapped; link __wrap_* to abort() in test builds (§28.4.4)
+   g++ -std=c++20 -fsyntax-only contracts_test.cpp && clang++ -std=c++20 -fsyntax-only contracts_test.cpp   # the static_assert contract table, both toolchains (§28.4.3)
+   objdump -d --no-show-raw-insn app | awk '/<_ZN8FastBook.*remove/,/ret/' | grep -c 'call\|div\|vfmadd'   # asm-count gate: 0 calls/divs in the LOB fast path, 0 FMAs in a bit-exact core (Ch. 32 §32.5, Ch. 37 §37.5)
    clang++ -std=c++23 --precompile book.cppm -o book.pcm && clang++ -std=c++23 -fmodule-file=book=book.pcm -c tu.cpp   # named module, Clang 18 (Ch. 27 §27.4.4)
    cmake -G Ninja -B build -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CXX_COMPILER_CLANG_SCAN_DEPS=$(which clang-scan-deps-18)   # CMake 3.28 module scanning
    SOURCE_DATE_EPOCH=1700000000 g++ -O2 -ffile-prefix-map=$PWD=/src -frandom-seed=x.cpp -Wl,--build-id=sha1 x.cpp -o x && cmp x x.rebuilt   # reproducible? (Ch. 27 §27.4.6)

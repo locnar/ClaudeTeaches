@@ -77,7 +77,7 @@ The three highest-leverage *whole-program* optimizations (Ch. 26) — applied to
 
 Sanitizer *costs* on hot-path kernels (full UBSan 2.5–20×, the overflow/bounds/shift/null subset 1.0–1.5×, trapping vs runtime) are measured in **Appendix P.3**; this section lists the flags.
 
-Flags that *find problems* rather than change codegen — build-time and test-time tools (Ch. 10, 34, 36, 50, 95):
+Flags that *find problems* rather than change codegen — build-time and test-time tools (Ch. 10, 34, 36, 50, 95). The *static* enforcement layer beyond flags — clang-tidy's `performance-*` set scoped to the hot path, custom AST-matcher checks for the book's rules, `static_assert` contract tables and link-time `--wrap`/`nm` assertions — is Ch. 28:
 
 - **`-Wpadded`** (Ch. 10) — warn when the compiler inserts struct padding. Invaluable for **object-layout** work (Ch. 10) — it shows exactly where padding bloats a hot struct so you can reorder members to shrink it to a cache line (Ch. 10). Noisy (don't leave it on globally); run it deliberately on hot structs. Pair with `pahole` (Ch. 10) for the full layout picture.
 - **`-Wfloat-equal`** (Ch. 34) — warn on `==`/`!=` between floats (a correctness trap — Ch. 34). Useful in price/numeric code review.

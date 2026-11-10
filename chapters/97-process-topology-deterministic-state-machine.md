@@ -40,6 +40,8 @@ The trade-off is **latency vs containment**: crossing a process boundary costs a
 
 ### 97.2.2 The Deterministic State Machine Pattern: pure, side-effect-free core decoupled from I/O for exact replayability
 
+> The arithmetic *inside* this core — per-instrument state, the signals maintained in O(1), floating-point drift and the build flags that keep a replay bit-exact — is Ch. 37; this section is the pattern around it.
+
 The most important pattern in the chapter: **isolate the core decision logic into a pure, deterministic state machine, decoupled from all I/O, timers, and randomness.**
 
 ```

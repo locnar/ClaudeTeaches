@@ -18,6 +18,8 @@
 | Silent `malloc` fallback on pool exhaustion | the tail appears only at the peak (the open) | pool high-water telemetry; `malloc` uprobe at the open | Hard cap with a deliberate reject policy; size from captured peaks | Ch. 30 §30.5, 39 §47.2.1 ◆ |
 | Coroutine frame / `std::execution` op-state allocated per invocation | `malloc` per message in "async" code | `malloc` uprobe; `-fsanitize=address` alloc counts; check HALO in the asm | Verify frame elision in the asm; preallocate op-states; keep coroutines off the critical path | Ch. 48 §48.6, 41 §49.6 |
 | Giant stack frames / unbounded stack use (large locals, recursion, `alloca`) | a stack-guard page fault at the worst moment; a `SIGSEGV` on a sigaltstack-less thread | `-fstack-usage`; `perf stat -e page-faults` on the first deep call; `ulimit -s` experiments | Bound frames; pre-touch the stack; `sigaltstack` per thread | Ch. 29 §29.5, 89 §101.5 |
+| `std::unordered_map` (or `std::map`/`std::list`) as the order-id map or the price-level store | one node allocation per add (2.4 M in 5 M events); p90 +90 ns, p99.9 +190 ns over the ladder book | the `operator new` counter around the replay (Ch. 29); `nm -u hot.o \| grep 'operator new'` | a dense tick ladder + pooled orders; direct addressing for near-monotone ids, a flat hash for opaque ones | Ch. 32 §32.3, §32.6 |
+| A hot TU that imports `malloc`/`operator new` through an inlined library path (`vector` growth, `std::string` > SSO, a `__throw_length_error`) | allocation on a path every source-level check called clean | `nm -u -C hot.o`; the `ld -r --wrap=malloc --wrap=_Znwm` partial link with `__wrap_*` → `abort()` in test builds | pre-size; move cold code to cold TUs; keep the trap in CI | Ch. 28 §28.3, §28.4.4 |
 
 ## O.2 Dispatch, type erasure and abstraction cost
 
@@ -44,6 +46,9 @@
 | Branch chain instead of a bitmask in a validation gate (risk checks) ◆ | each reject mispredicts; the all-pass path pollutes the predictor | `perf stat -e branch-misses` scaled with reject rate | Accumulate `r \|= (cond) * BIT`, one branch on the verdict | Ch. 98 §98.2.3, §98.5 |
 | Reading the clock inside the deterministic core; timers as callbacks ◆ | replay digest diverges on the first run | Ch. 97 §97.4.6 digest compare live vs replay; `grep rdtsc\|clock_gettime` in core code | Time as an input (`now` stamped once per iteration); timer fires as events | Ch. 97 §97.5, 44 §52.5, 91 §104.5 |
 | Floating-point fold / hash-map iteration order inside a replicated fold ◆ | replicas with different histories disagree | replica digest comparison at equal `seq` | Integer state or fixed reduction order; flat arrays; one binary | Ch. 104 §104.5, 27 §34.6, 29 §36.6 |
+| Branchless (`cmov`) binary search on a *predictable* key stream (a price walk) | 33 ns where `std::lower_bound` takes 21: the select turned speculable control flow into a serial load chain | `perf stat -e branch-misses` near zero for both, cycles higher for the branchless one; the dependent-chain latency harness | choose per key stream: SIMD scan ≤ 64 keys, branchless on random keys, plain `lower_bound` on a predictable walk, Eytzinger past L2 | Ch. 31 §31.3 row 4, §31.5 |
+| A "branchless" ternary that the compiler turned into a branch | Clang 18: 62 ns vs 40 for the same source under GCC; the asm has a `jae` where a `cmovb` was intended | `objdump -d \| grep -c cmov` on the function; Godbolt | write the select as arithmetic (`base += (cond) * half`) or `__builtin_unpredictable`; asm-check in CI | Ch. 31 §31.4.6, §31.5 |
+| Per-byte tag/delimiter loops and a tag `if`-chain in a text parser | ~5 ns per field whatever the number conversion costs; one mispredict per field | `perf stat -e branch-misses` per message ≈ field count | layout-pinned parsing (expect the tag order, scan only values), a dense `switch` (jump table), SIMD delimiter find | Ch. 68 §68.3, §68.4.4 |
 
 ## O.4 Sharing, contention and false sharing
 
@@ -118,6 +123,8 @@
 | Benchmarking with everything in L1 / unrepresentative working set | "node containers are fine" in the lab | compare `perf stat` miss rates lab vs production replay | Benchmark at the real working set with cache-cold access | Ch. 3 §3.5, 7 §8.5, 25 §31.5 |
 | DDIO cross-socket trap; huge RX rings defeating DDIO | RX data lands in the wrong L3 or DRAM | `perf stat -e offcore_response.*` on the RX path; `pcm-pcie` | NIC and consumer on one socket; rings sized to the DDIO way share | Ch. 72 §72.5 |
 | The kill-switch that walks a 4 MiB table ◆ | 300–400 µs to enumerate 400 orders | the kill's measured time vs the live-order count | Live-order bitmap or intrusive live list | Ch. 98 §98.3, §98.5 |
+| Re-centring the dense ladder on *every* out-of-window add (a deep resting order far from the touch) | a 26 µs copy per deep add — one per message from a careless participant | the re-centre counter in the book; `rdtsc` around `recentre()` | only an add that *improves the best* may move the window; deep adds go to the cold sorted store | Ch. 32 §32.4.1, §32.6 |
+| Holding `Level*` across a re-centre or `Order*` across a pool reuse; `Order*` across an erase-by-swap | silent corruption after the tail event, or a cancel booked against the wrong order | ASan on the replay; the stale-id rejection counter | hold ticks and pool indices; recompute `Level*` from the tick; validate ids against the slot | Ch. 32 §32.6, Ch. 31 §31.5 |
 
 ## O.9 Numerics, bits and SIMD
 
@@ -130,6 +137,11 @@
 | `pdep`/`pext` on Zen 1/2; `bsr`/`bsf` on zero; missing `-march` → software fallback | 18 cycles per µop, or a `call __popcountdi2` | `objdump` for the library call; CPUID of the target | `-march` matching the fleet; `<bit>`; guard the zero case | Ch. 35 §35.6 |
 | AVX-512 on the single-message latency path (downclocking); SIMD for short loops | the whole core slows for ms after a wide instruction | `perf stat -e core_power.lvl2_turbo_license`; frequency telemetry | Keep AVX-512 off the hot core or accept the license; SIMD for batches | Ch. 36 §36.6, 46 §54.5 |
 | C bit-fields for wire layout; endianness bugs; unaligned `reinterpret_cast` | wrong fields on another compiler; UB that "works" | UBSan `-fsanitize=alignment`; a cross-compiler layout `static_assert` | `memcpy`/`bit_cast` loads, explicit shifts/masks, `std::byteswap` | Ch. 10 §10.6, 21 §25.6, 28 §35.6, 57 §67.6 |
+| Variance as `E[x²] − E[x]²` on a price series | a 3400× wrong variance (two 12-digit numbers subtracted) | compare against Welford on the same window | Welford/West recurrence; integers for prices | Ch. 37 §37.3, §37.6 |
+| An EWMA of an input that went quiet, without FTZ/DAZ | 33× per update once the value decays into subnormals — on the hot thread | `perf stat -e fp_assist.any`; `_MM_GET_FLUSH_ZERO_MODE()` at thread start | FTZ/DAZ on every hot thread; initialise the EWMA to the first sample | Ch. 37 §37.3, Ch. 34 §34.4.2 |
+| `float` running sums; add-new/subtract-old in floating point forever | 0.3 % drift in 10⁹ updates (`float`), unbounded slow drift (`double`), and *different* drift on the replay box | the periodic exact recompute's correction size; the state-hash replay test | integer sums for prices/sizes; periodic exact recompute at a fixed event count | Ch. 37 §37.3, §37.4.6 |
+| Implicit FMA contraction in a core that claims bit-exact replay | the same source gives different state bits per layout/compiler (GCC 13: two hashes from one template) | `objdump -d core.o \| grep -c vfmadd` > 0; the state-hash test across builds | `-ffp-contract=off` on the core's TUs or explicit `std::fma`; no fast-math | Ch. 37 §37.3, §37.5 |
+| Prices parsed through `double` (`strtod` + `llround(x*1e4)`) | 47 ns where 5 is available, and a rounding bug on prices like `0.07` | diff against the integer-digit parser on a day of messages | digits straight to a scaled integer with the decimal position; reject excess precision | Ch. 68 §68.3, §68.4.2 |
 
 ## O.10 Build, flags, codegen and toolchain
 
@@ -142,6 +154,8 @@
 | Inline asm without the clobbers / `volatile`; the memory clobber mistaken for a hardware fence | the statement deleted, hoisted, or a wrong register | the asm diff; an infinite loop at `-O2` | Declare every clobber; `volatile` for side effects; a real fence where one is needed | Ch. 87 §87.6 |
 | Sanitizers in production; TSan+ASan together; fuzzing without sanitizers | 2–10× slowdown, or bugs that slip | the CI matrix | ASan/UBSan/TSan on the replay in CI, separately; fuzz the decoders with sanitizers | Ch. 50 §50.5, 84 §95.5 |
 | Per-message crossings into another runtime; callbacks from a managed runtime on the hot thread | 10–500 ns per call and GC pauses on the hot thread | the per-crossing cost in Ch. 89's ladder; safepoint/GC logs aligned with the tail | Batch at the waist; keep managed code one hop away via shared memory | Ch. 89 §89.6, 79 §90.6, 80 §91.6 |
+| An unpinned clang-tidy, or `performance-*` run tree-wide with `-Werror` | CI red on toolchain upgrades for no latency reason; a thousand cold-path findings suppressed wholesale, hot ones with them | the suppression count; `clang-tidy --version` vs the hermetic toolchain | pin the version with the compiler; scope the lint to marked hot TUs; reasons on every `NOLINT` | Ch. 28 §28.4.1, §28.5 |
+| A load-bearing loop assumed vectorised (a checksum byte loop) | 37.6 ns under GCC `-O2`, 7.1 ns under Clang — the same source | `-fopt-info-vec-missed` / `-Rpass-missed=loop-vectorize`; `objdump \| grep psadbw` | write the intrinsic (`psadbw`) or gate the build on the vectorisation report | Ch. 68 §68.3, §68.5 |
 
 ## O.11 Measurement and observability mistakes
 

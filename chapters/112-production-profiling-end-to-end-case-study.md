@@ -46,6 +46,8 @@ The three tiers and the rules between them:
 - **Deep analysis happens offline, on replays — and it starts from the live tiers' evidence.** The expensive tools — `perf`, VTune, top-down, uncore attribution, flame graphs (Ch. 2) — run *off* the production path on a **deterministic replay** (Ch. 97, 102) of the captured session, bit-identical to production (Ch. 97 §97.2.2), so you profile the *exact* production behaviour with heavy tooling without touching the box. When the replay disagrees with production, the per-event digest (Ch. 97 §97.4.6) says at which event; when the question is one unrepeatable spike, the frozen rings and the incident bundle (Ch. 106, Appendix N) are the input, because a replay runs the message in 180 ns and cannot show the 41 µs the kernel took.
 - **The tiers close a loop:** always-on detects and freezes → targeted-live and the bundle attribute → offline replay reproduces, the fix is made, the CI gate (§112.4.1) defends → deploy → the always-on tier watches the trend. A low-latency system that lacks any of the three is one deploy — or one 09:31:42 — away from a silent regression it cannot explain.
 
+The *streaming* monitors this section leans on in production — an EWMA/EW-variance of each stage's latency, a decayed rate counter per venue session, a rolling p99 estimate — are Ch. 37's primitives (§37.4.3, §37.4.5) applied to the telemetry path (Ch. 94): O(1) per sample, fixed memory, no `exp` on the sampling thread.
+
 ## 112.3 Measure it: a full tick-to-trade walkthrough
 
 *Toolchain and machine: Appendix L.3.*
@@ -56,9 +58,9 @@ The capstone measurement: decompose the **end-to-end tick-to-trade latency distr
 |---|---|---|---:|---:|
 | **Wire → NIC → userspace** | packet arrives, kernel-bypass RX (poll-mode) | Ch. 71, 78 | ~700 ns | ~1 µs |
 | **Decode / normalize** | parse ITCH/SBE off the wire, zero-copy | Ch. 67, 35 | ~80 ns | ~200 ns |
-| **Book update / strategy** | update order book, run decision (state machine) | Ch. 31, 97, 9–14 | ~150 ns | ~500 ns |
+| **Book update / strategy** | update order book, run decision (state machine) | Ch. 32 (the book: ~16 ns/event measured), 37 (the signals: ~19 ns/event), 97, 9–14 | ~150 ns | ~500 ns |
 | **Pre-trade risk** | limit/position/kill-switch check | Ch. 98 (built there: ~11–15 ns measured), 84, 86 | ~40 ns | ~120 ns |
-| **Order encode → TX** | build order message, kernel-bypass TX | Ch. 67, 78 | ~500 ns | ~700 ns |
+| **Order encode → TX** | build order message, kernel-bypass TX | Ch. 68 (the template encoder: ~27 ns/message measured), 100, 78 | ~500 ns | ~700 ns |
 | **End-to-end tick-to-trade** | wire-in to wire-out (measured, not summed) | (all) | **~1.5 µs** | **~2.0 µs** |
 
 The end-to-end p99.9 is *less* than the sum of the stage p99.9s (~2.5 µs): the stages' tails rarely coincide, so the measured end-to-end tail is roughly the sum of p50s plus the dominant stage's excess — which is why the end-to-end row is measured at the wire, never summed. The Ch. 97 process-per-role topology would add ~3 shared-memory ring hops at ~50–150 ns each (Ch. 64; Ch. 46 §46.3 measures the hop and the topologies) — the containment-vs-latency trade of §97.2.1, paid deliberately or co-located after a benchmark like this one; a sequencer in front of those roles (Ch. 104) replaces the point-to-point rings with one stamped stream for the price of one such hop, and makes the gateway, risk and journal replicas of one fold.

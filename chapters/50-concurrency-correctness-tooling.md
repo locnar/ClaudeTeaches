@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 38 (the memory model — TSan checks happens-before; the bugs are ordering bugs), Ch. 42–45 (the lock-free structures this validates), Ch. 29/44 (allocation/UAF — ASan's domain), Ch. 25 (UB — UBSan's domain), Ch. 3 (measurement rigor extends to correctness).
 >
-> **Leads into:** Ch. 95 (secure programming — sanitizers + fuzzing on the decode path), Ch. 109 (testing the *logic* of the deterministic core — table-driven, property-based and deterministic simulation tests, the complement to this chapter's dynamic tooling), Ch. 110 and 112 (CI/regression — these tools belong in CI). Closes **Part VI** — the verification discipline that makes the lock-free and async work of Ch. 38–49 *trustworthy*.
+> **Leads into:** Ch. 28 (the *static* complement — scoped performance lints, the book's rules as AST matchers, `static_assert` contracts and link-time no-malloc/no-syscall assertions — which catches at build time what this chapter catches at run time), Ch. 95 (secure programming — sanitizers + fuzzing on the decode path), Ch. 109 (testing the *logic* of the deterministic core — table-driven, property-based and deterministic simulation tests, the complement to this chapter's dynamic tooling), Ch. 110 and 112 (CI/regression — these tools belong in CI). Closes **Part VI** — the verification discipline that makes the lock-free and async work of Ch. 38–49 *trustworthy*.
 
 ---
 

@@ -101,7 +101,7 @@ The functions the process-topology chapter (Ch. 97) maps onto separate processes
 
 - **Feed handler** — receives market data (J.4), performs A/B arbitration and gap recovery, decodes messages (J.5).
 - **Book builder** — applies decoded messages to maintain order books and the BBO (J.2), publishing snapshots to strategies (Ch. 43).
-- **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — outside this book's scope, but the thing everything else serves).
+- **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — *which* signals and why — is outside this book's scope, but the thing everything else serves; the *mechanics* of computing any signal in O(1), in fixed memory and deterministically are Ch. 37).
 - **Order gateway / OMS** — encodes and sends orders (J.3), tracks their state machine, handles acks/fills/cancels.
 - **Pre-trade risk** — enforces limits on the order path (J.3) before anything reaches the wire.
 - **Sequencer** — a single process (or switch/FPGA) that stamps a total order on every input (ticks, acks, timers, commands, strategy decisions) and fans the sequenced stream out, so that deterministic consumers (Ch. 97) hold bit-identical state and can be replayed exactly from the journal (Ch. 102). Built, measured and failed-over in **Ch. 104**; Ch. 97 §97.4.1's point-to-point rings remain the minimal topology when only one consumer needs each stream.

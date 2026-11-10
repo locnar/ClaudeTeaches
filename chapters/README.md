@@ -294,7 +294,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part III — Compile-Time & Language Mechanics
 
-*Moving work to compile time and paying for abstractions only when they cost: `constexpr`/`consteval` and the template cost model, zero-cost design (CRTP, policies, strong types, concepts), a protocol decoder generated from a schema at compile time, the abstractions that are not free (exceptions, the calling convention, statics and TLS), the cost model of modern idioms and strings without allocation, aliasing and object lifetime, the toolchain flags, and the build system as a latency path and a correctness boundary.*
+*Moving work to compile time and paying for abstractions only when they cost: `constexpr`/`consteval` and the template cost model, zero-cost design (CRTP, policies, strong types, concepts), a protocol decoder generated from a schema at compile time, the abstractions that are not free (exceptions, the calling convention, statics and TLS), the cost model of modern idioms and strings without allocation, aliasing and object lifetime, the toolchain flags, the build system as a latency path and a correctness boundary, and the static layer — scoped performance lints, the book's rules as AST matchers, `static_assert` contract tables and link-time no-malloc assertions — that makes the toolchain refuse to build a hot path that breaks the rules.*
 
 ### [20. Compile-Time Mechanics](20-compile-time-mechanics.md)
 - 20.1 Why it matters: work done at compile time is free at runtime
@@ -433,7 +433,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part IV — Memory Management
 
-*Allocation cost, custom allocators, cache-friendly containers, and memory mapping.*
+*Allocation cost, custom allocators, cache-friendly containers (and how to search a small sorted array), the limit order book built and measured — dense tick ladders with re-centring, pooled orders behind three id maps, L2 vs L3 — and memory mapping.*
 
 ### [29. Memory Management Fundamentals](29-memory-management-fundamentals.md)
 - 29.1 Why it matters: `malloc` can stall on the hot path
@@ -501,7 +501,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part V — Numerics & Data Parallelism
 
-*Representing prices exactly, bit tricks, and SIMD.*
+*Representing prices exactly, bit tricks, SIMD, and the strategy stage as computation: streaming statistics maintained in O(1) and fixed memory, with floating-point drift, the denormal cliff and bit-exact replay measured.*
 
 ### [34. Fixed-Point & Floating-Point Arithmetic](34-fixed-point-floating-point-arithmetic.md)
 - 34.1 Why it matters: representing prices without losing money
@@ -926,7 +926,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part IX — Market Data, NIC & Fabric
 
-*Decoding the feed, recovering losses, keeping the multicast membership alive, and the NIC, cache, timing, and fabric hardware around the receive and send paths.*
+*Decoding the feed (binary overlays, and the text protocols that stay on the order path — parsed and formatted branch-free), recovering losses, keeping the multicast membership alive, and the NIC, cache, timing, and fabric hardware around the receive and send paths.*
 
 ### [67. Zero-Copy Wire Handling & Market-Data Decoding](67-zero-copy-wire-market-data-decoding.md)
 - 67.1 Why it matters: parse off the wire without copies

@@ -67,7 +67,11 @@ NUMWORDS = {70: "seventy", 71: "seventy-one", 72: "seventy-two", 73: "seventy-th
             98: "ninety-eight", 99: "ninety-nine", 100: "one hundred", 101: "one hundred and one",
             102: "one hundred and two", 103: "one hundred and three", 104: "one hundred and four",
             105: "one hundred and five", 106: "one hundred and six", 107: "one hundred and seven",
-            108: "one hundred and eight", 109: "one hundred and nine", 110: "one hundred and ten"}
+            108: "one hundred and eight", 109: "one hundred and nine", 110: "one hundred and ten",
+            111: "one hundred and eleven", 112: "one hundred and twelve", 113: "one hundred and thirteen",
+            114: "one hundred and fourteen", 115: "one hundred and fifteen", 116: "one hundred and sixteen",
+            117: "one hundred and seventeen", 118: "one hundred and eighteen", 119: "one hundred and nineteen",
+            120: "one hundred and twenty"}
 
 PARTWORDS = {10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen",
              16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen", 20: "twenty"}

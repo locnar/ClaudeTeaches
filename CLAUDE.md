@@ -60,7 +60,7 @@ Code & content guidelines:
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
 > appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to 95 chapters in thirteen Parts and fifteen appendices (A–O), and then — with the modern-C++ depth chapters — to **98 chapters in thirteen Parts and sixteen appendices (A–P)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below), and on 2026-11-10 (P3-6 batch B: the hardware/OS chapters) to **108 chapters in thirteen Parts and eighteen appendices (A–R)**. Do not renumber against this list. The **Appendices** entries (A–R)
+> *Status / Workflow* below), on 2026-11-10 (P3-6 batch B: the hardware/OS chapters) to 108 chapters in thirteen Parts and eighteen appendices (A–R), and on 2026-11-10 (P3-6 batch C: the algorithms/data chapters) to **112 chapters in thirteen Parts and eighteen appendices (A–R)**. Do not renumber against this list. The **Appendices** entries (A–R)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
 
@@ -465,11 +465,11 @@ Code & content guidelines:
   12–14, 16, 18, 34, 37, 54, 68, 78; Appendices D, E, L, Q).
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 98
-  chapters and appendices A–R — see Phases 2–3, the six 2026-11-09 insertions and the 2026-11-10 insertion below).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 112
+  chapters and appendices A–R — see Phases 2–3, the six 2026-11-09 insertions and the two 2026-11-10 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 108 chapters + 18 appendices (A–R);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 112 chapters + 18 appendices (A–R);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
   with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters, O with
   the 2026-11-09 design-pattern chapters, P with the 2026-11-09 modern-C++ depth chapters, and Q–R with the
@@ -493,9 +493,13 @@ Code & content guidelines:
     abstractions (with concepts, §19.4.6), compile-time protocol decoders (Ch. 20, added 2026-11-09 P3-5), the cost
     of abstractions (with the calling convention and statics/TLS, §21.4.5–§21.4.6), the cost of modern idioms &
     strings without allocation (Ch. 22, P3-5), aliasing & type punning (with object lifetime / `start_lifetime_as`),
-    the build toolchain, build systems & hermetic toolchains (Ch. 25, P3-5).
-  - **IV — Memory Management** (29–33).
-  - **V — Numerics & Data Parallelism** (34–37).
+    the build toolchain, build systems & hermetic toolchains (Ch. 27, P3-5), and enforcing the hot-path rules —
+    static analysis, performance linters & contracts in code (Ch. 28, added 2026-11-10 P3-6C).
+  - **IV — Memory Management** (29–33): fundamentals, custom allocators, hot-path-hostile STL & cache-friendly
+    containers (with §31.4.6 small-array search, P3-6C), limit order book engineering (Ch. 32, added 2026-11-10
+    P3-6C), memory mapping.
+  - **V — Numerics & Data Parallelism** (34–37): fixed/floating point, bit tricks, SIMD, and streaming statistics &
+    incremental signal computation (Ch. 37, added 2026-11-10 P3-6C).
   - **VI — Concurrency** (38–50): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
     2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 42, P3-4), coroutines, `std::execution`,
     correctness tooling.
@@ -504,8 +508,9 @@ Code & content guidelines:
     residual noise (Ch. 52, added 2026-11-09 P3-1), warming. Power management & frequency determinism is Ch. 54 (added 2026-11-10 P3-6B).
   - **VIII — Kernel I/O, Sockets & Zero-Copy** (60–66): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP. The datapath anatomy chapter is Ch. 58 (added 2026-11-10 P3-6B).
-  - **IX — Market Data, NIC & Fabric** (67–76): decoding, reliable multicast, multicast membership &
-    dark-feed detection (Ch. 59, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
+  - **IX — Market Data, NIC & Fabric** (67–76): decoding, text protocols on the hot path — branch-free parsing &
+    formatting (Ch. 68, added 2026-11-10 P3-6C), reliable multicast, multicast membership & dark-feed detection
+    (Ch. 70), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
   - **X — Kernel Bypass, RDMA & Transport** (77–81): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (82–86): PCIe, GPU, MPI, FPGA, SmartNICs.
@@ -670,6 +675,36 @@ Code & content guidelines:
   measurements and is labelled so. Left for later batches: Appendix E rows (nothing derivable for the
   reference machine from the VM runs), Appendix O rows for the four chapters, the remaining item-19 gaps
   (C, D1, D2).
+- **2026-11-10 algorithms/data insertion (work-queue item P3-6 batch C):** four chapters were added with
+  `insert_chapter.py` (four ascending insertions, one commit each — no new Part) and one set of sections by
+  hand: **28** Enforcing the Hot-Path Rules: Static Analysis, Performance Linters & Contracts in Code (Part III,
+  after build systems — extends Part III to 20–28), **32** Limit Order Book Engineering (Part IV, after the
+  containers chapter, whose §31.4.5 case study is now a pointer), **37** Streaming Statistics & Incremental
+  Signal Computation on the Hot Path (Part V, after SIMD — extends Part V to 34–37), **68** Text Protocols on
+  the Hot Path: Branch-Free Parsing & Formatting (Part IX, after wire decoding, whose §67.4.1 is now a
+  pointer), and **Ch. 31 §31.4.6** Searching small sorted arrays (with the §31.3 row 4 that discharges Ch. 3
+  §3.3's sorted-vector-vs-hash-map promise). Renumber map from the post-batch-B numbering: 1–27 unchanged;
+  old 28–30 → 29–31; old 31–34 → 33–36; old 35–64 → 38–67; old 65–108 → 69–112. Composite from the Phase-3
+  numbering: 1–6 unchanged; 7–16 → 8–17; 17–19 → 19–21; 20 → 23; 21 → 25; 22 → 26; 23–25 → 29–31; 26 → 33;
+  27–29 → 34–36; 30–37 → 38–45; 38–41 → 48–51; 42–45 → 53–56; 46 → 58; 47 → 60; 48–53 → 62–67; 54 → 69;
+  55–70 → 71–86; 71 → 92; 72 → 95; 73 → 96; 74 → 97; 75 → 102; 76 → 112 (`stale_crossrefs.py`'s STEPS chain is
+  the executable form). Also: Ch. 3 §3.3's promise re-pointed at §31.3/§31.4.6; Ch. 20 §20.4.1 → §28.4.3;
+  Ch. 50's Leads-into names Ch. 28 as the static complement; Ch. 97 §97.2.2 → Ch. 37; Ch. 112 §112.3's stage
+  rows name Ch. 32/37/68 and §112.2 points at Ch. 37's streaming monitors; Appendix J.6's "outside this book's
+  scope" now points at Ch. 37; Appendix D.7/I.9 pointers and I.12 one-liners (clang-tidy, clang-query, `nm -u`,
+  `ld -r --wrap`, the asm-count gate); Appendix F (Welford, EWMA/EWMV, OFI, microprice, VWAP, monotonic deque,
+  MBO/MBP, dense tick ladder, re-centring, direct addressing, Eytzinger, sorting network, SWAR, digit-pair
+  table, layout-pinned parsing, performance contract, `--wrap` trap), Appendix G (Welford/West, Khuong & Morin,
+  Cont–Kukanov–Stoikov, Lemire, Langdale & Lemire, Hinnant, Algorithmica, Alexandrescu, clang-tidy/`ld` docs;
+  G.6 lines), Appendix O rows for the four chapters' pitfalls; README legend (112 chapters), Part III/IV/V/IX
+  intros and outlines; the preface's count and Part bullets. Measured on the author's 4-vCPU KVM guest
+  (GCC 13.3 / Clang 18.1, Linux 6.18, no PMU): `smallsearch.cpp` (Ch. 31), `lob.cpp` (Ch. 32), `signals.cpp`
+  (Ch. 37), `fixparse.cpp` (Ch. 68), `copycost.cpp`/`hot.cpp`/`hotrules.cq`/`contracts_test.cpp`/the `--wrap`
+  and seccomp demos (Ch. 28); every number is labelled VM-measured, `perf`-counter invocations are given for
+  the reference machine. Left for later: the rest of the data-structures brainstorm (D01–D18 beyond the D04
+  direct addressing and the two-level D05 bitmap the LOB chapter uses), the multi-venue consolidated book
+  (G54), a captured-ITCH replay of `lob.cpp` (Ch. 32 exercise 1), Appendix E rows (nothing derivable for the
+  reference machine from the VM runs), and the remaining item-19 batches (D1, D2).
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to
