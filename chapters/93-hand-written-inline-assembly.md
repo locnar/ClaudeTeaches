@@ -296,7 +296,7 @@ Compiled at `-O2`, **both GCC 13.3 and Clang 18.1 produce a program that never t
 2. **Hoist or not.** Build `nonvolatile.cpp` with GCC and Clang; find the `rdtsc` in each `-S`; explain in one sentence why Clang's loop reads the same timestamp every iteration and GCC's does not — and why both are allowed.
 3. **Beat the compiler, fairly.** Take Ch. 70's `decode()` and write a NASM version; measure out-of-line vs out-of-line, then vs inlined, as §93.3 does. Then inline *your* instruction selection as an `asm` statement inside the C++ function with `"=r"` outputs and compare again.
 4. **A doorbell on the reference machine.** With a NIC or FPGA BAR scratch register (Ch. 87 §87.3 — never a live doorbell), measure `movdir64b` vs four `vmovdqa` to a write-combining mapping with `sfence`; count PCIe TLPs with the device's counters if it exposes them.
-5. **`rdpmc` per stage.** Using Ch. 120 §120.4.4's `perf_event_open` + `mmap` setup, replace the `rdtscp` stage stamps of Ch. 94 (tracing) with `rdpmc` core-cycle reads in one stage; compare the two distributions and the cost of the read itself.
+5. **`rdpmc` per stage.** Using Ch. 120 §120.4.4's `perf_event_open` + `mmap` setup, replace the `rdtscp` stage stamps of Ch. 99 (tracing) with `rdpmc` core-cycle reads in one stage; compare the two distributions and the cost of the read itself.
 
 Checklist for every `asm` statement in a review:
 
@@ -312,7 +312,7 @@ Checklist for every `asm` statement in a review:
 
 - GCC manual, *Extended Asm — Assembler Instructions with C Expression Operands*, *Constraints for asm Operands* and *x86 Operand Modifiers* — the normative description of outputs, inputs, clobbers, `volatile`, `asm goto`, `asm inline` and the dialect alternatives (§93.2, §93.4.4).
 - Clang documentation, *Language Extensions: Inline Assembly* and the LLVM *Inline Assembler Expressions* reference — Clang's constraint support and divergences (§93.5).
-- Intel® 64 and IA-32 Architectures Software Developer's Manual, Vol. 2 — `RDTSCP`, `RDPMC`, `CPUID`, `SERIALIZE`, `MOVDIR64B`, `CLWB`, `CLFLUSHOPT`, `SFENCE`; Vol. 3 Ch. 24 (performance monitoring: fixed counters and the `rdpmc` index encoding) (§93.4.2).
+- Intel® 64 and IA-32 Architectures Software Developer's Manual, Vol. 2 — `RDTSCP`, `RDPMC`, `CPUID`, `SERIALIZE`, `MOVDIR64B`, `CLWB`, `CLFLUSHOPT`, `SFENCE`; Vol. 3 ch. 20 (performance monitoring: fixed counters and the `rdpmc` index encoding) (§93.4.2).
 - Intel, *How to Benchmark Code Execution Times on Intel IA-32 and IA-64 Instruction Set Architectures* (Paoloni) — the `cpuid; rdtsc` / `rdtscp; cpuid` fencing recipe and its clobbers, superseded on current parts by `lfence`/`serialize` (§93.4.2; Ch. 20).
 - *System V Application Binary Interface, AMD64 Architecture Processor Supplement* — the register, stack-alignment, red-zone and struct-return rules a hand-written function must honour (§93.2.4; Ch. 4 §4.2.1).
 - NASM manual, *The Netwide Assembler* — syntax, `default rel`, sections and `.note.GNU-stack` (§93.3, §93.4.5).

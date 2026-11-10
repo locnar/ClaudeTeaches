@@ -220,7 +220,7 @@ FP flags change *which instructions* the compiler emits, and that's verifiable. 
 
 The two produce **different bits** — which is exactly the determinism knob of §35.4.3: replay-critical code uses `-ffp-contract=off` for reproducibility, performance-critical-but-not-replayed code uses the FMA.
 
-**Reassociation / vectorized reduction (`-ffast-math`).** Without fast-math the compiler keeps a serial `vaddsd` chain (Ch. 13.5); with `-ffast-math` it reassociates into a vectorized multi-accumulator reduction — *faster, different result*:
+**Reassociation / vectorized reduction (`-ffast-math`).** Without fast-math the compiler keeps a serial `vaddsd` chain (§13.5); with `-ffast-math` it reassociates into a vectorized multi-accumulator reduction — *faster, different result*:
 
 ```asm
 ; sum reduction, -O2 (strict):   serial scalar chain (Ch. 13) — exact order preserved

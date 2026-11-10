@@ -59,7 +59,7 @@ This is the section a reader on AMD hardware needs most: **every `perf` event na
    ─────────────────────────────────── ─────────────────────────────────────────────── ──────────────────────────────────────────────────────
    retired instructions / branches     inst_retired.any, br_inst_retired.*             ex_ret_instr, ex_ret_brn, ex_ret_brn_misp, ex_ret_near_ret_mispred
    L1d misses / fills by source        mem_load_retired.l1_miss, l2_hit, l3_hit        ls_l1_d_tlb_miss.*, ls_dmnd_fills_from_sys.{local_l2,local_ccx,
-   (Ch. 8, 17 §17.3, 17 §18.3)         mem_load_l3_miss_retired.{local,remote}_dram        near_cache,far_cache,dram_io_near,dram_io_far}  (Zen 4+ names)
+   (Ch. 8, 17 §17.3, 18 §18.3)         mem_load_l3_miss_retired.{local,remote}_dram        near_cache,far_cache,dram_io_near,dram_io_far}  (Zen 4+ names)
    L2 behaviour                        l2_rqsts.*                                      l2_cache_req_stat.*, l2_pf_hit_l2, l2_pf_miss_l2_hit_l3
    L3 (per CCX uncore PMU)             uncore_cha_*/LLC_LOOKUP                         amd_l3/l3_lookup_state.l3_miss/, amd_l3/l3_xi_sampled_latency/
    DRAM / fabric traffic (Ch. 18, 76)  uncore_imc_*/cas_count_read                     amd_df/dram_channel_data_controller_N/ (bytes × 64), umc_* on Zen 4+

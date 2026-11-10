@@ -197,7 +197,7 @@ The structural cure (ties Ch. 42): give each thread/core its own data, laid out 
 - J. Mario / Red Hat blog posts on `perf c2c` and real-world false-sharing case studies — practical detection and fixes.
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — coherence-miss analysis and false-sharing detection.
 - Ch. 8 (*Caches/MESI*) — the coherence mechanics; Ch. 11 (*Alignment/Padding*) — the layout tools; Ch. 41–43 (*Atomics/Foundations/Spinlocks*) — the contention this is the accidental form of; Ch. 45–48 (*Lock-Free/Seqlock/Disruptor*) — structures whose indices must be padded; Ch. 18 (*NUMA*) — cross-socket false sharing; Ch. 53 (*Concurrency Tooling*) — distinguishing races from false sharing.
-- **Appendix A** — cache-line-size differences (64 vs 128) on ARM and their effect on `hardware_destructive_interference_size`; **Appendix E** — HITM/coherence latency numbers; **Appendix F** — false-sharing/HITM glossary.
+- **Appendix A** — cache-line-size differences on ARM (64 on Neoverse/Graviton, 128 on Apple cores, 256 on A64FX) and what `hardware_destructive_interference_size` is there (256 with GCC on AArch64, A.3); **Appendix E** — HITM/coherence latency numbers; **Appendix F** — false-sharing/HITM glossary.
 
 ---
 

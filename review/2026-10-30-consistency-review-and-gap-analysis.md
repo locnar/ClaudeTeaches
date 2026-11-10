@@ -679,11 +679,102 @@ If the author wants the smallest set of additions that closes the gaps they name
 
 ---
 
+## 11. Close-out (2026-11-10)
+
+Work-queue item 21 (**P4-2**, branch `work/item-21-final-sweep`) is the final consistency pass. It replaced the keyword heuristic with a deterministic reference validator, read every low-evidence reference by hand, extended the structure sweep, built the PDF, and recorded what is left. All chapter numbers in this section are today's (120 chapters).
+
+### 11.1 The queue and where each item landed
+
+| # | Item | What it did | Merge commit(s) |
+|---|---|---|---|
+| — | the review | this report, the gap analysis, the review tooling, first metadata fixes | `49e721c` |
+| 1 | P0-1 | remap the stale cross-references left by the Phase-3 renumber | `cdce168`, `597b454` |
+| 2 | P0-2 | fix stale book-shape metadata (counts, Part ranges, legend) | `2b62799` |
+| 3 | P0-3 | listings and commands that fail as printed | `ed5f0ef` |
+| 4 | P0-4 | listings with UB or concurrency bugs | `20e5ee3` (+ `38b1a83`) |
+| 5 | P0-5 | Appendix L coordinated-omission harness | `af8f901` |
+| 6 | P1-1 | benchmarks that collapse under the optimizer (§6) | `a707038` (+ `113ba3e`) |
+| 7 | P1-2 | technical misstatements in the prose (§7) | `0b0aa17` |
+| 8 | P1-3 | recurring numbers reconciled; the reference toolchain statement | `b74d3a3` |
+| 9 | P1-4 | Appendix H version table, Appendix D/C flag facts | `f95a9ed` |
+| 10 | P1-5 | Appendix G bibliography and Appendix F glossary | `e3ca928` (+ `08d70f1`) |
+| 11 | P1-6 | chapter chain, teasers and forward promises | `b9fb97e` |
+| 12 | P2-1 | duplication and chapter placement (§8) | `a501203` |
+| 13 | P2-2 | the confirmed medium/low findings: parts 1–4 | `157ec8c` (+ `ee05bc0`), `eac8280` (+ `79f4e32`), `6a87654` (+ `85e77e2`), `aed2b3c` |
+| 14 | P3-1 | monitoring chapters and the readiness appendix (Theme A) | `100a520` |
+| 15 | P3-2 | debugging and diagnostics chapters (Theme B) | `ca9a648` |
+| 16 | P3-3 | Part XII, Beyond C++ (Theme C) | `fb5eb8e` |
+| 17 | P3-4 | design-pattern chapters and the anti-pattern catalogue (Theme D) | `f12595a` |
+| 18 | P3-5 | modern-C++ depth chapters and the attribute/UB appendix (Theme E) | `49f8588` |
+| 19 | P3-6 | Themes F–L in five batches: A trading/lifecycle, B hardware/OS, C algorithms/data, D1 OS/hardware depth, D2 trading/networking/numerics | `1477dd4`, `2c2d3b0`, `bd5beb0`, `22df6bb`, `b0bb6bc` |
+| 20 | P4-1 | backfill reference-machine runs | **open** |
+| 21 | P4-2 | this pass | the merge of `work/item-21-final-sweep` (the one that carries this section) |
+| 22 | — | esoteric data structures (D01–D18) | **unscheduled** |
+
+### 11.2 The book as it stands
+
+**120 chapters in thirteen Parts, nineteen appendices (A–S), a preface.** Parts: I 1–7 · II 8–20 · III 21–29 · IV 30–34 · V 35–40 · VI 41–53 · VII 54–62 · VIII 63–69 · IX 70–80 · X 81–86 · XI 87–92 · XII 93–97 · XIII 98–120. 89 chapters have the eight-section shape (no *Verify the codegen*; Pitfalls at §N.5), 31 the nine-section one. About 5.0 MB of Markdown, 744 fenced blocks, 15,000 chapter references and 8,000 section references.
+
+### 11.3 What this pass checked, found and fixed
+
+| Check | Found | Fixed |
+|---|---|---|
+| `check_refs.py` — every `Ch.`/`§`/Appendix/Part/file reference resolves (new; exit 0 clean, 1 errors, 2 structure) | 200 errors on first run: 143 list items `N §M.x` whose bare chapter number the insertion tool had left behind (Appendix O's *Where* column above all); 46 `Ch. N.M` spellings; 8 references to sections that do not exist (2 in the book, 6 in CLAUDE.md's Part lines); 3 Part ranges | all: 148 list items set to their `§` prefix, 48 spellings rewritten as `§N.M`, Ch. 36 → `§39.2`, Appendix R → `Ch. 109 §109.4.8`, Appendix G Part III → 21–29, two sub-ranges reworded, CLAUDE.md's Phase-3 block rewritten |
+| blind spots of the insertion tool (found by reading its grammar, then dated with `renumber_history.py when`) | 30 bare list items after a `§`-item; a fenced table in Ch. 113 with a bare chapter-number column (27 numbers); Ch. 120's ledger (8) and Ch. 41's Leads-into (5) — bare numbers after a parenthesis; three continuations the tool's unit guard skipped (`Ch. 13/14 way` in Ch. 37, `& NN-preview` in Ch. 42 and 43); **21 citations of other people's books renumbered as if they were ours** (SDM chapters, DDIA, perfbook, LKD, TLPI, Gregg, Gray & Reuter, the SRE book, C11 §7.17, the OCaml manual) | all mapped from the numbering of the commit that introduced them; external citations restored from git history and respelled `ch. N` / `sec. N.M` (36 in total, including 15 that had not been hit yet); `insert_chapter.py` now continues a list past an attached `§`; `check_refs.py` flags the other two classes (`list-implicit`, `ext-citation`) |
+| `check_hints.py` — topic hint vs target (new; 13,900 hints) | 335 low-evidence rows and 344 more at a lower threshold, all read; 24 wrong targets: PCIe cited as the transport chapter 16 times (Ch. 114, 115, Appendices I, M — written against an intermediate numbering), tracing cited as the Rust chapter (Ch. 93), a Phase-3 number in Ch. 110, and five topics that had moved into chapters added later (consolidated mid → Ch. 73, `crc32q` → Ch. 38, `flow_limit` → Ch. 64, `std::latch` → Ch. 42, TLS venues → Ch. 86) | all 24; the 216 remaining rows are recorded as read in `tools/review/hints-baseline.txt` |
+| counts in prose | "76 chapters" (Ch. 1), "94 chapters so far" (Ch. 105), "Seventy-five chapters" and "twelve Parts … Appendices (A–L)" (Ch. 120), "twenty-seven chapters" (Ch. 29), Appendix O's closing paragraph, the PDF README, CLAUDE.md's Phase-1 line | all |
+| `sweep.py` (extended: Part header vs README, the two section shapes, subsection nesting, both teaser chains with titles, fences, placeholders, hard wraps, README outline line by line, stated counts) | 0 structural faults, 0 unclosed fences, 0 hard-wrapped paragraphs, 0 placeholders; 7 README outline lines that no longer began with their heading; Appendix D's `Ch. 6, 101.4.4` | all 9; twelve seeded faults in a scratch copy were all reported |
+| hand-offs from the findings pass | 7 book-wide rows + 1 heading label | 4 edited (Ch. 13 ROB, Ch. 44 Appendix A pointer, Ch. 22 unnumbered heading, Ch. 37 §37.2 label); 4 already fixed and verified |
+| loose ends | Appendix O had no row for 11 chapters added after it; Appendix F was 429 entries out of alphabetical order with two duplicated terms; three "session state (Appendix J.8)" references pointed at the tick-to-trade walkthrough; the preface omitted three chapters and ran its appendix sentence past the README pointer | 11 rows added; F.1–F.8 sorted, NAPI and VFIO merged; → Appendix J.1; preface repaired |
+| PDF | the first full build stopped four fifths of the way through with `TeX capacity exceeded, sorry [main memory size=5000000]` (`breakanywhere` on all 744 code blocks); 13 glyphs absent from the body font were being dropped silently (◆ ⁷ ⁹ ⁿ ᵇ ₀ ₁ φ λ σ τ ∪ ⊇, about 250 occurrences); three-digit chapter numbers ran into their titles in the table of contents | `wrap-code.lua` enables `breakanywhere` only for a block with an unbreakable run wider than the line (37 of 744); 13 `\newunicodechar` mappings; wider TOC number boxes. The PDF builds: **2,188 pages** |
+
+`stale_crossrefs.py` is retired. What was exact in it — the renumbering history — is `tools/review/renumber_history.py`.
+
+### 11.4 What remains for Phase 4 (one list, current numbering)
+
+**Reference-machine runs (P4-1).** Every §N.3 is either representative for the Xeon Gold 6326 or measured on the 4-vCPU KVM guest and labelled so. The blocks that most need the real box, as recorded by the items that touched them:
+
+- the front-end/code-layout experiment of Ch. 14; the DRAM and page-walk figures of Ch. 2, 8, 12, 17 and 18 (the guest has a 480 MiB L3 and memory renaming); the coherence numbers of Ch. 42 and 44 (4 vCPUs); the isolated-core numbers of Ch. 56 and 62; Ch. 2's `perf record --control` run (no `perf` on the guest);
+- everything PMU-based in the diagnostics chapters: `perf record`/LBR/`rdpmc`/Intel PT costs (Ch. 2 §2.4.4, Ch. 113, Ch. 120 §120.4.4 — the `rdpmc` listing builds and has never run on bare metal);
+- Ch. 7's client-part column, Ch. 19's reference and Zen matrices, Ch. 60's `cyclictest`/PL1/uncore numbers, Ch. 64's per-stage trace; every block of Ch. 9, 36, 38, 73, 86, 88, 107, 117 and Appendix S (all guest-measured);
+- hardware `perf` counter columns in the §32.3, §33.3 and §71.3 tables; a captured-ITCH replay of `lob.cpp` (Ch. 33 exercise 1);
+- Appendix E rows for the hop, the C-ABI call, the sequencer and the failover: VM figures today, with the conversion given in the chapters.
+
+**Measurements that need a new benchmark or hardware this project did not have.**
+
+- Ch. 16 §16.3: a function-pointer / `move_only_function` / `function_ref` row in the dispatch ladder. Ch. 22 §22.3: an expression-template measurement.
+- Ch. 45: SPSC push→pop *handoff latency* (ping-pong RTT) and the cached-index batching variant. Ch. 48: a publish→consume latency histogram and induced-stall recovery. Ch. 52: a compilable `stdexec` pipeline against a hand-written baseline (`stdexec` was not in the toolchain image). Ch. 58: the `noisy.cpp` + CAT runs (needs a `resctrl` box). Ch. 66: the zero-copy send/receive crossover (needs two hosts and a scatter-gather NIC).
+- half-done: Ch. 42 (no measured thread-creation cost), Ch. 43 (no TTAS-vs-CAS measurement), Ch. 47 (`reclaim.cpp` is read-side only).
+- from the insertion rounds: the deduplicating dirty queue and priority-drain measurements (Ch. 50 exercises 2–3); a bounded-cascade sweep and a hashed-wheel row (Ch. 55 exercises 1–2); the cross-host multicast fan-out and the standby-sequencer failover (Ch. 111 exercises 4, 6); a measured SPAN-vs-tap error and a `TPACKET_V3` run with NIC stamps (Ch. 110); a cross-host lease store (Ch. 112 exercise 5); the deterministic-proxy measurement (Ch. 118); a libc++ hardened-mode measurement (Ch. 24); `-Zbuild-std` for Rust's unwind tables and the Go kernel's one-off 8-vs-19 ns shift (Ch. 94, 96).
+
+**Sections two chapters still lack.** Ch. 27 and Ch. 101 have no *Verify the codegen* section (SAXPY at three flag tiers; a provable vs unprovable bound and a dead-store-eliminated wipe). Adding one renumbers §N.5–§N.8 of that chapter: do it with a script and run the three checks. Ch. 31 would take a bump-allocator/pool codegen snippet.
+
+**Toolchain facts to re-verify.** Appendix H's compiler/library versions and its H.7 kernel table; GCC 14/15 modules on the real project (Ch. 28 records GCC 13's failure); C++26 reflection is sketched, not compiled (Ch. 23 §23.4.6); Bazel/Buck2 are described as policy, not run; Appendix L's code against the current toolchains.
+
+**Gap rows recorded as left and not picked up by a later batch** (check §10's status paragraphs before scheduling any of them): G02 watchdog chain and diagnose-before-restart; G05 the control plane as a channel; G12 the RAS/CMCI/scrub mechanism beyond the counters Ch. 114 samples; G13 storage-path health; G14 resource gauges in Ch. 30–31; G20's fabric-debugging paragraph; G21 an exported unified timeline (LTTng/Perfetto/Chrome-JSON); G31 HLS C++ as a dialect; Jäckel's implied-vol method (cited, not implemented, Ch. 36); a Kubernetes worked deployment (Ch. 59).
+
+**Appendix O.** Nine chapters that predate it still have no row of their own (Ch. 21, 58, 79, 81, 83, 84, 85, 90, 94).
+
+**Content pointers without content** (found by `check_hints.py`, left alone because fixing them is writing, not editing): Appendix H's `std::mdspan` row cites Ch. 39 and its "deducing `this`" row cites Ch. 22; neither chapter uses the feature. Ch. 7's "Ch. 18's noisy neighbour" names a term only Ch. 58 uses.
+
+**Typography in the PDF.** See §11.5.
+
+**Unscheduled: D01–D18.** `review/2026-11-03-data-structures-brainstorm.md` proposes eighteen data-structure additions (slot vectors and sparse sets, bounded-probe and cuckoo tables, filters and sketches, van Emde Boas / S-trees / Fenwick depth, fast division, deterministic iteration order, …). Delivered so far: D04 and the first two rungs of D05 inside Ch. 33, slot maps in Ch. 32 §32.4.4, the fast-range trick in Ch. 38. The rest is work-queue item 22 and has no date.
+
+### 11.5 The PDF
+
+Built on 2026-11-10 with pandoc 3.1.3 and Tectonic 0.15.0 (the static `x86_64-unknown-linux-musl` binary from the project's GitHub releases; no TeX was installed on the host), `ENGINE=tectonic tools/book-pdf/build.sh`, DejaVu Sans Mono for code. The build output is not committed (`.gitignore` covers the PDF and `tools/book-pdf/build/`).
+
+- **Result:** 2,188 pages at 7 × 10 in, 7.1 MB, 1 min 43 s wall time. The README's "500+ pages" estimate is replaced by the measured figure.
+- **Table of contents, checked against the index by script:** Part dividers I–XIII in order with the README's titles; chapters 1–120 in order, every title equal to its chapter file's; "Appendices", then A–S in order with their titles. Section numbers in the body are LaTeX's own and equal the manual ones (spot-checked: 100.4.4, 120.4.1, L.3, O.13, S.5).
+- **Three defects found by building, fixed in `tools/book-pdf/`:** the memory overflow (above — XeTeX's main memory is fixed in Tectonic, so the cure is to use `breakanywhere` only where a block needs it; the README now says what to look for if the error returns); the dropped glyphs (the log's `could not represent character` list is now empty); the TOC number box, which the `book` class sizes for two digits.
+- **Left as it is:** 2,271 `Overfull \hbox` warnings, 189 of them wider than 100 pt — table cells and long inline code that do not fit the 5.15 in text block. They were there before this pass (1,047 in the first four fifths of the old build against 912 now) and are a typesetting task for Phase 4, not a consistency one: the worst are the six- and seven-column tables of Appendices C, O and R.
+
 ## Files in this review
 
 - `review/2026-10-30-consistency-review-and-gap-analysis.md` — this report.
 - `review/2026-10-30-findings-part1-ch01-26.md`, `…-part2-ch27-52.md`, `…-part3-ch53-76.md`, `…-part4-appendices-frontmatter-bookwide.md` — every finding grouped by file with the verifier's verdict (confirmed / refuted / duplicate / verifier-added), severity, quote, problem and suggested fix.
-- `review/2026-10-30-stale-crossrefs.md` — the mechanically detected stale cross-references (fenced: near-certain; prose: heuristic).
+- `review/2026-10-30-stale-crossrefs.md` — the mechanically detected stale cross-references (fenced: near-certain; prose: heuristic), as of 2026-10-30. The tool that produced it was retired on 2026-11-10 (§11.3); `tools/review/check_refs.py` and `tools/review/check_hints.py` replace it.
 - `review/2026-10-30-gap-verification.md` — the skeptical coverage pass over the 92 merged items: verdict, grep evidence, where the closest existing coverage is, refined placement and priority reasoning.
 - `review/2026-10-30-gap-proposals-raw.txt` — the 163 raw gap proposals from the fourteen lenses (title, placement, scope bullets, claimed existing coverage, grep evidence), keyed by the source tags used in §10.
 - **P2-2 part 4 (appendices, front matter, book-wide), 2026-11-09:** 87 fixed / 109 already fixed / 2 left — see the findings file header.

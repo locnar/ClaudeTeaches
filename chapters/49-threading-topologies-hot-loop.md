@@ -300,7 +300,7 @@ The bug this protocol exists to prevent is a stage that keeps using slot *N*'s b
 - Thompson, M., Farley, D., Barker, M., Gee, P., Stewart, A. *Disruptor: High performance alternative to bounded queues for exchanging data between concurrent threads.* LMAX, 2011 — the claim/publish/gate protocol this chapter formalizes.
 - Dean, J., Barroso, L. A. "The Tail at Scale." *CACM* 56(2), 2013 — why tails compound across stages.
 - Intel. *Intel 64 and IA-32 Architectures Optimization Reference Manual*, §"Multicore and Hyper-Threading" (coherence traffic, `pause`) — the hop's hardware cost.
-- Kleppmann, M. *Designing Data-Intensive Applications*, Ch. 13 (stream processing: partitioning vs pipelining) — the same decision at datacenter scale.
+- Kleppmann, M. *Designing Data-Intensive Applications*, ch. 11 (stream processing: partitioning vs pipelining) — the same decision at datacenter scale.
 - Linux kernel documentation: `Documentation/scheduler/sched-domains.rst`, `Documentation/admin-guide/kernel-per-CPU-kthreads.rst` — what else runs on a "dedicated" core.
 
 ## 49.8 Additional Reading

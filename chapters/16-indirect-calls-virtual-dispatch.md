@@ -47,13 +47,13 @@ The crucial nuance: **a monomorphic virtual call is cheap.** If a call site only
 
 ### 16.2.2 Indirect-branch prediction (BTB) and mispredict cost
 
-Direction prediction (Ch. 15) answers taken/not-taken; **target** prediction answers *to which address*. The hardware uses the **BTB** (Branch Target Buffer) and an indirect-branch predictor that, like the direction predictor (Ch. 15.2.1), correlates the target with global history. Call sites fall into three regimes:
+Direction prediction (Ch. 15) answers taken/not-taken; **target** prediction answers *to which address*. The hardware uses the **BTB** (Branch Target Buffer) and an indirect-branch predictor that, like the direction predictor (§15.2.1), correlates the target with global history. Call sites fall into three regimes:
 
 - **Monomorphic** (one target): the BTB nails it every time — prediction ~100%, cost ≈ a direct call. The common, benign case.
 - **Polymorphic** (a few targets, ~2–4): a good indirect predictor can often learn the pattern *if* it correlates with history (e.g. alternating types in a regular order). If the sequence is data-dependent and irregular, mispredicts climb.
 - **Megamorphic** (many targets, interleaved unpredictably): the history-indexed indirect predictor cannot learn a pattern for the target sequence, so it mispredicts at roughly (1 − 1/k) for k uniformly random targets; BTB *capacity* only becomes the limit with hundreds of hot indirect sites. **This is the expensive regime** — and it's the shape of a feed handler dispatching a stream of mixed message types through one `handler->on_message()` site.
 
-A target mispredict costs the same ~15–20-cycle flush as a direction mispredict (Ch. 15.2.2): the front-end speculated down the wrong target's code, the back-end's in-flight work is squashed, refetch and refill. But indirect mispredicts carry an extra tax: each distinct target is *different code*, so a megamorphic site also thrashes the **L1i and I-TLB** (Ch. 14) — many target bodies competing for instruction-cache space — compounding the front-end cost. The signature (§16.3) is therefore high `branch-misses` **localized to indirect branches** (`perf` can break out `BR_MISP_RETIRED.INDIRECT`), often alongside elevated front-end stalls.
+A target mispredict costs the same ~15–20-cycle flush as a direction mispredict (§15.2.2): the front-end speculated down the wrong target's code, the back-end's in-flight work is squashed, refetch and refill. But indirect mispredicts carry an extra tax: each distinct target is *different code*, so a megamorphic site also thrashes the **L1i and I-TLB** (Ch. 14) — many target bodies competing for instruction-cache space — compounding the front-end cost. The signature (§16.3) is therefore high `branch-misses` **localized to indirect branches** (`perf` can break out `BR_MISP_RETIRED.INDIRECT`), often alongside elevated front-end stalls.
 
 ### 16.2.3 `std::function` and type-erasure overhead
 
@@ -159,7 +159,7 @@ Read it the Ch. 2 / Ch. 15 way:
 - **CRTP/static is fastest** because the call is *inlined away* — no indirection, no prediction, and the callee folds into the loop (Ch. 13). This is the "zero-cost abstraction" (Ch. 22) ideal.
 - **Monomorphic virtual is cheap but not free:** the BTB predicts the single target perfectly (`indirect branch-misses ~0`), so the cost is the vtable load + the *lost inlining* of the trivial callee — a real but modest gap vs CRTP.
 - **`std::function` is worse** — an empty-check plus an indirect call to the invoker, and no inlining — even though its target is also monomorphic here.
-- **Megamorphic virtual is the disaster:** 4 unpredictably-interleaved targets give the indirect predictor nothing to learn, `br_misp_retired.indirect` spikes to ~50–75%, IPC craters, and each dispatch eats a flush (Ch. 15.2.2) plus I-cache thrash (Ch. 14). ~10× the CRTP cost — most of it dispatch overhead, though note the `mega` column also carries one extra dependent load (`hs[data[i] & 3]` before the vptr load) that `mono` does not.
+- **Megamorphic virtual is the disaster:** 4 unpredictably-interleaved targets give the indirect predictor nothing to learn, `br_misp_retired.indirect` spikes to ~50–75%, IPC craters, and each dispatch eats a flush (§15.2.2) plus I-cache thrash (Ch. 14). ~10× the CRTP cost — most of it dispatch overhead, though note the `mega` column also carries one extra dependent load (`hs[data[i] & 3]` before the vptr load) that `mono` does not.
 
 The fingerprint to recognize: **high `br_misp_retired.indirect` with low IPC on a dispatch-heavy loop** = megamorphic indirect-call bottleneck. That's the signal §16.4 addresses; a clean (monomorphic) indirect predictor means the call is *not* your problem and CRTP-ifying it buys little.
 
@@ -244,7 +244,7 @@ The lowest-level dispatch is a `switch` on an integer type tag — and how the c
 
 - **Branch chain.** A `switch`/`if-else` ladder over a *few* sparse cases compiles to a sequence of compares + conditional branches (Ch. 15). Predictable if the case distribution is biased; mispredicts if data-dependent and balanced.
 - **Jump table.** A `switch` over a *dense* range of integer tags compiles to an **indexed indirect jump** through a table of code addresses — O(1), but it's an *indirect branch* with the same BTB target-prediction problem (§16.2.2). For a dense, megamorphic tag stream it can mispredict as badly as a vtable.
-- **Data lookup (Ch. 15.4.2).** Often best: if each case maps to *data* (a parameter, a small computation) rather than wildly different *code*, index a **data table** and avoid the indirect jump entirely — no target prediction needed. This is the Ch. 15 lookup-table idea applied to dispatch.
+- **Data lookup (§15.4.2).** Often best: if each case maps to *data* (a parameter, a small computation) rather than wildly different *code*, index a **data table** and avoid the indirect jump entirely — no target prediction needed. This is the Ch. 15 lookup-table idea applied to dispatch.
 
 The decision: dispatching to genuinely different *code* over a closed set → prefer `variant`/visit (§16.4.3) or a `switch` (let the compiler pick the lowering — verify in §16.5); dispatching to different *data*/parameters → a data lookup table beats them all by removing the indirect branch. And recall Ch. 15's other lever: if the tag stream is unpredictable, **sort/batch by type** upstream so even a `switch`/vtable sees long monomorphic runs the predictor loves — turning a megamorphic site monomorphic without changing the dispatch mechanism.
 
@@ -344,7 +344,7 @@ Both are one indirect call; the `std::function` adds a predicted branch and a st
 - **Assuming `final` always devirtualizes.** It only fires when the compiler can statically recover the concrete type at the call site; through a base pointer it often can't. Verify in the asm (§16.5); if it didn't fire, change the call site, don't assume.
 - **`virtual` on a tiny, hot, monomorphic callee.** Even with perfect BTB prediction, the *lost inlining* of a 2-line function can dominate (§16.2.1, §16.3 `mono` vs `crtp`). If the type is compile-time known, CRTP; if runtime but monomorphic, `final`/LTO to recover the inline.
 - **CRTP where you need runtime selection.** CRTP is compile-time only. Forcing it where the type must come from config/runtime leads to contortions; use a closed-set runtime mechanism (`variant`) or accept a (devirtualized/monomorphic) virtual call instead.
-- **Jump table assumed cheap.** A `switch` lowered to a jump table is *still an indirect branch* (§16.4.4) — megamorphic, data-dependent tags mispredict through it too. If cases map to *data*, prefer a data lookup (Ch. 15.4.2) that has no indirect branch.
+- **Jump table assumed cheap.** A `switch` lowered to a jump table is *still an indirect branch* (§16.4.4) — megamorphic, data-dependent tags mispredict through it too. If cases map to *data*, prefer a data lookup (§15.4.2) that has no indirect branch.
 - **Optimizing dispatch when it isn't the bottleneck.** A *monomorphic* indirect call is cheap (§16.3). If `br_misp_retired.indirect` is low, the call isn't your problem — top-down first (Ch. 2), don't CRTP-ify a clean call site for nothing.
 
 ---
@@ -354,7 +354,7 @@ Both are one indirect call; the `std::function` adds a predicted branch and a st
 **Exercises**
 
 1. **Measure the dispatch ladder.** Build `dispatch.cpp`, run `crtp`/`mono`/`func`/`mega` pinned/turbo-off with `perf stat -e cycles,instructions,branches,branch-misses,br_misp_retired.indirect`. Confirm: CRTP fastest (inlined), mega worst (high indirect mispredicts). What's the IPC of each? Which top-down bucket (Ch. 2) is `mega`?
-2. **Make the megamorphic site monomorphic.** Take the `mega` case and **sort** the work by type so each handler runs in a long contiguous run. Re-measure `br_misp_retired.indirect` and ns/call. How close to `mono` does it get, and why (Ch. 15.2.1)?
+2. **Make the megamorphic site monomorphic.** Take the `mega` case and **sort** the work by type so each handler runs in a long contiguous run. Re-measure `br_misp_retired.indirect` and ns/call. How close to `mono` does it get, and why (§15.2.1)?
 3. **`final` and the asm.** Mark the handler classes/methods `final` and call through a *concrete* type. Disassemble (Ch. 4): did the call devirtualize and inline? Now call through `IH*` — does `final` still help? Explain (§16.4.1, §16.5).
 4. **`variant` vs virtual.** Reimplement the closed 4-type set as `std::variant` + `std::visit` in a contiguous `vector<Event>`. Compare ns/call *and* cache behavior (`L1-dcache-load-misses`) against `vector<unique_ptr<IH>>`. Where does the win come from — dispatch, or layout (Ch. 10)?
 5. **`std::function` allocation.** Construct `std::function`s from progressively larger captures and find where SBO stops and heap allocation begins (instrument `operator new`, or read the library's SBO size). Confirm constructing on the hot path is a `malloc` (Ch. 30).

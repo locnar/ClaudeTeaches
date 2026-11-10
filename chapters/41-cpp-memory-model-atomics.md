@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (cache coherence/MESI — atomics are coherence operations; the cost is cache-line traffic), Ch. 13 (out-of-order execution — the hardware reordering atomics constrain), Ch. 26 (the compiler reordering atomics also constrain), Ch. 4 (reading asm — §41.5 reads the emitted barriers), Ch. 44-preview (false sharing — the cost of contended atomics).
 >
-> **Leads into:** the rest of Part VI — Ch. 42 (threading), 32 (spinlocks), 33 (false sharing — the cost of atomics), 34 (lock-free structures built on these orderings), 35 (seqlocks), 36 (reclamation). This chapter is the *foundation* every lock-free pattern in Part VI rests on. ARM's weaker model is Appendix A.
+> **Leads into:** the rest of Part VI — Ch. 42 (threading), Ch. 43 (spinlocks), Ch. 44 (false sharing — the cost of atomics), Ch. 45 (lock-free structures built on these orderings), Ch. 46 (seqlocks), Ch. 47 (reclamation). This chapter is the *foundation* every lock-free pattern in Part VI rests on. ARM's weaker model is Appendix A.
 
 ---
 

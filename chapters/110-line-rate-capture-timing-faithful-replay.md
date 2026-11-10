@@ -168,7 +168,7 @@ With the tap on the feed link and another on the order link (or one appliance on
 
 ### 110.4.6 What this chapter takes from Ch. 109
 
-Ch. 109 keeps the journal formats, the off-hot-path writer, storage and indexing, the deterministic-core replay and the columnar research tier; its §109.4.1 is now a paragraph pointing here for the capture point and the host stack, and its §109.4.5 for replay *onto the wire*. Ch. 120 keeps the CI gate and the state-machine replay. The three exercises that asked for a replayed open (Ch. 65, 70, 80) are satisfied by §110.4.3's replayer and §110.4.4's validation.
+Ch. 109 keeps the journal formats, the off-hot-path writer, storage and indexing, the deterministic-core replay and the columnar research tier; its §109.4.1 is now a paragraph pointing here for the capture point and the host stack, and its §109.4.5 for replay *onto the wire*. Ch. 120 keeps the CI gate and the state-machine replay. The three exercises that asked for a replayed open (Ch. 70, 75, 80) are satisfied by §110.4.3's replayer and §110.4.4's validation.
 
 ## 110.5 Pitfalls & anti-patterns
 

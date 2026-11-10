@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 45 (the SPSC/SPMC ring buffer — the Disruptor's core), Ch. 46 (sequence publication — the Disruptor publishes via sequences), Ch. 44 (false sharing — padding the sequences is non-negotiable), Ch. 42 (shared-nothing pipeline — the Disruptor *is* the channel), Ch. 43 (busy-spin waiting), Ch. 30–31 (pre-allocated, no hot-path allocation).
 >
-> **Leads into:** Ch. 62 (warming — the ring stays warm), Ch. 67 (IPC — the Disruptor across processes via shared memory — Ch. 34), Ch. 98 (logging — async logger as a Disruptor consumer), Ch. 109–120 (capture/replay through the pipeline). Capstone of the **lock-free arc of Part VI** (Ch. 41–47) — it synthesizes them; Ch. 51–53 then turn to async models and correctness tooling.
+> **Leads into:** Ch. 62 (warming — the ring stays warm), Ch. 67 (IPC — the Disruptor across processes via shared memory — Ch. 34), Ch. 98 (logging — async logger as a Disruptor consumer), Ch. 109–120 (capture/replay through the pipeline). Capstone of **Part VI's lock-free arc** (Ch. 41–47) — it synthesizes them; Ch. 51–53 then turn to async models and correctness tooling.
 
 ---
 

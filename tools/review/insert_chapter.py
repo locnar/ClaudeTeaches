@@ -22,6 +22,10 @@ What it does, in order:
        - README outline lines `### [M. Title](MM-slug.md)`, `- M.x …`, `  - M.x.y …`;
        - the `The 76 chapters` legend count in README and the `seventy-six chapters` count in
          the preface.
+     A list item may carry its own section (`Ch. 42 §42.5, 43 §43.5 ◆, 44`): the list continues past it.
+     NOT seen (write them so the tool can see them — check_refs.py reports both): a bare number after a
+     parenthesis (`Ch. 42 (threading), 43 (spinlocks)` — repeat the `Ch.`), and a citation of someone
+     else's book (`*Title*, Ch. 9` would be renumbered — write `ch. 9` / `sec. 7.17` in lower case).
      Numbers <= N are never touched; numbers > MAX are never treated as chapter references; a
      list continuation that is followed by a unit-like token (`Ch. 12, 64 bytes`) is not treated as
      a chapter and is reported for manual review.
@@ -33,8 +37,8 @@ What it does, in order:
      Part header (copied from chapter N unless --part is given), the Prerequisites/Leads-into block,
      the §1–§8 section headings and a teaser pointing at the (moved) chapter N+2; inserts a matching
      README outline block after chapter N's block.
-  6. Appends an ("insert", N) step to STEPS in tools/review/stale_crossrefs.py so the stale-reference
-     heuristic keeps mapping pre-Phase-3 numbers through this insertion.
+  6. Appends an ("insert", N) step to STEPS in tools/review/renumber_history.py, the record that lets
+     `renumber_history.py when FILE NEEDLE N…` date any number in the book and map it to today's.
   7. Prints a per-file change summary and the list of suspicious lines, then `git diff --stat`.
 
   --new-part (with --part): the inserted chapter OPENS A NEW PART. The Part's roman numeral R is read
@@ -47,8 +51,9 @@ What it does, in order:
   Every shifted prose line is printed so the wording can be checked by hand.
 
 After running: write the chapter, fill the README outline, rewrite chapter N's teaser and the new
-chapter's Prerequisites, update CLAUDE.md's counts, then run tools/review/sweep.py and
-tools/review/stale_crossrefs.py.
+chapter's Prerequisites, update CLAUDE.md's counts, then run the three checks:
+tools/review/sweep.py (structure), tools/review/check_refs.py (every reference resolves) and
+tools/review/check_hints.py (it resolves to the right topic). All three must exit 0.
 """
 import argparse
 import os
@@ -145,14 +150,17 @@ class PartShifter:
         return re.sub(rf"\b{old} Parts\b", f"{new} Parts", text)
 
 
-# Tokens that mean "the number before me was a quantity, not a chapter".
+# Tokens that mean "the number before me was a quantity, not a chapter". ("way" is not one of them: "8-way" is
+# caught by the hyphen rule, and "read it the Ch. 13/15 way" must be renumbered — it went stale twice.)
 UNIT_GUARD = re.compile(
-    r"\s?(?:-?(?:bytes?|bit|byte|way|core|cores|thread|threads|entry|entries|lane|lanes|"
+    r"\s?(?:-?(?:bytes?|bit|byte|core|cores|thread|threads|entry|entries|lane|lanes|"
     r"B|KiB|MiB|GiB|KB|MB|GB|ns|µs|us|ms|s|Hz|kHz|MHz|GHz|%|×|x)\b|-[A-Za-z])")
 
 CH_PREFIX = re.compile(r"\b(Ch(?:apter)?s?\.?|Chs\.)(\s| )?(?=\d)")
 NUM = re.compile(r"(\d{1,3})((?:\.\d+)*)")
 CH_SEP = re.compile(r"(\s?[,/]\s?|\s?[–—-]\s?|\s?&\s?|,?\s(?:and|or)\s)")
+# " §42.5", " §42.5–§42.6", " §42.5, §42.7", optionally followed by Appendix O's " ◆" marker
+SEC_ATTACH = re.compile(r"(?:\s?§\s?\d{1,3}(?:\.\d+)+(?:\s?[–-]\s?§?\d{1,3}(?:\.\d+)+)?(?:(?:,\s|/)§\d{1,3}(?:\.\d+)+)*)?(?:\s◆)?")
 SEC_PREFIX = re.compile(r"§§?\s?(?=\d)")
 SEC_NUM = re.compile(r"(\d{1,3})((?:\.\d+)+)")
 SEC_SEP = re.compile(r"(\s?[,/]\s?§?|\s?[–—-]\s?§?|\s?&\s?§?|,?\s(?:and|or)\s§?)")
@@ -198,10 +206,16 @@ class Renumberer:
                 out.append(str(self.m(n)) + nm.group(2))
                 p = nm.end()
                 first = False
-                sm = CH_SEP.match(line, p)
+                # A section attached to the item ("Ch. 42 §42.5, 43 §43.5 ◆, 44") must not end the list:
+                # copy it through untouched (rewrite_sec_refs renumbers it afterwards) and keep going.
+                # Before 2026-11-10 the list stopped here and every later bare number went stale.
+                am = SEC_ATTACH.match(line, p)
+                q = am.end() if am else p
+                sm = CH_SEP.match(line, q)
                 if sm and NUM.match(line, sm.end()):
                     nxt = int(NUM.match(line, sm.end()).group(1))
-                    if self.is_ch(nxt):
+                    if self.is_ch(nxt) and not (am and am.end() > p and UNIT_GUARD.match(line, NUM.match(line, sm.end()).end())):
+                        out.append(line[p:q])
                         out.append(sm.group(0))
                         p = sm.end()
                         continue
@@ -563,18 +577,18 @@ TODO
             rlines[end:end] = block
             open(rpath, "w", encoding="utf-8").write("\n".join(rlines))
 
-    # 5. stale_crossrefs.py step chain
-    spath = os.path.join(root, "tools/review/stale_crossrefs.py")
+    # 5. renumber_history.py step chain
+    spath = os.path.join(root, "tools/review/renumber_history.py")
     if os.path.exists(spath):
         stext = open(spath, encoding="utf-8").read()
         marker = "    # INSERT_STEPS_END"
         if marker in stext:
             stext = stext.replace(marker, f'    ("insert", {N}),  # Ch. {k} {args.slug}\n{marker}')
-            print(f"  stale_crossrefs.py: appended ('insert', {N}) step")
+            print(f"  renumber_history.py: appended ('insert', {N}) step")
             if not args.dry_run:
                 open(spath, "w", encoding="utf-8").write(stext)
         else:
-            print("  WARNING: stale_crossrefs.py has no INSERT_STEPS_END marker; add the step by hand")
+            print("  WARNING: renumber_history.py has no INSERT_STEPS_END marker; add the step by hand")
 
     # 6. summary
     print(f"\n{R.changed} line(s) rewritten in total.")

@@ -330,8 +330,8 @@ The `std::terminate` path (an uncaught exception, a `noexcept` violation, `std::
 
 1. Linux man pages: `signal-safety(7)` (the async-signal-safe function list), `sigaction(2)`, `sigaltstack(2)`, `sigreturn(2)`, `core(5)` (`core_pattern` specifiers, pipe semantics, `core_pipe_limit`, `coredump_filter` bits), `madvise(2)` (`MADV_DONTDUMP`/`MADV_DODUMP`), `prctl(2)` (`PR_SET_DUMPABLE`), `proc(5)`, `getrlimit(2)` (`RLIMIT_CORE`), `eventfd(2)`, `backtrace(3)` (the first-call `dlopen` note).
 2. Linux kernel, `fs/coredump.c` (the dump path: `do_coredump`, the `ispipe` limit handling), `arch/x86/kernel/signal.c` and `fpu/signal.c` (`setup_rt_frame`, the XSAVE sigframe), `Documentation/admin-guide/sysctl/kernel.rst` (`core_pattern`, `core_pipe_limit`, `core_uses_pid`).
-3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 1 Ch. 15 "Managing State Using the XSAVE Feature Set" (XSAVE area layout, the init and modified optimizations).
-4. GNU C Library Manual, §34 "Signal Handling" (async-signal safety, `sigaltstack`), and the `backtrace` documentation; libgcc `unwind.h` (`_Unwind_Backtrace`, `_Unwind_GetIP`).
+3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 1 ch. 13 "Managing State Using the XSAVE Feature Set" (XSAVE area layout, the init and modified optimizations).
+4. GNU C Library Manual, the "Signal Handling" chapter (async-signal safety, `sigaltstack`), and the `backtrace` documentation; libgcc `unwind.h` (`_Unwind_Backtrace`, `_Unwind_GetIP`).
 5. nongnu.org libunwind documentation, `libunwind(3)` — "Local unwinding" and the notes on signal-handler use with `UNW_LOCAL_ONLY`.
 6. systemd: `systemd-coredump(8)`, `coredump.conf(5)`, `coredumpctl(1)`.
 7. Google Breakpad and Chromium Crashpad project documentation — the minidump format, out-of-process handlers, `minidump_stackwalk`.
@@ -340,12 +340,12 @@ The `std::terminate` path (an uncaught exception, a `noexcept` violation, `std::
 
 ## 108.8 Additional Reading
 
-- Kerrisk, M. *The Linux Programming Interface*, No Starch Press 2010 — Ch. 24–27 (signals: fundamentals, handlers, advanced features — `sigaltstack`, `SA_SIGINFO`, the realtime semantics) and Ch. 47 (resource limits).
+- Kerrisk, M. *The Linux Programming Interface*, No Starch Press 2010 — ch. 20–22 (signals: fundamentals, handlers, advanced features — `sigaltstack`, `SA_SIGINFO`, the realtime semantics) and ch. 36 (resource limits).
 - Drepper, U. "Signal handling in glibc" and the glibc wiki page *Async-signal-safe functions*.
-- Gregg, B. *Systems Performance*, 2nd ed. — Ch. 15 "perf" and the discussion of frame pointers vs DWARF for stack walking in production.
+- Gregg, B. *Systems Performance*, 2nd ed. — ch. 13 "perf" and the discussion of frame pointers vs DWARF for stack walking in production.
 - Poimboeuf, J. "SFrame-based stack unwinding", LWN.net 2023–2025 — the kernel's path to unwinding user stacks without frame pointers or DWARF (Ch. 27 §27.4.4).
 - Chromium project, *Crashpad Overview Design* — why the crash handler lives out of process.
-- Love, R. *Linux System Programming*, 2nd ed., O'Reilly 2013 — Ch. 12 "Signals".
+- Love, R. *Linux System Programming*, 2nd ed., O'Reilly 2013 — ch. 10 "Signals".
 
 ---
 

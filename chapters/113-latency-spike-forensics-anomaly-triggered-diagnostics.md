@@ -70,36 +70,36 @@ Three mechanics make this routine instead of heroic. **Anchor the TSC to `CLOCK_
 Ch. 1 §1.4.3's table says what each mechanism *looks like* in the latency; this one says what it *leaves behind* in the evidence streams — the test of step 4:
 
 ```
-   suspect                      fingerprint inside the window                                      sampled from / by               knob (Ch.)
+   suspect                      fingerprint inside the window                                      sampled from / by               knob (chapters)
    ──────────────────────────── ─────────────────────────────────────────────────────────────────── ─────────────────────────────── ───────────
-   preemption / stray thread    sched:sched_switch prev=hot next=X on the hot CPU; nonvoluntary_    ftrace ring; Ch. 114 1 Hz        42, 45, 46
+   preemption / stray thread    sched:sched_switch prev=hot next=X on the hot CPU; nonvoluntary_    ftrace ring; Ch. 114 1 Hz        Ch. 56, 59, 61
                                 ctxt_switches +1                                                    sampler
-   IRQ on the hot core          irq:irq_handler_entry / softirq_entry; /proc/interrupts row delta   ftrace; Ch. 114 sampler           42, 46
-   IPI: TLB shootdown           tlb:tlb_flush reason=REMOTE_SHOOTDOWN; TLB column delta; the        ftrace (+ipi:ipi_send_cpu for    46 §61.4.3,
-                                sender's munmap/mprotect/madvise in ITS flight recorder             the sender)                      23, 24
-   IPI: function call (CAL)     irq_vectors:call_function_entry; CAL column delta; sender =         ftrace                           46
+   IRQ on the hot core          irq:irq_handler_entry / softirq_entry; /proc/interrupts row delta   ftrace; Ch. 114 sampler           Ch. 56, 61
+   IPI: TLB shootdown           tlb:tlb_flush reason=REMOTE_SHOOTDOWN; TLB column delta; the        ftrace (+ipi:ipi_send_cpu for    Ch. 61 §61.4.3,
+                                sender's munmap/mprotect/madvise in ITS flight recorder             the sender)                      Ch. 30, 31
+   IPI: function call (CAL)     irq_vectors:call_function_entry; CAL column delta; sender =         ftrace                           Ch. 61
                                 text_poke (a probe being armed), perf -C, cpufreq, vmstat…
-   timer tick / hrtimer         timer:tick_stop success=0 dependency=…; hrtimer_expire_entry;        ftrace                           45, 46
+   timer tick / hrtimer         timer:tick_stop success=0 dependency=…; hrtimer_expire_entry;        ftrace                           Ch. 59, 61
                                 LOC column delta (nohz_full fell back)
-   RT throttling                sched_rt_period exceeded: "sched: RT throttling activated" in       dmesg; ftrace sched_switch      45
+   RT throttling                sched_rt_period exceeded: "sched: RT throttling activated" in       dmesg; ftrace sched_switch      Ch. 59
                                 dmesg; a ~50 ms gap in the ring                                     to swapper
-   THP / compaction / reclaim   compaction:mm_compaction_begin, vmscan:*; khugepaged in sched_       ftrace; /proc/vmstat deltas     15, 23
+   THP / compaction / reclaim   compaction:mm_compaction_begin, vmscan:*; khugepaged in sched_       ftrace; /proc/vmstat deltas     Ch. 17, 30
                                 switch; thp_* counters delta; a minor fault (minflt +1) on the hot   (Ch. 114)
                                 thread with a 4K→2M collapse behind it
-   SMI                          a gap with NOTHING in the ftrace ring; MSR 0x34 SMI_COUNT delta;     Ch. 114 §114.4.2 (read from the   6 §6.4.4, 82
+   SMI                          a gap with NOTHING in the ftrace ring; MSR 0x34 SMI_COUNT delta;     Ch. 114 §114.4.2 (read from the   Ch. 6 §6.4.4, 114
                                 hwlat/osnoise "hw noise"                                             housekeeping core)
-   C-state exit / frequency     first event after an idle gap on a *neighbour* (SMT sibling — 43);   turbostat / cpupower monitor     6, 43, 47
+   C-state exit / frequency     first event after an idle gap on a *neighbour* (SMT sibling: Ch. 57); turbostat / cpupower monitor    Ch. 6, 57, 62
                                 cpufreq_transition tracepoint; aperf/mperf ratio drop (Ch. 114)       sampled by Ch. 114
-   LLC / memory-bandwidth       resctrl MBM/CMT for the neighbour's RMID spikes; LLC-miss rate on    Ch. 58 §58.4.2 monitor          44, 16
+   LLC / memory-bandwidth       resctrl MBM/CMT for the neighbour's RMID spikes; LLC-miss rate on    Ch. 58 §58.4.2 monitor          Ch. 58, 18
    neighbour                    the hot core up with IPC down (rdpmc, Ch. 120 §120.4.4)
-   PTP step / servo             ptp4l "clockcheck" / phc2sys "step" in the journal; the TSC→UTC       Ch. 78; Ch. 114 clock signals    60
+   PTP step / servo             ptp4l "clockcheck" / phc2sys "step" in the journal; the TSC→UTC       Ch. 78; Ch. 114 clock signals    Ch. 78
                                 residual jumps                                                      (note: a step moves the VENUE
                                                                                                     comparison, not the TSC stages)
-   NIC: pause / drop / ring     rx_missed / rx_no_buffer / pause frames delta; a gap in the          Ch. 115 sampler; capture (80)     57, 83
+   NIC: pause / drop / ring     rx_missed / rx_no_buffer / pause frames delta; a gap in the          Ch. 115 sampler; Ch. 109 capture  Ch. 75, 115
    full                         capture's hardware stamps with intact venue sequence numbers
-   venue-side                   t_hw_rx − SendingTime jumps for THIS packet with flat neighbours;    Ch. 99 §99.4.5 feed-latency      74, 62
+   venue-side                   t_hw_rx − SendingTime jumps for THIS packet with flat neighbours;    Ch. 99 §99.4.5 feed-latency      Ch. 99, 80
                                 the stage stamps are all normal                                     series
-   the message itself           replay reproduces the stage time (a pathological book depth, a       Ch. 109 replay; Ch. 5            25, 54
+   the message itself           replay reproduces the stage time (a pathological book depth, a       Ch. 109 replay; Ch. 5            Ch. 33, 70
                                 decode path never taken before); flight recorder shows the work
 ```
 
@@ -329,12 +329,12 @@ A spike that has been attributed is still not finished. Two hand-offs close it:
 
 1. Linux kernel documentation: `Documentation/trace/ftrace.rst` (`trace_clock`, `tracing_on`, `trace_marker`, per-CPU buffers, `tracing_cpumask`), `Documentation/trace/events.rst`, `Documentation/tools/rtla/` (Ch. 61).
 2. `perf-record(1)` — `--overwrite`, `--switch-output`, `--snapshot`, `--control=fifo`, `-k`/`--clockid`, `--aux-sample`; `perf-intel-pt(1)` — snapshot mode, `cyc`/`mtc` packets, PTWRITE, `--itrace` decoding options; `perf-script(1)` (`--time`, `--ns`).
-3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, Ch. 44 "Intel® Processor Trace" (packets, ToPA, PTWRITE); Vol. 3 Sec. 18.17 (invariant TSC).
+3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, ch. 33 "Intel® Processor Trace" (packets, ToPA, PTWRITE); Vol. 3 Sec. 18.17 (invariant TSC).
 4. Linux man pages: `clock_gettime(2)` (`CLOCK_MONOTONIC`, `CLOCK_BOOTTIME`, `CLOCK_REALTIME`), `dmesg(1)` (`--time-format`), `journalctl(1)` (`-o short-monotonic`, `--since=@`), `proc(5)` (`/proc/interrupts`, `/proc/softirqs`, `/proc/vmstat`).
 5. Linux `Documentation/driver-api/ptp.rst` — `PTP_SYS_OFFSET_PRECISE` and cross-timestamping (Ch. 78).
-6. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — Ch. 2 "Methodologies" (the USE and drill-down methods this chapter's loop specialises), Ch. 15–16 (`perf`, ftrace).
+6. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — ch. 2 "Methodologies" (the USE and drill-down methods this chapter's loop specialises), ch. 13–14 (`perf`, ftrace).
 7. Corbet, J. "Deferred user-space stack unwinding" and related LWN coverage of perf's overwrite/snapshot modes.
-8. Jain, R. *The Art of Computer Systems Performance Analysis*, Wiley 1991 — Ch. 2 "Common Mistakes" (comparing unconverted measurements).
+8. Jain, R. *The Art of Computer Systems Performance Analysis*, Wiley 1991 — ch. 2 "Common Mistakes" (comparing unconverted measurements).
 
 ## 113.8 Additional Reading
 
@@ -342,7 +342,7 @@ A spike that has been attributed is still not finished. Two hand-offs close it:
 - Jane Street, *magic-trace* documentation — Intel PT snapshot tracing triggered from the application, the closest open-source relative of §113.4.3 C.
 - Rostedt, S. "Finding Origins of Latencies Using Ftrace", Linux Plumbers / Embedded Linux Conference — the stop-on-threshold technique Ch. 61 builds on.
 - Kleen, A. *simple-pt* and the `perf` Intel PT wiki pages — practical PT recipes and decode costs.
-- Google SRE, *Site Reliability Engineering*, Ch. 14 "Effective Troubleshooting" — hypothesis testing against evidence, the non-HFT statement of §113.2.1.
+- Google SRE, *Site Reliability Engineering*, ch. 12 "Effective Troubleshooting" — hypothesis testing against evidence, the non-HFT statement of §113.2.1.
 
 ---
 

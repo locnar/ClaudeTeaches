@@ -2,3 +2,7 @@
 /low-latency-cpp-on-linux.pdf
 
 .DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc

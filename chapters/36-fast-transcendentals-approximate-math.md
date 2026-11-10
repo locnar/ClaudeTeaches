@@ -195,7 +195,7 @@ The quoting engine's loop is "for each series in the chain, theo = BS(S, K[i], T
 
 - **No calls, no branches, no `errno`** inside the loop body — the three things that stop the auto-vectorizer. `std::fma`, `std::nearbyint`, `std::bit_cast` and the table loads (a `vgatherdpd`, or better: keep the table small enough that the gather is cheap, or restructure so the table index is shared) all vectorize.
 - **SoA inputs and outputs**, `__restrict` or `std::span` with no aliasing, and a trip count the vectorizer can see (Ch. 39 §39.4.1).
-- **Width**: AVX2 gives 4 doubles, AVX-512 8 (with the frequency-licence caveat of Ch. 39 §39.2.3 — on the reference box a 512-bit loop of this length is a net win, measured there; on a shared core it may not be). Clang's 1.25 cycles/`exp` in §36.3 is the 8-wide case.
+- **Width**: AVX2 gives 4 doubles, AVX-512 8 (with the frequency-licence caveat of Ch. 39 §39.2 — on the reference box a 512-bit loop of this length is a net win, measured there; on a shared core it may not be). Clang's 1.25 cycles/`exp` in §36.3 is the 8-wide case.
 
 When the kernel is not yours to restructure — a vendor pricing library, a research model ported to C++ — link **SLEEF** (`Sleef_expd4_u10`, ≤ 1 ULP, BSL licence) or glibc's `libmvec` (`-ffast-math` plus `-lmvec`, or the `__attribute__((__simd__))` declarations in `<math.h>` under `-fopenmp-simd`) and call the vector variants explicitly on 4/8-lane chunks; both are within 1.5× of the hand-written polynomial in throughput and give you `pow`, `sin`, `atan` and friends with audited accuracy. Intel's SVML (`-fveclib=SVML` with ICX/Clang, or oneMKL VM's `vdExp`) is the fastest on Intel parts and the least portable.
 
@@ -288,7 +288,7 @@ A branch and a PLT call on the slow side — predicted away for positive inputs,
 
 - J.-M. Muller et al., *Handbook of Floating-Point Arithmetic*, 2nd ed., and J.-M. Muller, *Elementary Functions: Algorithms and Implementation*, 3rd ed. — range reduction (Cody–Waite, Payne–Hanek), polynomial and rational approximation, table-driven methods, and error analysis (§36.2.2–§36.2.4).
 - W. J. Cody and W. Waite, *Software Manual for the Elementary Functions* — the original reduction-and-approximation recipes libm descends from (§36.2.2).
-- M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, §7.1.26 — the `erf` approximation of §36.4.4 and its 1.5 × 10⁻⁷ bound; W. J. Cody, "Rational Chebyshev approximations for the error function," *Math. Comp.* 23 (1969) — the `erfc` libm uses.
+- M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, sec. 7.1.26 — the `erf` approximation of §36.4.4 and its 1.5 × 10⁻⁷ bound; W. J. Cody, "Rational Chebyshev approximations for the error function," *Math. Comp.* 23 (1969) — the `erfc` libm uses.
 - S. Chevillard, M. Joldeş, C. Lauter, "Sollya: an environment for the development of numerical codes" (ICMS 2010) — `fpminimax` and `supnorm`, the tool for §36.4.2's coefficients and bounds.
 - P. Jäckel, "Let's Be Rational" (*Wilmott*, 2015) — full-precision implied volatility in two iterations for every strike (§36.4.4); S. Manaster and G. Koehler, "The calculation of implied variances from the Black-Scholes model: a note," *J. Finance* 37 (1982) — the convergent starting point.
 - The GCC and Clang manuals: `-fno-math-errno`, `-fno-trapping-math`, `-ffp-contract`, `-fveclib`, `#pragma clang fp`; glibc's `libmvec` documentation and `NEWS` for 2.28 (the new `exp`/`log`/`pow`) (§36.4.1, §36.4.6).

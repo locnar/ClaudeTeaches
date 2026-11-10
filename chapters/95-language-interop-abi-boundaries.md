@@ -239,9 +239,9 @@ Checklist for a boundary:
 - JEP 442 (FFM API, third preview, JDK 21) and JEP 454 (final, JDK 22) — `Linker`, `MemorySegment`, `Linker.Option.critical`/`isTrivial`; the JNI specification (`GetPrimitiveArrayCritical`) (§95.3).
 - *The Rustonomicon*, "FFI" chapter; Rust RFC 2945 (`extern "C-unwind"`) and the Rust 1.81 release notes (abort on unwind through `extern "C"`) (§95.4.3; Ch. 94).
 - The `cgo` command documentation and *"cgo is not Go"* (Cheney) — the stack switch and scheduler interaction behind the 50 ns (§95.3).
-- The OCaml manual, Ch. 27 *Interfacing C with OCaml* — `[@@noalloc]`, `[@unboxed]`, `[@untagged]` (§95.3).
+- The OCaml manual, ch. 22 *Interfacing C with OCaml* — `[@@noalloc]`, `[@unboxed]`, `[@untagged]` (§95.3).
 - nanobind and pybind11 documentation — call overhead, the buffer protocol/`ndarray`, GIL handling (§95.3; Ch. 109 §109.4.6).
-- Zig language reference: `extern struct`, `translate-c`, `zig cc`; C11 standard §8.17 (`<stdatomic.h>`) and the C++20 `[atomics]` clause — layout and lock-freedom guarantees (§95.4.4–§95.4.5).
+- Zig language reference: `extern struct`, `translate-c`, `zig cc`; C11 standard sec. 7.17 (`<stdatomic.h>`) and the C++20 `[atomics]` clause — layout and lock-freedom guarantees (§95.4.4–§95.4.5).
 - libabigail (`abidiff`) documentation — ABI diffing of shared libraries in CI (§95.2.4).
 
 ## 95.9 Additional Reading
