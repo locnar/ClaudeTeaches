@@ -1386,6 +1386,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 97.4.6 Privilege reduction (`seccomp`, capabilities, namespaces)
   - 97.4.7 Build/supply-chain integrity; reproducible and signed builds
   - 97.4.8 Fuzzing message parsers (libFuzzer/AFL++); ASan/UBSan/MSan
+  - 97.4.9 The cost of the kernel's own security subsystems: LSM, audit, seccomp (and the SSBD trap), Yama, lockdown — measured
 - 97.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
 - 97.6 Exercises & checklist
 
