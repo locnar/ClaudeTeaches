@@ -89,13 +89,14 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 6.2 Mental model
   - 6.2.1 C-states, P-states, turbo, and frequency scaling
   - 6.2.2 Hyperthreading and CPU topology
-  - 6.2.3 Speculative-execution mitigations (Spectre/Meltdown/retpoline)
+  - 6.2.3 Speculative-execution mitigations (Spectre/Meltdown/retpoline) — the per-generation table: Meltdown/L1TF/MDS/TAA/Retbleed vs BHI/SSBD/SRSO/GDS/RFDS, the sysfs strings and the per-vuln knobs
 - 6.3 Measure it: jitter before/after tuning
 - 6.4 Techniques
   - 6.4.1 BIOS/firmware tuning for determinism
   - 6.4.2 Topology discovery (`lscpu`, `hwloc`)
   - 6.4.3 Building a quiet machine; selectively disabling mitigations on isolated boxes
   - 6.4.4 Clocksource and SMIs
+  - 6.4.5 Microcode and firmware change control
 - 6.5 Pitfalls & anti-patterns: turbo-induced variance, noisy neighbors
 - 6.6 Exercises & checklist
 
