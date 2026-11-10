@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 117 chapters are grouped into thirteen Parts; eighteen appendices (A–R) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 118 chapters are grouped into thirteen Parts; eighteen appendices (A–R) follow.
 
 ---
 
@@ -1005,7 +1005,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 70.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 72)
   - 70.4.4 Tuning RX ring sizes, managing UDP reordering in software ring buffers, detecting hardware packet drops
 - 70.5 Verify the codegen: parse loop
-- 70.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 100)*
+- 70.6 Pitfalls & anti-patterns: unaligned reads, trusting wire input *(ties Ch. 101)*
 - 70.7 Exercises & checklist
 
 ### [71. Text Protocols on the Hot Path: Branch-Free Parsing & Formatting](71-branch-free-parsing-formatting.md)
@@ -1142,7 +1142,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part X — Kernel Bypass, RDMA & Transport
 
-*Removing the kernel entirely, one-sided remote memory, lossless fabric, and purpose-built transports beyond TCP.*
+*Removing the kernel entirely, one-sided remote memory, lossless fabric, purpose-built transports beyond TCP — and, closing the Part, the slow-by-mandate transports of the encrypted web-protocol venues and the cloud hosts that reach them.*
 
 ### [81. eBPF, bpftrace & XDP / AF_XDP](81-ebpf-bpftrace-xdp.md)
 - 81.1 Why it matters: low-overhead production tracing and fast packet paths
@@ -1201,85 +1201,106 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 85.5 Pitfalls & anti-patterns: reinventing TCP badly
 - 85.6 Exercises & checklist
 
+### [86. Encrypted & Web-Protocol Venues and Trading in the Cloud: TLS/kTLS, WebSocket, JSON and REST on a Latency Budget](86-encrypted-web-protocol-venues-cloud.md)
+- 86.1 Why it matters: the venues you cannot colocate with
+- 86.2 Mental model
+  - 86.2.1 The TLS record: what it costs, where, and what kTLS moves
+  - 86.2.2 Handshakes: 1-RTT, resumption, and why 0-RTT is forbidden for orders
+  - 86.2.3 WebSocket: a framing layer, not a transport
+  - 86.2.4 JSON and REST as wire formats: the parse is the decoder, the request is the session
+  - 86.2.5 The tier, and what transfers
+- 86.3 Measure it: TLS records by cipher and size, the handshake, a WebSocket frame, and a JSON book update
+- 86.4 Techniques
+  - 86.4.1 The connection: TLS 1.3, AES-128-GCM, resumed, established before the session, and never 0-RTT for orders
+  - 86.4.2 Record handling without copies: read into your ring, and when kTLS pays
+  - 86.4.3 The WebSocket frame parser on the hot path
+  - 86.4.4 JSON fast paths: simdjson On-Demand into the overlay discipline
+  - 86.4.5 REST order entry: rate limits, signing, idempotency and FIX-over-TLS
+  - 86.4.6 Trading from a cloud host: virtualized NICs, placement, time, and the floor you cannot buy
+- 86.5 Pitfalls & anti-patterns
+- 86.6 Exercises & checklist
+
+---
+
 ## Part XI — Heterogeneous Computing & Hardware Acceleration
 
 *The PCIe boundary and how user space crosses it (BARs, VFIO, DMA mappings, the driver/module split), then pushing work off the CPU onto GPUs, FPGAs, and SmartNICs — and where the PCIe round-trip keeps them off the order path.*
 
-### [86. PCIe & the Host–Device Boundary](86-pcie-host-device-boundary.md)
-- 86.1 Why it matters: the round-trip floor under every offload
-- 86.2 Mental model
-  - 86.2.1 PCIe topology, lanes/generations and bandwidth
-  - 86.2.2 MMIO, BAR-mapped registers, DMA and the IOMMU
-  - 86.2.3 Descriptor rings and doorbells; posted vs non-posted transactions
-- 86.3 Measure it: device-register round-trip and streaming bandwidth
-- 86.4 Techniques
-  - 86.4.1 Write-combining and relaxed ordering
-  - 86.4.2 MSI-X interrupts vs polling for completions
-  - 86.4.3 Peer-to-peer DMA (GPUDirect, NIC-to-GPU/FPGA)
-- 86.5 Pitfalls & anti-patterns: a device read on the hot path; IOMMU overhead
-- 86.6 Exercises & checklist
-
-### [87. Userspace Drivers & Kernel Modules: UIO, VFIO and the Device Boundary](87-userspace-drivers-kernel-modules.md)
-- 87.1 Why it matters: every bypass path stands on a userspace driver
+### [87. PCIe & the Host–Device Boundary](87-pcie-host-device-boundary.md)
+- 87.1 Why it matters: the round-trip floor under every offload
 - 87.2 Mental model
-  - 87.2.1 Three routes to the device: `resourceN`, UIO, VFIO
-  - 87.2.2 IOMMU groups, ACS, and the DMA mapping
-  - 87.2.3 Interrupts to a process: eventfds, INTx and the two tiers
-  - 87.2.4 When to go kernel-side
-- 87.3 Measure it: an eventfd completion vs a polled one
+  - 87.2.1 PCIe topology, lanes/generations and bandwidth
+  - 87.2.2 MMIO, BAR-mapped registers, DMA and the IOMMU
+  - 87.2.3 Descriptor rings and doorbells; posted vs non-posted transactions
+- 87.3 Measure it: device-register round-trip and streaming bandwidth
 - 87.4 Techniques
-  - 87.4.1 Binding the device, and checking the group is yours
-  - 87.4.2 A minimal VFIO driver in C++
-  - 87.4.3 The two-tier completion loop
-  - 87.4.4 DMA memory: pinned, huge, local, and few mappings
-  - 87.4.5 When the answer is a kernel module
-- 87.5 Pitfalls & anti-patterns: a DMA bug is a kernel bug
+  - 87.4.1 Write-combining and relaxed ordering
+  - 87.4.2 MSI-X interrupts vs polling for completions
+  - 87.4.3 Peer-to-peer DMA (GPUDirect, NIC-to-GPU/FPGA)
+- 87.5 Pitfalls & anti-patterns: a device read on the hot path; IOMMU overhead
 - 87.6 Exercises & checklist
 
-### [88. GPU Computing with CUDA](88-gpu-computing-cuda.md)
-- 88.1 Why it matters: data-parallel offload (and why not the order path)
-- 88.2 Mental model: CUDA execution & memory model; warps/occupancy
-- 88.3 Measure it: end-to-end including transfer, not just kernel time
+### [88. Userspace Drivers & Kernel Modules: UIO, VFIO and the Device Boundary](88-userspace-drivers-kernel-modules.md)
+- 88.1 Why it matters: every bypass path stands on a userspace driver
+- 88.2 Mental model
+  - 88.2.1 Three routes to the device: `resourceN`, UIO, VFIO
+  - 88.2.2 IOMMU groups, ACS, and the DMA mapping
+  - 88.2.3 Interrupts to a process: eventfds, INTx and the two tiers
+  - 88.2.4 When to go kernel-side
+- 88.3 Measure it: an eventfd completion vs a polled one
 - 88.4 Techniques
-  - 88.4.1 Host–device transfer; pinned and unified memory
-  - 88.4.2 Streams and compute/transfer overlap
-  - 88.4.3 Where GPUs pay off (risk, pricing/Greeks, Monte-Carlo, backtesting, ML inference)
-- 88.5 Pitfalls & anti-patterns: PCIe latency on the tick-to-trade path
+  - 88.4.1 Binding the device, and checking the group is yours
+  - 88.4.2 A minimal VFIO driver in C++
+  - 88.4.3 The two-tier completion loop
+  - 88.4.4 DMA memory: pinned, huge, local, and few mappings
+  - 88.4.5 When the answer is a kernel module
+- 88.5 Pitfalls & anti-patterns: a DMA bug is a kernel bug
 - 88.6 Exercises & checklist
 
-### [89. Distributed Computing with MPI](89-distributed-computing-mpi.md)
-- 89.1 Why it matters: scaling across hosts (off the order path)
-- 89.2 Mental model: communicators; point-to-point vs collective
-- 89.3 Measure it: message latency vs size
+### [89. GPU Computing with CUDA](89-gpu-computing-cuda.md)
+- 89.1 Why it matters: data-parallel offload (and why not the order path)
+- 89.2 Mental model: CUDA execution & memory model; warps/occupancy
+- 89.3 Measure it: end-to-end including transfer, not just kernel time
 - 89.4 Techniques
-  - 89.4.1 Non-blocking calls and compute/communication overlap
-  - 89.4.2 RDMA/InfiniBand transports
-  - 89.4.3 NUMA- and topology-aware rank placement
-- 89.5 Pitfalls & anti-patterns: collectives on the critical path
+  - 89.4.1 Host–device transfer; pinned and unified memory
+  - 89.4.2 Streams and compute/transfer overlap
+  - 89.4.3 Where GPUs pay off (risk, pricing/Greeks, Monte-Carlo, backtesting, ML inference)
+- 89.5 Pitfalls & anti-patterns: PCIe latency on the tick-to-trade path
 - 89.6 Exercises & checklist
 
-### [90. FPGA Acceleration](90-fpga-acceleration.md)
-- 90.1 Why it matters: deterministic nanosecond pipelines inline on the wire
-- 90.2 Mental model: HLS vs RTL; the host–FPGA boundary
-- 90.3 Measure it: wire-to-wire latency of a hardware path
+### [90. Distributed Computing with MPI](90-distributed-computing-mpi.md)
+- 90.1 Why it matters: scaling across hosts (off the order path)
+- 90.2 Mental model: communicators; point-to-point vs collective
+- 90.3 Measure it: message latency vs size
 - 90.4 Techniques
-  - 90.4.1 NIC-integrated FPGAs and inline feed handling/order entry
-  - 90.4.2 Partial reconfiguration
-  - 90.4.3 Deciding what belongs in fabric vs software
-- 90.5 Pitfalls & anti-patterns: host-boundary stalls; toolchain complexity
+  - 90.4.1 Non-blocking calls and compute/communication overlap
+  - 90.4.2 RDMA/InfiniBand transports
+  - 90.4.3 NUMA- and topology-aware rank placement
+- 90.5 Pitfalls & anti-patterns: collectives on the critical path
 - 90.6 Exercises & checklist
 
-### [91. SmartNICs & DPUs](91-smartnics-dpus.md)
-- 91.1 Why it matters: a programmable hop between wire and host
-- 91.2 Mental model: NIC-resident ARM cores / FPGA fabric (BlueField, IPU, Pensando)
-  - 91.2.1 The two boundaries: wire↔DPU and DPU↔host
-- 91.3 Measure it: DPU-offload latency vs host path
+### [91. FPGA Acceleration](91-fpga-acceleration.md)
+- 91.1 Why it matters: deterministic nanosecond pipelines inline on the wire
+- 91.2 Mental model: HLS vs RTL; the host–FPGA boundary
+- 91.3 Measure it: wire-to-wire latency of a hardware path
 - 91.4 Techniques
-  - 91.4.1 Programming models (DOCA, P4, eBPF/XDP offload)
-  - 91.4.2 On-NIC RDMA and storage/security offload
-  - 91.4.3 Partitioning work between DPU and host
-- 91.5 Pitfalls & anti-patterns: when the DPU just adds a hop
+  - 91.4.1 NIC-integrated FPGAs and inline feed handling/order entry
+  - 91.4.2 Partial reconfiguration
+  - 91.4.3 Deciding what belongs in fabric vs software
+- 91.5 Pitfalls & anti-patterns: host-boundary stalls; toolchain complexity
 - 91.6 Exercises & checklist
+
+### [92. SmartNICs & DPUs](92-smartnics-dpus.md)
+- 92.1 Why it matters: a programmable hop between wire and host
+- 92.2 Mental model: NIC-resident ARM cores / FPGA fabric (BlueField, IPU, Pensando)
+  - 92.2.1 The two boundaries: wire↔DPU and DPU↔host
+- 92.3 Measure it: DPU-offload latency vs host path
+- 92.4 Techniques
+  - 92.4.1 Programming models (DOCA, P4, eBPF/XDP offload)
+  - 92.4.2 On-NIC RDMA and storage/security offload
+  - 92.4.3 Partitioning work between DPU and host
+- 92.5 Pitfalls & anti-patterns: when the DPU just adds a hop
+- 92.6 Exercises & checklist
 
 ---
 
@@ -1287,459 +1308,459 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 *Stepping outside C++ to the instructions themselves and to the other languages at or near the floor: inline and hand-written assembly, Rust measured against C++ on the book's own kernels, the C ABI boundary and vendor-SDK wrappers, the managed runtimes measured from the hot thread, and the tier-by-tier choice with an equal-rigour cross-language protocol.*
 
-### [92. Hand-Written & Inline Assembly](92-hand-written-inline-assembly.md)
-- 92.1 Why it matters: when the compiler has no word for what you mean
-- 92.2 Mental model
-  - 92.2.1 Extended asm anatomy: template, outputs, inputs, clobbers
-  - 92.2.2 What the optimizer may do around an asm statement
-  - 92.2.3 The two asm statements you have used since Ch. 3
-  - 92.2.4 Hand-written functions: the ABI is the whole contract
-- 92.3 Measure it: asm vs intrinsic vs compiler, on this book's own instructions
-- 92.4 Techniques
-  - 92.4.1 Intrinsics first — and why that is not a cop-out
-  - 92.4.2 The irreducible cases (`rdpmc`, serializing timestamps, `clwb`, doorbells)
-  - 92.4.3 `asm goto`: a branch the compiler never materialises as a flag
-  - 92.4.4 The constraints cookbook
-  - 92.4.5 Writing a hand-written function that stays correct
-- 92.5 Verify the codegen: the statement in its context
-- 92.6 Pitfalls & anti-patterns: the undeclared clobber, and friends
-- 92.7 Exercises & checklist
-### [93. Rust for the Hot Path](93-rust-for-the-hot-path.md)
-- 93.1 Why it matters: a second language at the floor
+### [93. Hand-Written & Inline Assembly](93-hand-written-inline-assembly.md)
+- 93.1 Why it matters: when the compiler has no word for what you mean
 - 93.2 Mental model
-  - 93.2.1 Ownership vs the zero-allocation discipline
-  - 93.2.2 Layout you control: `repr`, `align`, padding
-  - 93.2.3 Atomics and the memory model: the same model, the same instructions
-  - 93.2.4 Bounds checks: where they are elided and where they stay
-  - 93.2.5 `&mut` is `noalias`
-  - 93.2.6 `unsafe` at the hardware boundary
-- 93.3 Measure it: the book's kernels, Rust beside GCC and Clang
+  - 93.2.1 Extended asm anatomy: template, outputs, inputs, clobbers
+  - 93.2.2 What the optimizer may do around an asm statement
+  - 93.2.3 The two asm statements you have used since Ch. 3
+  - 93.2.4 Hand-written functions: the ABI is the whole contract
+- 93.3 Measure it: asm vs intrinsic vs compiler, on this book's own instructions
 - 93.4 Techniques
-  - 93.4.1 The wire overlay without `transmute`
-  - 93.4.2 Indexing that compiles to a load
-  - 93.4.3 The SPSC ring: where `unsafe` lives and why it is small
-  - 93.4.4 The build profile for a hot path
-  - 93.4.5 What maps to what: Part III in Rust
-- 93.5 Verify the codegen: side by side
-- 93.6 Pitfalls & anti-patterns: where parity breaks, and the one that is not Rust's fault
+  - 93.4.1 Intrinsics first — and why that is not a cop-out
+  - 93.4.2 The irreducible cases (`rdpmc`, serializing timestamps, `clwb`, doorbells)
+  - 93.4.3 `asm goto`: a branch the compiler never materialises as a flag
+  - 93.4.4 The constraints cookbook
+  - 93.4.5 Writing a hand-written function that stays correct
+- 93.5 Verify the codegen: the statement in its context
+- 93.6 Pitfalls & anti-patterns: the undeclared clobber, and friends
 - 93.7 Exercises & checklist
-### [94. Language Interop & ABI Boundaries](94-language-interop-abi-boundaries.md)
-- 94.1 Why it matters: the hot path already crosses a boundary on every packet
+### [94. Rust for the Hot Path](94-rust-for-the-hot-path.md)
+- 94.1 Why it matters: a second language at the floor
 - 94.2 Mental model
-  - 94.2.1 The hourglass: one narrow C waist
-  - 94.2.2 What may not cross
-  - 94.2.3 The cost model: a call is a call; a transition is not
-  - 94.2.4 Symbols, visibility and the dynamic linker
-- 94.3 Measure it: the cross-language call ladder
+  - 94.2.1 Ownership vs the zero-allocation discipline
+  - 94.2.2 Layout you control: `repr`, `align`, padding
+  - 94.2.3 Atomics and the memory model: the same model, the same instructions
+  - 94.2.4 Bounds checks: where they are elided and where they stay
+  - 94.2.5 `&mut` is `noalias`
+  - 94.2.6 `unsafe` at the hardware boundary
+- 94.3 Measure it: the book's kernels, Rust beside GCC and Clang
 - 94.4 Techniques
-  - 94.4.1 Parity asserts on both sides
-  - 94.4.2 Zero-cost RAII wrappers over vendor C SDKs
-  - 94.4.3 Exceptions and panics at the boundary
-  - 94.4.4 Shared memory across languages
-  - 94.4.5 C and Zig idioms worth stealing
-  - 94.4.6 Binding generators and where each belongs
-- 94.5 Verify the codegen: the wrapper adds nothing; the boundary adds a PLT hop
-- 94.6 Pitfalls & anti-patterns: per-message crossings and silent ABI drift
+  - 94.4.1 The wire overlay without `transmute`
+  - 94.4.2 Indexing that compiles to a load
+  - 94.4.3 The SPSC ring: where `unsafe` lives and why it is small
+  - 94.4.4 The build profile for a hot path
+  - 94.4.5 What maps to what: Part III in Rust
+- 94.5 Verify the codegen: side by side
+- 94.6 Pitfalls & anti-patterns: where parity breaks, and the one that is not Rust's fault
 - 94.7 Exercises & checklist
-### [95. Managed Runtimes Near the Hot Path, Measured](95-managed-runtimes-measured.md)
-- 95.1 Why it matters: the runtime owns the timing of your tail
+### [95. Language Interop & ABI Boundaries](95-language-interop-abi-boundaries.md)
+- 95.1 Why it matters: the hot path already crosses a boundary on every packet
 - 95.2 Mental model
-  - 95.2.1 What a collector does to the hot thread
-  - 95.2.2 Safepoints and time-to-safepoint
-  - 95.2.3 Tiered JIT: interpreter, C1, C2, OSR, deoptimisation
-  - 95.2.4 The four runtimes in one frame
-- 95.3 Measure it: pauses, warm-up and the garbage-free line
+  - 95.2.1 The hourglass: one narrow C waist
+  - 95.2.2 What may not cross
+  - 95.2.3 The cost model: a call is a call; a transition is not
+  - 95.2.4 Symbols, visibility and the dynamic linker
+- 95.3 Measure it: the cross-language call ladder
 - 95.4 Techniques
-  - 95.4.1 Garbage-free code: the flyweight over the bytes
-  - 95.4.2 Choosing and tuning the collector
-  - 95.4.3 Warming the JIT, and pinning what it compiled
-  - 95.4.4 .NET: `Span<T>`, `ref struct`, and the collector you cannot turn off
-  - 95.4.5 Go: allocation-free loops, `GOGC`, and the scheduler
-  - 95.4.6 OCaml: unboxed ints, the minor heap, and Jane Street's discipline
-  - 95.4.7 One hop away: the managed reader of a C++-written ring
-- 95.5 Verify the codegen: reading what the JIT emitted
-- 95.6 Pitfalls & anti-patterns
+  - 95.4.1 Parity asserts on both sides
+  - 95.4.2 Zero-cost RAII wrappers over vendor C SDKs
+  - 95.4.3 Exceptions and panics at the boundary
+  - 95.4.4 Shared memory across languages
+  - 95.4.5 C and Zig idioms worth stealing
+  - 95.4.6 Binding generators and where each belongs
+- 95.5 Verify the codegen: the wrapper adds nothing; the boundary adds a PLT hop
+- 95.6 Pitfalls & anti-patterns: per-message crossings and silent ABI drift
 - 95.7 Exercises & checklist
-### [96. Choosing a Language per Latency Tier](96-choosing-a-language-per-latency-tier.md)
-- 96.1 Why it matters: a one-time decision with a per-tick consequence
+### [96. Managed Runtimes Near the Hot Path, Measured](96-managed-runtimes-measured.md)
+- 96.1 Why it matters: the runtime owns the timing of your tail
 - 96.2 Mental model
-  - 96.2.1 The tiers, restated with what the language controls
-  - 96.2.2 What the language does not control
-  - 96.2.3 Equal rigour: the protocol
-  - 96.2.4 What this Part measured, and what it did not
-- 96.3 Measure it: one kernel, nine toolchains
+  - 96.2.1 What a collector does to the hot thread
+  - 96.2.2 Safepoints and time-to-safepoint
+  - 96.2.3 Tiered JIT: interpreter, C1, C2, OSR, deoptimisation
+  - 96.2.4 The four runtimes in one frame
+- 96.3 Measure it: pauses, warm-up and the garbage-free line
 - 96.4 Techniques
-  - 96.4.1 Running the protocol
-  - 96.4.2 The tier table with measured floors
-  - 96.4.3 `constexpr` vs `const fn` vs `comptime`: one table, three compilers, one `.rodata`
-  - 96.4.4 The scorecard
-  - 96.4.5 The polyglot architecture
-  - 96.4.6 Parity testing across languages
-  - 96.4.7 Three worked placements
-- 96.5 Verify the codegen: the same bytes
-- 96.6 Pitfalls & anti-patterns: the benchmark that compares warm-up to steady state
+  - 96.4.1 Garbage-free code: the flyweight over the bytes
+  - 96.4.2 Choosing and tuning the collector
+  - 96.4.3 Warming the JIT, and pinning what it compiled
+  - 96.4.4 .NET: `Span<T>`, `ref struct`, and the collector you cannot turn off
+  - 96.4.5 Go: allocation-free loops, `GOGC`, and the scheduler
+  - 96.4.6 OCaml: unboxed ints, the minor heap, and Jane Street's discipline
+  - 96.4.7 One hop away: the managed reader of a C++-written ring
+- 96.5 Verify the codegen: reading what the JIT emitted
+- 96.6 Pitfalls & anti-patterns
 - 96.7 Exercises & checklist
+### [97. Choosing a Language per Latency Tier](97-choosing-a-language-per-latency-tier.md)
+- 97.1 Why it matters: a one-time decision with a per-tick consequence
+- 97.2 Mental model
+  - 97.2.1 The tiers, restated with what the language controls
+  - 97.2.2 What the language does not control
+  - 97.2.3 Equal rigour: the protocol
+  - 97.2.4 What this Part measured, and what it did not
+- 97.3 Measure it: one kernel, nine toolchains
+- 97.4 Techniques
+  - 97.4.1 Running the protocol
+  - 97.4.2 The tier table with measured floors
+  - 97.4.3 `constexpr` vs `const fn` vs `comptime`: one table, three compilers, one `.rodata`
+  - 97.4.4 The scorecard
+  - 97.4.5 The polyglot architecture
+  - 97.4.6 Parity testing across languages
+  - 97.4.7 Three worked placements
+- 97.5 Verify the codegen: the same bytes
+- 97.6 Pitfalls & anti-patterns: the benchmark that compares warm-up to steady state
+- 97.7 Exercises & checklist
 ## Part XIII — Observability & Operations in Production
 
 *Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology (with checkpointing and segment recovery), the pre-trade risk gate and kill-switch, idempotent order entry and order-state recovery, the order-entry gateway and session layer, crash handling, capture/replay and line-rate wire capture with timing-faithful replay, the sequencer and replicated consumers, failover without split-brain, latency-spike forensics, host and network health, the engineering lifecycle — testing, performance gates in CI and the profile lifecycle, release engineering — and the end-to-end case study.*
 
-### [97. Zero-Overhead Logging](97-zero-overhead-logging.md)
-- 97.1 Why it matters: logging must never stall the hot path
-- 97.2 Mental model: deferred formatting; binary logging
-- 97.3 Measure it: log-call cost on the hot path
-- 97.4 Techniques
-  - 97.4.1 Async/lock-free loggers
-  - 97.4.2 Binary logging with offline formatting
-  - 97.4.3 `std::print`/`std::println` for off-hot-path output
-- 97.5 Verify the codegen: the hot-path log call is a few stores
-- 97.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O
-- 97.7 Exercises & checklist
-
-### [98. In-Band Latency Tracing & Budget Attribution](98-in-band-latency-tracing-budget-attribution.md)
-- 98.1 Why it matters: the budget you cannot attribute
-- 98.2 Mental model
-  - 98.2.1 The trace header: a correlation ID and a vector of stage stamps
-  - 98.2.2 In-band vs out-of-band carriage
-  - 98.2.3 Causality across processes: tick → decision → order
-  - 98.2.4 Three clocks on one message
-- 98.3 Measure it: what the stamp and the header cost
+### [98. Zero-Overhead Logging](98-zero-overhead-logging.md)
+- 98.1 Why it matters: logging must never stall the hot path
+- 98.2 Mental model: deferred formatting; binary logging
+- 98.3 Measure it: log-call cost on the hot path
 - 98.4 Techniques
-  - 98.4.1 The trace header and the stamping points
-  - 98.4.2 Carrying the header through rings, Disruptor slots and shm segments
-  - 98.4.3 Contention-free correlation IDs and the tick → order link
-  - 98.4.4 Off-path aggregation: from stamps to per-stage histograms
-  - 98.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
-  - 98.4.6 The per-packet ledger: joining a tap capture to the host's stamps
-- 98.5 Verify the codegen: a stage boundary is a counter read and a store
-- 98.6 Pitfalls & anti-patterns
+  - 98.4.1 Async/lock-free loggers
+  - 98.4.2 Binary logging with offline formatting
+  - 98.4.3 `std::print`/`std::println` for off-hot-path output
+- 98.5 Verify the codegen: the hot-path log call is a few stores
+- 98.6 Pitfalls & anti-patterns: formatting in the hot path; blocking on I/O
 - 98.7 Exercises & checklist
 
-### [99. Zero-Overhead Application Telemetry](99-zero-overhead-application-telemetry.md)
-- 99.1 Why it matters: the counter that has to leave a busy-poll process
+### [99. In-Band Latency Tracing & Budget Attribution](99-in-band-latency-tracing-budget-attribution.md)
+- 99.1 Why it matters: the budget you cannot attribute
 - 99.2 Mental model
-  - 99.2.1 Counter, gauge, high-water mark, histogram — and what each may cost
-  - 99.2.2 Percentiles are not additive: merge histograms, never average percentiles
-  - 99.2.3 Interval vs cumulative, windows and minimum samples
-  - 99.2.4 Coordinated omission in production
-- 99.3 Measure it: per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence
+  - 99.2.1 The trace header: a correlation ID and a vector of stage stamps
+  - 99.2.2 In-band vs out-of-band carriage
+  - 99.2.3 Causality across processes: tick → decision → order
+  - 99.2.4 Three clocks on one message
+- 99.3 Measure it: what the stamp and the header cost
 - 99.4 Techniques
-  - 99.4.1 The shared-memory telemetry segment
-  - 99.4.2 What a trading process must expose
-  - 99.4.3 The off-core scraper and export
-  - 99.4.4 From metrics to SLOs, alerts and triggers
-- 99.5 Verify the codegen: the instrumentation is a few stores
-- 99.6 Pitfalls & anti-patterns: shared counters, averaged percentiles, service time, the scraper on the sibling
+  - 99.4.1 The trace header and the stamping points
+  - 99.4.2 Carrying the header through rings, Disruptor slots and shm segments
+  - 99.4.3 Contention-free correlation IDs and the tick → order link
+  - 99.4.4 Off-path aggregation: from stamps to per-stage histograms
+  - 99.4.5 Exchange-provided timestamps: attributing the budget between you, the wire and the matching engine
+  - 99.4.6 The per-packet ledger: joining a tap capture to the host's stamps
+- 99.5 Verify the codegen: a stage boundary is a counter read and a store
+- 99.6 Pitfalls & anti-patterns
 - 99.7 Exercises & checklist
 
-### [100. Secure Programming for Low-Latency Systems](100-secure-programming-low-latency.md)
-- 100.1 Why it matters: security as a hot-path concern
+### [100. Zero-Overhead Application Telemetry](100-zero-overhead-application-telemetry.md)
+- 100.1 Why it matters: the counter that has to leave a busy-poll process
 - 100.2 Mental model
-  - 100.2.1 Market-data/order-entry messages as untrusted input
-  - 100.2.2 Undefined behavior as a vulnerability class
-  - 100.2.3 The hardening-vs-latency trade-off
-- 100.3 Measure it: hot-path cost of hardening options
+  - 100.2.1 Counter, gauge, high-water mark, histogram — and what each may cost
+  - 100.2.2 Percentiles are not additive: merge histograms, never average percentiles
+  - 100.2.3 Interval vs cumulative, windows and minimum samples
+  - 100.2.4 Coordinated omission in production
+- 100.3 Measure it: per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence
 - 100.4 Techniques
-  - 100.4.1 Bounds/length validation on variable-length fields and zero-copy parses
-  - 100.4.2 Memory safety in zero-allocation/arena designs; bounds checks that compile away
-  - 100.4.3 Integer/arithmetic safety in price/quantity math
-  - 100.4.4 Stack protector, `_FORTIFY_SOURCE`, PIE/ASLR, CFI, CET shadow stacks
-  - 100.4.5 Secret handling and secure wiping; keeping secrets out of logs
-  - 100.4.6 Privilege reduction (`seccomp`, capabilities, namespaces)
-  - 100.4.7 Build/supply-chain integrity; reproducible and signed builds
-  - 100.4.8 Fuzzing message parsers (libFuzzer/AFL++); ASan/UBSan/MSan
-  - 100.4.9 The cost of the kernel's own security subsystems: LSM, audit, seccomp (and the SSBD trap), Yama, lockdown — measured
-- 100.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
-- 100.6 Exercises & checklist
+  - 100.4.1 The shared-memory telemetry segment
+  - 100.4.2 What a trading process must expose
+  - 100.4.3 The off-core scraper and export
+  - 100.4.4 From metrics to SLOs, alerts and triggers
+- 100.5 Verify the codegen: the instrumentation is a few stores
+- 100.6 Pitfalls & anti-patterns: shared counters, averaged percentiles, service time, the scraper on the sibling
+- 100.7 Exercises & checklist
 
-### [101. Hot Reload & Live Reconfiguration](101-hot-reload-live-reconfiguration.md)
-- 101.1 Why it matters: change strategy/config without dropping a tick
-- 101.2 Mental model: atomic pointer swaps and double-buffering
-- 101.3 Measure it: reload-induced tear/stall test
+### [101. Secure Programming for Low-Latency Systems](101-secure-programming-low-latency.md)
+- 101.1 Why it matters: security as a hot-path concern
+- 101.2 Mental model
+  - 101.2.1 Market-data/order-entry messages as untrusted input
+  - 101.2.2 Undefined behavior as a vulnerability class
+  - 101.2.3 The hardening-vs-latency trade-off
+- 101.3 Measure it: hot-path cost of hardening options
 - 101.4 Techniques
-  - 101.4.1 Seqlock-/RCU-published config snapshots read lock-free
-  - 101.4.2 Versioned configuration and safe reclamation
-  - 101.4.3 Shared-memory config segments; validation-before-swap
-  - 101.4.4 Draining vs instantaneous cutover; dynamic-library/strategy reload with warm-up
-- 101.5 Pitfalls & anti-patterns: torn config, stalls during cutover
+  - 101.4.1 Bounds/length validation on variable-length fields and zero-copy parses
+  - 101.4.2 Memory safety in zero-allocation/arena designs; bounds checks that compile away
+  - 101.4.3 Integer/arithmetic safety in price/quantity math
+  - 101.4.4 Stack protector, `_FORTIFY_SOURCE`, PIE/ASLR, CFI, CET shadow stacks
+  - 101.4.5 Secret handling and secure wiping; keeping secrets out of logs
+  - 101.4.6 Privilege reduction (`seccomp`, capabilities, namespaces)
+  - 101.4.7 Build/supply-chain integrity; reproducible and signed builds
+  - 101.4.8 Fuzzing message parsers (libFuzzer/AFL++); ASan/UBSan/MSan
+  - 101.4.9 The cost of the kernel's own security subsystems: LSM, audit, seccomp (and the SSBD trap), Yama, lockdown — measured
+- 101.5 Pitfalls & anti-patterns: trusting the wire; mitigation interactions
 - 101.6 Exercises & checklist
 
-### [102. Process Topology & The Deterministic State Machine](102-process-topology-deterministic-state-machine.md)
-- 102.1 Why it matters: contain a crash, keep the venue session up
-- 102.2 Mental model
-  - 102.2.1 Process-per-role vs monolith (feed handler / strategy / order gateway / risk)
-  - 102.2.2 The Deterministic State Machine Pattern: pure, side-effect-free core decoupled from I/O for exact replayability
-  - 102.2.3 Fault domains and blast radius
-  - 102.2.4 Crash-only design
-- 102.3 Measure it: failover/restart time and its tail
+### [102. Hot Reload & Live Reconfiguration](102-hot-reload-live-reconfiguration.md)
+- 102.1 Why it matters: change strategy/config without dropping a tick
+- 102.2 Mental model: atomic pointer swaps and double-buffering
+- 102.3 Measure it: reload-induced tear/stall test
 - 102.4 Techniques
-  - 102.4.1 Shared-memory data planes between isolated processes
-  - 102.4.2 Single-writer-per-segment discipline
-  - 102.4.3 Supervisor/watchdog, heartbeats and liveness
-  - 102.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
-  - 102.4.5 Symbol/venue sharding (core dumps → Ch. 106)
-  - 102.4.6 Divergence forensics and determinism auditing
-  - 102.4.7 Checkpointing the core: consistent snapshots without stalling the hot path
-  - 102.4.8 Segment lifecycle: reattach, epochs and torn-write recovery
-  - 102.4.9 The host side of the lifecycle: the trading unit, privileges, boot-to-ready and the readiness gate
-- 102.5 Pitfalls & anti-patterns: shared fate, cascading restarts
+  - 102.4.1 Seqlock-/RCU-published config snapshots read lock-free
+  - 102.4.2 Versioned configuration and safe reclamation
+  - 102.4.3 Shared-memory config segments; validation-before-swap
+  - 102.4.4 Draining vs instantaneous cutover; dynamic-library/strategy reload with warm-up
+- 102.5 Pitfalls & anti-patterns: torn config, stalls during cutover
 - 102.6 Exercises & checklist
 
-### [103. The Pre-Trade Risk Gate & Kill-Switch Path](103-pre-trade-risk-gate-kill-switch.md)
-- 103.1 Why it matters: the one stage you may not skip, budgeted at 40 ns
+### [103. Process Topology & The Deterministic State Machine](103-process-topology-deterministic-state-machine.md)
+- 103.1 Why it matters: contain a crash, keep the venue session up
 - 103.2 Mental model
-  - 103.2.1 The check inventory: regulation → concrete per-order checks
-  - 103.2.2 Data layout for a ~40 ns gate
-  - 103.2.3 Checked arithmetic and branch-light evaluation
-  - 103.2.4 The kill-switch path: triggers, propagation, safe state
-- 103.3 Measure it: the gate's cost, and the time from trigger to cancels queued
+  - 103.2.1 Process-per-role vs monolith (feed handler / strategy / order gateway / risk)
+  - 103.2.2 The Deterministic State Machine Pattern: pure, side-effect-free core decoupled from I/O for exact replayability
+  - 103.2.3 Fault domains and blast radius
+  - 103.2.4 Crash-only design
+- 103.3 Measure it: failover/restart time and its tail
 - 103.4 Techniques
-  - 103.4.1 The gate as a pure function over flat records, with limits published lock-free
-  - 103.4.2 Self-match prevention and duplicate detection without a book lookup
-  - 103.4.3 Throttles: TSC token buckets per venue port
-  - 103.4.4 Changing limits under a running gate: validate, publish, verify
-  - 103.4.5 Kill-switch triggers as runtime monitors
-  - 103.4.6 The safe-state sequence, measured and rehearsed
-- 103.5 Pitfalls & anti-patterns
+  - 103.4.1 Shared-memory data planes between isolated processes
+  - 103.4.2 Single-writer-per-segment discipline
+  - 103.4.3 Supervisor/watchdog, heartbeats and liveness
+  - 103.4.4 Kill-switch / safe-state on failure; fast restart with warm-up
+  - 103.4.5 Symbol/venue sharding (core dumps → Ch. 107)
+  - 103.4.6 Divergence forensics and determinism auditing
+  - 103.4.7 Checkpointing the core: consistent snapshots without stalling the hot path
+  - 103.4.8 Segment lifecycle: reattach, epochs and torn-write recovery
+  - 103.4.9 The host side of the lifecycle: the trading unit, privileges, boot-to-ready and the readiness gate
+- 103.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 - 103.6 Exercises & checklist
 
-### [104. Idempotent Order Entry & Order-State Recovery](104-idempotent-order-entry-order-state-recovery.md)
-- 104.1 Why it matters: a duplicated or orphaned order is a real position
+### [104. The Pre-Trade Risk Gate & Kill-Switch Path](104-pre-trade-risk-gate-kill-switch.md)
+- 104.1 Why it matters: the one stage you may not skip, budgeted at 40 ns
 - 104.2 Mental model
-  - 104.2.1 Order identity: slot + generation, never a string
-  - 104.2.2 The in-flight table and the per-order state machine
-  - 104.2.3 The unknown-state matrix after a crash
-  - 104.2.4 Session resynchronization and the two sources of truth
-- 104.3 Measure it: correlation cost, and time-to-known-state after a kill
+  - 104.2.1 The check inventory: regulation → concrete per-order checks
+  - 104.2.2 Data layout for a ~40 ns gate
+  - 104.2.3 Checked arithmetic and branch-light evaluation
+  - 104.2.4 The kill-switch path: triggers, propagation, safe state
+- 104.3 Measure it: the gate's cost, and the time from trigger to cancels queued
 - 104.4 Techniques
-  - 104.4.1 Allocating ids and sending: journal-before-send
-  - 104.4.2 Correlating responses: acks, fills, rejects, cancels, replaces
-  - 104.4.3 Position and exposure accumulators: one writer, from fills only
-  - 104.4.4 Recovery after a kill: replay, resync, resolve
-  - 104.4.5 Reconciliation against drop-copy and order status; position rebuild
-  - 104.4.6 Type-state for the session and the order
+  - 104.4.1 The gate as a pure function over flat records, with limits published lock-free
+  - 104.4.2 Self-match prevention and duplicate detection without a book lookup
+  - 104.4.3 Throttles: TSC token buckets per venue port
+  - 104.4.4 Changing limits under a running gate: validate, publish, verify
+  - 104.4.5 Kill-switch triggers as runtime monitors
+  - 104.4.6 The safe-state sequence, measured and rehearsed
 - 104.5 Pitfalls & anti-patterns
 - 104.6 Exercises & checklist
 
-### [105. The Order-Entry Gateway & Session Layer](105-order-entry-gateway-session-layer.md)
-- 105.1 Why it matters: the session is the only thing that can cancel your orders
+### [105. Idempotent Order Entry & Order-State Recovery](105-idempotent-order-entry-order-state-recovery.md)
+- 105.1 Why it matters: a duplicated or orphaned order is a real position
 - 105.2 Mental model
-  - 105.2.1 Four protocols, one state machine
-  - 105.2.2 Sequence numbers are state, and state must survive the process
-  - 105.2.3 Liveness has layers, and each one is a clock
-  - 105.2.4 The encode fast path and the throttle
-- 105.3 Measure it: encode latency, resync time, and how long TCP takes to notice
+  - 105.2.1 Order identity: slot + generation, never a string
+  - 105.2.2 The in-flight table and the per-order state machine
+  - 105.2.3 The unknown-state matrix after a crash
+  - 105.2.4 Session resynchronization and the two sources of truth
+- 105.3 Measure it: correlation cost, and time-to-known-state after a kill
 - 105.4 Techniques
-  - 105.4.1 The persisted session state: one page, written before the send
-  - 105.4.2 The encode fast path: template, `to_chars`, one checksum pass
-  - 105.4.3 The resend store and `ResendRequest` handling
-  - 105.4.4 Liveness: heartbeats, `TestRequest`, and setting TCP's timers below the session's
-  - 105.4.5 Throttles, batching and the order of operations on send
-  - 105.4.6 Reconnect and takeover: who owns the numbers
+  - 105.4.1 Allocating ids and sending: journal-before-send
+  - 105.4.2 Correlating responses: acks, fills, rejects, cancels, replaces
+  - 105.4.3 Position and exposure accumulators: one writer, from fills only
+  - 105.4.4 Recovery after a kill: replay, resync, resolve
+  - 105.4.5 Reconciliation against drop-copy and order status; position rebuild
+  - 105.4.6 Type-state for the session and the order
 - 105.5 Pitfalls & anti-patterns
 - 105.6 Exercises & checklist
 
-### [106. Crash Handling, Core Dumps & Post-Mortem Diagnostics](106-crash-handling-core-dumps-post-mortem.md)
-- 106.1 Why it matters: the fault at 09:30:01 with four hundred working orders
+### [106. The Order-Entry Gateway & Session Layer](106-order-entry-gateway-session-layer.md)
+- 106.1 Why it matters: the session is the only thing that can cancel your orders
 - 106.2 Mental model
-  - 106.2.1 From the faulting instruction to the core file
-  - 106.2.2 Async-signal safety, and the faults you will see
-  - 106.2.3 The order of business: safety, evidence, dump
-  - 106.2.4 Why dumps stall the box, and what controls their size
-- 106.3 Measure it: a signal's cost, a stack capture's cost, a dump versus its size
+  - 106.2.1 Four protocols, one state machine
+  - 106.2.2 Sequence numbers are state, and state must survive the process
+  - 106.2.3 Liveness has layers, and each one is a clock
+  - 106.2.4 The encode fast path and the throttle
+- 106.3 Measure it: encode latency, resync time, and how long TCP takes to notice
 - 106.4 Techniques
-  - 106.4.1 The async-signal-safe fault handler
-  - 106.4.2 Pre-warming, and choosing the stack-capture mechanism
-  - 106.4.3 The kill-switch handoff and the flight recorder
-  - 106.4.4 Dumps that do not stall the box: `coredump_filter`, `MADV_DONTDUMP`, the pipe handler, systemd-coredump and minidumps
-  - 106.4.5 Post-mortem: joining the core, the crash record, the trace record and the capture
+  - 106.4.1 The persisted session state: one page, written before the send
+  - 106.4.2 The encode fast path: template, `to_chars`, one checksum pass
+  - 106.4.3 The resend store and `ResendRequest` handling
+  - 106.4.4 Liveness: heartbeats, `TestRequest`, and setting TCP's timers below the session's
+  - 106.4.5 Throttles, batching and the order of operations on send
+  - 106.4.6 Reconnect and takeover: who owns the numbers
 - 106.5 Pitfalls & anti-patterns
 - 106.6 Exercises & checklist
 
-### [107. Capture, Persistence & Replay Storage](107-capture-persistence-replay-storage.md)
-- 107.1 Why it matters: deterministic replay, research, and compliance
-- 107.2 Mental model: append-only/WAL journals; time-indexed storage
-- 107.3 Measure it: capture throughput and hot-path impact
+### [107. Crash Handling, Core Dumps & Post-Mortem Diagnostics](107-crash-handling-core-dumps-post-mortem.md)
+- 107.1 Why it matters: the fault at 09:30:01 with four hundred working orders
+- 107.2 Mental model
+  - 107.2.1 From the faulting instruction to the core file
+  - 107.2.2 Async-signal safety, and the faults you will see
+  - 107.2.3 The order of business: safety, evidence, dump
+  - 107.2.4 Why dumps stall the box, and what controls their size
+- 107.3 Measure it: a signal's cost, a stack capture's cost, a dump versus its size
 - 107.4 Techniques
-  - 107.4.1 Lossless line capture and nanosecond packet timestamps
-  - 107.4.2 Compact binary log formats
-  - 107.4.3 Getting bytes to disk off the hot path (async, io_uring, `O_DIRECT`, NVMe, batching)
-  - 107.4.4 Sequencing and gap-free persistence; retention and compaction
-  - 107.4.5 Feeding captures into replay, simulation and backtests
-  - 107.4.6 Research to production: one decoder, two bindings (pybind11/nanobind, zero-copy NumPy views, parity tests, Arrow)
-  - 107.4.7 Columnar tick storage: from the journal to Arrow and Parquet (kdb+/ClickHouse/QuestDB tier)
-- 107.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
+  - 107.4.1 The async-signal-safe fault handler
+  - 107.4.2 Pre-warming, and choosing the stack-capture mechanism
+  - 107.4.3 The kill-switch handoff and the flight recorder
+  - 107.4.4 Dumps that do not stall the box: `coredump_filter`, `MADV_DONTDUMP`, the pipe handler, systemd-coredump and minidumps
+  - 107.4.5 Post-mortem: joining the core, the crash record, the trace record and the capture
+- 107.5 Pitfalls & anti-patterns
 - 107.6 Exercises & checklist
 
-### [108. Line-Rate Capture, Timing-Faithful Replay & Passive Wire Measurement](108-line-rate-capture-timing-faithful-replay.md)
-- 108.1 Why it matters: the open is the only realistic test, and you only get one a day
-- 108.2 Mental model
-  - 108.2.1 Capture-point fidelity: what each point loses
-  - 108.2.2 The host capture stack: rings, blocks and fan-out
-  - 108.2.3 Timestamps and formats
-  - 108.2.4 Replay is a timing problem, not a copying problem
-- 108.3 Measure it: the host capture stack under a burst, and the replayer's timing error
+### [108. Capture, Persistence & Replay Storage](108-capture-persistence-replay-storage.md)
+- 108.1 Why it matters: deterministic replay, research, and compliance
+- 108.2 Mental model: append-only/WAL journals; time-indexed storage
+- 108.3 Measure it: capture throughput and hot-path impact
 - 108.4 Techniques
-  - 108.4.1 A `TPACKET_V3` capture ring
-  - 108.4.2 Proving the capture lossless
-  - 108.4.3 Timing-faithful replay onto the wire
-  - 108.4.4 Validating replay fidelity with the tap
-  - 108.4.5 Passive wire measurement: what to compute from the tap
-  - 108.4.6 What this chapter takes from Ch. 107
-- 108.5 Pitfalls & anti-patterns
+  - 108.4.1 Lossless line capture and nanosecond packet timestamps
+  - 108.4.2 Compact binary log formats
+  - 108.4.3 Getting bytes to disk off the hot path (async, io_uring, `O_DIRECT`, NVMe, batching)
+  - 108.4.4 Sequencing and gap-free persistence; retention and compaction
+  - 108.4.5 Feeding captures into replay, simulation and backtests
+  - 108.4.6 Research to production: one decoder, two bindings (pybind11/nanobind, zero-copy NumPy views, parity tests, Arrow)
+  - 108.4.7 Columnar tick storage: from the journal to Arrow and Parquet (kdb+/ClickHouse/QuestDB tier)
+- 108.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 - 108.6 Exercises & checklist
 
-### [109. The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers](109-sequencer-total-order-replicated-consumers.md)
-- 109.1 Why it matters: one truth, or the replay lies
+### [109. Line-Rate Capture, Timing-Faithful Replay & Passive Wire Measurement](109-line-rate-capture-timing-faithful-replay.md)
+- 109.1 Why it matters: the open is the only realistic test, and you only get one a day
 - 109.2 Mental model
-  - 109.2.1 The sequencer and its stream
-  - 109.2.2 Replicated deterministic consumers and the digest
-  - 109.2.3 Standby: hot, warm, cold — RPO, RTO and what each survives
-  - 109.2.4 The sequencer as the single point of failure
-- 109.3 Measure it: the hop the sequencer adds, the digest, and catch-up
+  - 109.2.1 Capture-point fidelity: what each point loses
+  - 109.2.2 The host capture stack: rings, blocks and fan-out
+  - 109.2.3 Timestamps and formats
+  - 109.2.4 Replay is a timing problem, not a copying problem
+- 109.3 Measure it: the host capture stack under a burst, and the replayer's timing error
 - 109.4 Techniques
-  - 109.4.1 Building the sequencer: the loop, the stamp, the log
-  - 109.4.2 Fan-out: shm ring on-host, reliable multicast across hosts
-  - 109.4.3 Replicas: the fold, the digest, the monitor
-  - 109.4.4 The slow replica: gate, drop, or demote
-  - 109.4.5 Sequencer failover and the standby sequencer
-  - 109.4.6 Reducing what the other chapters carry
+  - 109.4.1 A `TPACKET_V3` capture ring
+  - 109.4.2 Proving the capture lossless
+  - 109.4.3 Timing-faithful replay onto the wire
+  - 109.4.4 Validating replay fidelity with the tap
+  - 109.4.5 Passive wire measurement: what to compute from the tap
+  - 109.4.6 What this chapter takes from Ch. 108
 - 109.5 Pitfalls & anti-patterns
 - 109.6 Exercises & checklist
 
-### [110. Failover Without Split-Brain: Leases, Fencing & Session Takeover on the Order Path](110-failover-without-split-brain-leases-fencing.md)
-- 110.1 Why it matters: two emitters under one session is worse than the outage
+### [110. The Sequencer: Total-Order Broadcast & Replicated Deterministic Consumers](110-sequencer-total-order-replicated-consumers.md)
+- 110.1 Why it matters: one truth, or the replay lies
 - 110.2 Mental model
-  - 110.2.1 The invariant and where it is enforced
-  - 110.2.2 Failure detection over two paths
-  - 110.2.3 Leases, epochs and fencing tokens
-  - 110.2.4 The venue's safety nets
-  - 110.2.5 The takeover timeline
-- 110.3 Measure it: detect → lease → logon → first accepted order, and a zombie fenced
+  - 110.2.1 The sequencer and its stream
+  - 110.2.2 Replicated deterministic consumers and the digest
+  - 110.2.3 Standby: hot, warm, cold — RPO, RTO and what each survives
+  - 110.2.4 The sequencer as the single point of failure
+- 110.3 Measure it: the hop the sequencer adds, the digest, and catch-up
 - 110.4 Techniques
-  - 110.4.1 The lease word and the fencing token
-  - 110.4.2 The two-path detector
-  - 110.4.3 The takeover sequence: cancel first, then trade
-  - 110.4.4 Zombies: bounded pauses and stepping down
-  - 110.4.5 Where the token is checked when the venue cannot
-  - 110.4.6 Off-the-shelf: consensus beside the path
+  - 110.4.1 Building the sequencer: the loop, the stamp, the log
+  - 110.4.2 Fan-out: shm ring on-host, reliable multicast across hosts
+  - 110.4.3 Replicas: the fold, the digest, the monitor
+  - 110.4.4 The slow replica: gate, drop, or demote
+  - 110.4.5 Sequencer failover and the standby sequencer
+  - 110.4.6 Reducing what the other chapters carry
 - 110.5 Pitfalls & anti-patterns
 - 110.6 Exercises & checklist
 
-### [111. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](111-latency-spike-forensics-anomaly-triggered-diagnostics.md)
-- 111.1 Why it matters: the book can say it happened; this chapter says why
+### [111. Failover Without Split-Brain: Leases, Fencing & Session Takeover on the Order Path](111-failover-without-split-brain-leases-fencing.md)
+- 111.1 Why it matters: two emitters under one session is worse than the outage
 - 111.2 Mental model
-  - 111.2.1 From one outlier to a mechanism: the forensic loop
-  - 111.2.2 One timeline across clocks
-  - 111.2.3 Suspects and fingerprints
-  - 111.2.4 Always-on, frozen on trigger
-- 111.3 Measure it: the always-on record, the freeze, and the clock alignment
+  - 111.2.1 The invariant and where it is enforced
+  - 111.2.2 Failure detection over two paths
+  - 111.2.3 Leases, epochs and fencing tokens
+  - 111.2.4 The venue's safety nets
+  - 111.2.5 The takeover timeline
+- 111.3 Measure it: detect → lease → logon → first accepted order, and a zombie fenced
 - 111.4 Techniques
-  - 111.4.1 Reconstructing the timeline
-  - 111.4.2 The flight recorder: always-on, frozen by a swap
-  - 111.4.3 Kernel and hardware capture on the same trigger: ftrace, `perf record` in overwrite mode, Intel PT snapshots
-  - 111.4.4 Testing the suspects: the decision table in practice
-  - 111.4.5 From spike to incident: the bundle and the reproduction
+  - 111.4.1 The lease word and the fencing token
+  - 111.4.2 The two-path detector
+  - 111.4.3 The takeover sequence: cancel first, then trade
+  - 111.4.4 Zombies: bounded pauses and stepping down
+  - 111.4.5 Where the token is checked when the venue cannot
+  - 111.4.6 Off-the-shelf: consensus beside the path
 - 111.5 Pitfalls & anti-patterns
 - 111.6 Exercises & checklist
 
-### [112. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](112-host-health-telemetry.md)
-- 112.1 Why it matters: the quiet box decays
-- 112.2 Mental model: isolation as a live invariant
-  - 112.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
-  - 112.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
-  - 112.2.3 Drift: how a tuned box untunes itself
-  - 112.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
-- 112.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
+### [112. Latency-Spike Forensics & Anomaly-Triggered Diagnostics](112-latency-spike-forensics-anomaly-triggered-diagnostics.md)
+- 112.1 Why it matters: the book can say it happened; this chapter says why
+- 112.2 Mental model
+  - 112.2.1 From one outlier to a mechanism: the forensic loop
+  - 112.2.2 One timeline across clocks
+  - 112.2.3 Suspects and fingerprints
+  - 112.2.4 Always-on, frozen on trigger
+- 112.3 Measure it: the always-on record, the freeze, and the clock alignment
 - 112.4 Techniques
-  - 112.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
-  - 112.4.2 Frequency, thermal, power and SMIs — read from the right core
-  - 112.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
-  - 112.4.4 Baseline, drift audit, and wiring into the pipeline
-- 112.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
+  - 112.4.1 Reconstructing the timeline
+  - 112.4.2 The flight recorder: always-on, frozen by a swap
+  - 112.4.3 Kernel and hardware capture on the same trigger: ftrace, `perf record` in overwrite mode, Intel PT snapshots
+  - 112.4.4 Testing the suspects: the decision table in practice
+  - 112.4.5 From spike to incident: the bundle and the reproduction
+- 112.5 Pitfalls & anti-patterns
 - 112.6 Exercises & checklist
 
-### [113. Network Health Telemetry & Drop Forensics](113-network-health-telemetry-drop-forensics.md)
-- 113.1 Why it matters: a silent drop at the open is a wrong book and a lost race
-- 113.2 Mental model: the counter hierarchy, by the layer that dropped
-  - 113.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
-  - 113.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
-  - 113.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
-- 113.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
+### [113. Host Health Telemetry: Proving the Quiet Box Stayed Quiet](113-host-health-telemetry.md)
+- 113.1 Why it matters: the quiet box decays
+- 113.2 Mental model: isolation as a live invariant
+  - 113.2.1 Invariants, not thresholds (the signal table: what healthy reads, what a delta means, where to read it)
+  - 113.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
+  - 113.2.3 Drift: how a tuned box untunes itself
+  - 113.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
+- 113.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
 - 113.4 Techniques
-  - 113.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
-  - 113.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
-  - 113.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
-  - 113.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
-  - 113.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
-- 113.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
+  - 113.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
+  - 113.4.2 Frequency, thermal, power and SMIs — read from the right core
+  - 113.4.3 Memory system, clock and hardware health (THP/compaction/NUMA, PSI, clocksource and kmsg, EDAC/MCE/AER)
+  - 113.4.4 Baseline, drift audit, and wiring into the pipeline
+- 113.5 Pitfalls & anti-patterns: the monitor is the noise; thresholds on invariants; unmonitored monitors; stale baselines
 - 113.6 Exercises & checklist
 
-### [114. Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing](114-testing-latency-critical-code.md)
-- 114.1 Why it matters: the bug that loses money is a logic bug in a correct-looking program
-- 114.2 Mental model
-  - 114.2.1 The test pyramid for a deterministic core
-  - 114.2.2 Properties, not expected values
-  - 114.2.3 Deterministic simulation testing
-  - 114.2.4 Test doubles that cost nothing
-- 114.3 Measure it: a test suite for the core, a bug found by seed, and the price of a seam
+### [114. Network Health Telemetry & Drop Forensics](114-network-health-telemetry-drop-forensics.md)
+- 114.1 Why it matters: a silent drop at the open is a wrong book and a lost race
+- 114.2 Mental model: the counter hierarchy, by the layer that dropped
+  - 114.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
+  - 114.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
+  - 114.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
+- 114.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
 - 114.4 Techniques
-  - 114.4.1 Table-driven tests of `apply(state, input)`
-  - 114.4.2 Property-based tests, invariants and shrinking
-  - 114.4.3 Deterministic simulation of the gateway against a fault-injecting venue
-  - 114.4.4 Golden-master tests cut from captures
-  - 114.4.5 Test doubles as policies: production and simulation from one template
-  - 114.4.6 Running the suite: sanitizers, ARM, and what belongs where
-- 114.5 Pitfalls & anti-patterns
+  - 114.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
+  - 114.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)
+  - 114.4.3 Fabric and membership signals the host can see (querier age, A/B skew, pause frames)
+  - 114.4.4 Link, PHY, optics and switch telemetry (FEC/CRC, DOM, flaps, switch-side counters)
+  - 114.4.5 When the kernel is not in the path: bypass-stack counters (DPDK, Onload, ef_vi)
+- 114.5 Pitfalls & anti-patterns: counters without layers, summed duplicates, `time_squeeze` ignored, zero on bypass, fast polling, arming probes mid-session
 - 114.6 Exercises & checklist
 
-### [115. Performance Engineering in CI & the Profile Lifecycle](115-performance-engineering-ci-profile-lifecycle.md)
-- 115.1 Why it matters: a gate that flaps is a gate that gets turned off
+### [115. Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing](115-testing-latency-critical-code.md)
+- 115.1 Why it matters: the bug that loses money is a logic bug in a correct-looking program
 - 115.2 Mental model
-  - 115.2.1 A benchmark is a test with a noisy oracle
-  - 115.2.2 Which statistic to gate, on which machine
-  - 115.2.3 The pipeline: fast gate, nightly gate, bisection
-  - 115.2.4 Profiles decay like benchmarks
-- 115.3 Measure it: the noise floor, the gate, and the stale profile
+  - 115.2.1 The test pyramid for a deterministic core
+  - 115.2.2 Properties, not expected values
+  - 115.2.3 Deterministic simulation testing
+  - 115.2.4 Test doubles that cost nothing
+- 115.3 Measure it: a test suite for the core, a bug found by seed, and the price of a seam
 - 115.4 Techniques
-  - 115.4.1 A/A calibration: measure the floor, derive the tolerance
-  - 115.4.2 The gate: bootstrap CI, rank test, minimum effect
-  - 115.4.3 Deterministic proxies for shared runners
-  - 115.4.4 The nightly replay gate and bisection by replay
-  - 115.4.5 Operating PGO/AutoFDO/BOLT: the profile lifecycle
-  - 115.4.6 Trend, alerting and the human loop
+  - 115.4.1 Table-driven tests of `apply(state, input)`
+  - 115.4.2 Property-based tests, invariants and shrinking
+  - 115.4.3 Deterministic simulation of the gateway against a fault-injecting venue
+  - 115.4.4 Golden-master tests cut from captures
+  - 115.4.5 Test doubles as policies: production and simulation from one template
+  - 115.4.6 Running the suite: sanitizers, ARM, and what belongs where
 - 115.5 Pitfalls & anti-patterns
 - 115.6 Exercises & checklist
 
-### [116. Release Engineering & Measuring Changes in Production](116-release-engineering-measuring-changes-in-production.md)
-- 116.1 Why it matters: the deploy is a latency event you schedule
+### [116. Performance Engineering in CI & the Profile Lifecycle](116-performance-engineering-ci-profile-lifecycle.md)
+- 116.1 Why it matters: a gate that flaps is a gate that gets turned off
 - 116.2 Mental model
-  - 116.2.1 The deploy calendar: what may change when
-  - 116.2.2 Compatibility windows: attaching a new version to live state
-  - 116.2.3 Trust in stages: shadow → canary → fleet
-  - 116.2.4 Why the CI gate is necessary and not sufficient
-- 116.3 Measure it: a blue/green cutover tick by tick, and paired comparison with its own A/A
+  - 116.2.1 A benchmark is a test with a noisy oracle
+  - 116.2.2 Which statistic to gate, on which machine
+  - 116.2.3 The pipeline: fast gate, nightly gate, bisection
+  - 116.2.4 Profiles decay like benchmarks
+- 116.3 Measure it: the noise floor, the gate, and the stale profile
 - 116.4 Techniques
-  - 116.4.1 The release manifest: what "a release" is
-  - 116.4.2 Compatibility windows in code
-  - 116.4.3 Blue/green cutover for process-per-role
-  - 116.4.4 Shadow runs and canary shards
-  - 116.4.5 Paired production comparison, with its A/A
-  - 116.4.6 Venue conformance and the weekend test
+  - 116.4.1 A/A calibration: measure the floor, derive the tolerance
+  - 116.4.2 The gate: bootstrap CI, rank test, minimum effect
+  - 116.4.3 Deterministic proxies for shared runners
+  - 116.4.4 The nightly replay gate and bisection by replay
+  - 116.4.5 Operating PGO/AutoFDO/BOLT: the profile lifecycle
+  - 116.4.6 Trend, alerting and the human loop
 - 116.5 Pitfalls & anti-patterns
 - 116.6 Exercises & checklist
 
-### [117. Production Profiling & End-to-End Case Study](117-production-profiling-end-to-end-case-study.md)
-- 117.1 Why it matters: tying the whole book together
-- 117.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
-- 117.3 Measure it: a full tick-to-trade walkthrough
+### [117. Release Engineering & Measuring Changes in Production](117-release-engineering-measuring-changes-in-production.md)
+- 117.1 Why it matters: the deploy is a latency event you schedule
+- 117.2 Mental model
+  - 117.2.1 The deploy calendar: what may change when
+  - 117.2.2 Compatibility windows: attaching a new version to live state
+  - 117.2.3 Trust in stages: shadow → canary → fleet
+  - 117.2.4 Why the CI gate is necessary and not sufficient
+- 117.3 Measure it: a blue/green cutover tick by tick, and paired comparison with its own A/A
 - 117.4 Techniques
-  - 117.4.1 Regression detection and latency-regression gates in CI
-  - 117.4.2 Deterministic replay of captured market data
-  - 117.4.3 Simulation harnesses
-  - 117.4.4 Profiling the live system safely
-  - 117.4.5 Closing the loop: from the latency ledger to fills, markouts and race outcomes
-- 117.5 Pitfalls & anti-patterns: drift between test and production
+  - 117.4.1 The release manifest: what "a release" is
+  - 117.4.2 Compatibility windows in code
+  - 117.4.3 Blue/green cutover for process-per-role
+  - 117.4.4 Shadow runs and canary shards
+  - 117.4.5 Paired production comparison, with its A/A
+  - 117.4.6 Venue conformance and the weekend test
+- 117.5 Pitfalls & anti-patterns
 - 117.6 Exercises & checklist
+
+### [118. Production Profiling & End-to-End Case Study](118-production-profiling-end-to-end-case-study.md)
+- 118.1 Why it matters: tying the whole book together
+- 118.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
+- 118.3 Measure it: a full tick-to-trade walkthrough
+- 118.4 Techniques
+  - 118.4.1 Regression detection and latency-regression gates in CI
+  - 118.4.2 Deterministic replay of captured market data
+  - 118.4.3 Simulation harnesses
+  - 118.4.4 Profiling the live system safely
+  - 118.4.5 Closing the loop: from the latency ledger to fills, markouts and race outcomes
+- 118.5 Pitfalls & anti-patterns: drift between test and production
+- 118.6 Exercises & checklist
 
 ## Appendices
 
@@ -1847,8 +1868,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - L.2 Tail-latency capture with HdrHistogram (and avoiding coordinated omission)
 - L.3 Making a run repeatable (environment & isolation)
 - L.4 The pre-trust checklist
-- L.5 Benchmarking across languages (the Ch. 96 protocol: same box/core/capture, digest parity, warm vs cold windows, each toolchain's sink and asm)
-- L.6 Benchmarks as tests: the CI skeleton (Ch. 115) — CTest labels, `--benchmark_out=json`, `compare.py`, the A/A table and the artefact layout keyed by revision and runner class
+- L.5 Benchmarking across languages (the Ch. 97 protocol: same box/core/capture, digest parity, warm vs cold windows, each toolchain's sink and asm)
+- L.6 Benchmarks as tests: the CI skeleton (Ch. 116) — CTest labels, `--benchmark_out=json`, `compare.py`, the A/A table and the artefact layout keyed by revision and runner class
 - L.7 The core-to-core map: placement input for every pinned pair (Ch. 19) — run `c2c` once per box and firmware mode, store the matrix, quote the pair's one-way latency with every two-core result
 
 ### [Appendix M — Pre-Open Readiness Gate & Market-Open Playbook](appendix-M-readiness-gate-market-open.md)
@@ -1865,7 +1886,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - N.1 What a bundle is for: alignable, attributable, checkable (and bounded)
 - N.2 Provenance: build IDs, recorded compiler flags, load bases, configuration hash, kernel/firmware/microcode, host fingerprint, NIC settings
 - N.3 Clocks and anchors: TSC↔MONOTONIC sandwiches, PHC cross-timestamps, PTP journal and steps, the clock each ring used
-- N.4 The evidence, per layer: application (trace record, frozen flight recorder, binary log, telemetry snapshot, crash record, venue-stamp series), kernel ring (ftrace, `perf.data`, Intel PT, journal), host (Ch. 112 samples, `/proc`, RAS), network (Ch. 113 samples, counters, membership, bypass stacks), capture and tap slices
+- N.4 The evidence, per layer: application (trace record, frozen flight recorder, binary log, telemetry snapshot, crash record, venue-stamp series), kernel ring (ftrace, `perf.data`, Intel PT, journal), host (Ch. 113 samples, `/proc`, RAS), network (Ch. 114 samples, counters, membership, bypass stacks), capture and tap slices
 - N.5 The collection script (skeleton): bounded by `taskset`/`nice`/`ionice`/`timeout`, per-group logs, manifest and checksums
 - N.6 The ten-minute first look (cheap exonerations first)
 - N.7 Retention, pattern analysis and what to scrub

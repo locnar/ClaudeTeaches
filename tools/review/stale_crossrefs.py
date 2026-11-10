@@ -71,6 +71,7 @@ STEPS = [
     ("insert", 35),  # Ch. 36 fast-transcendentals-approximate-math
     ("insert", 37),  # Ch. 38 fast-hashing-checksums-key-design
     ("insert", 72),  # Ch. 73 multi-venue-book-normalization-symbology-sor
+    ("insert", 85),  # Ch. 86 encrypted-web-protocol-venues-cloud
     # INSERT_STEPS_END
 ]
 def old2new(n):

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 41 (atomics & memory ordering — the seqlock's correctness rests entirely on acquire/release and fences), Ch. 42 (single-writer discipline — the seqlock *is* the single-writer/many-reader primitive), Ch. 44 (false sharing — the sequence counter and data layout), Ch. 45 (lock-free — the SPSC ring is for *streams*, the seqlock for *snapshots*), Ch. 8 (coherence — readers don't write, so they don't bounce the line).
 >
-> **Leads into:** Ch. 47 (safe reclamation — the alternative for *large/pointer* state), Ch. 48 (Disruptor — publishes via sequences), Ch. 101 (hot reload — config published via seqlock/pointer swap), Ch. 34/67 (shared-memory publication across processes). The single-writer pattern reappears in Ch. 102.
+> **Leads into:** Ch. 47 (safe reclamation — the alternative for *large/pointer* state), Ch. 48 (Disruptor — publishes via sequences), Ch. 102 (hot reload — config published via seqlock/pointer swap), Ch. 34/67 (shared-memory publication across processes). The single-writer pattern reappears in Ch. 103.
 
 ---
 
@@ -236,8 +236,8 @@ The reader side — read optimistically and validate, never accepting a torn val
 ## 46.8 Additional Reading
 
 - J. Preshing's blog — memory ordering and publication patterns, helpful for getting the seqlock fences right.
-- Talks/posts on "single-writer principle" (Martin Thompson / Mechanical Sympathy) — why single-writer is the foundation of fast publication (ties Ch. 42, 102).
-- Ch. 41 (*Atomics*) — the ordering the seqlock depends on; Ch. 42 (*Foundations*) — single-writer discipline; Ch. 45 (*Lock-Free*) — the streaming (ring) alternative; Ch. 47 (*Safe Reclamation*) — pointer-swap/RCU for large state; Ch. 48 (*Disruptor*) — sequence publication; Ch. 101 (*Hot Reload*) — config/reference-data publication; Ch. 34/67 (*mmap/IPC*) — cross-process publication.
+- Talks/posts on "single-writer principle" (Martin Thompson / Mechanical Sympathy) — why single-writer is the foundation of fast publication (ties Ch. 42, 103).
+- Ch. 41 (*Atomics*) — the ordering the seqlock depends on; Ch. 42 (*Foundations*) — single-writer discipline; Ch. 45 (*Lock-Free*) — the streaming (ring) alternative; Ch. 47 (*Safe Reclamation*) — pointer-swap/RCU for large state; Ch. 48 (*Disruptor*) — sequence publication; Ch. 102 (*Hot Reload*) — config/reference-data publication; Ch. 34/67 (*mmap/IPC*) — cross-process publication.
 - **Appendix A** — ARM weak ordering (where naive seqlocks break); **Appendix F** — seqlock/single-writer glossary entries.
 
 ---

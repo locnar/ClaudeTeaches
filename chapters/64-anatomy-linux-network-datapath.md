@@ -4,13 +4,13 @@
 
 > **Prerequisites:** Ch. 63 (readiness vs completion, `epoll`, busy-poll — the syscall layer this chapter looks *beneath*), Ch. 54 (syscall and context-switch cost, interrupts), Ch. 56 and Ch. 59 (IRQ affinity and isolated cores — the softirq trap here is their unnamed jitter source), Ch. 61 §61.2 (the noise catalog's `ksoftirqd` row), Ch. 8 (cache lines — an `sk_buff` is several of them), Ch. 20 (TSC timestamps for the attribution).
 >
-> **Leads into:** Ch. 65–66 (io_uring and the zero-copy fast path — which stages they remove), Ch. 68–69 (socket and TCP tuning — the knobs named here get their mechanism), Ch. 70 (decoding — what the application does with the bytes that arrive at the end of this path), Ch. 75–77 (NIC offloads, DDIO, flow steering — the hardware end of the same path), Ch. 79 (ETF/FQ — the qdiscs that plug into §64.2.3), Ch. 81–82 (XDP and kernel bypass — the hooks that cut the path short, and the decision to leave it entirely), Ch. 113 (network health telemetry — this chapter's counters as a continuous signal). The book quotes "5–20 µs for the kernel stack" and moves on to bypass; this chapter is for the sockets that *stay* on the kernel stack — recovery, drop copy, order replies, control plane — and for the jitter the stack inflicts on cores that never touch it.
+> **Leads into:** Ch. 65–66 (io_uring and the zero-copy fast path — which stages they remove), Ch. 68–69 (socket and TCP tuning — the knobs named here get their mechanism), Ch. 70 (decoding — what the application does with the bytes that arrive at the end of this path), Ch. 75–77 (NIC offloads, DDIO, flow steering — the hardware end of the same path), Ch. 79 (ETF/FQ — the qdiscs that plug into §64.2.3), Ch. 81–82 (XDP and kernel bypass — the hooks that cut the path short, and the decision to leave it entirely), Ch. 114 (network health telemetry — this chapter's counters as a continuous signal). The book quotes "5–20 µs for the kernel stack" and moves on to bypass; this chapter is for the sockets that *stay* on the kernel stack — recovery, drop copy, order replies, control plane — and for the jitter the stack inflicts on cores that never touch it.
 
 ---
 
 ## 64.1 Why it matters: the stack you did not bypass is still on the box
 
-Every HFT system bypasses the kernel for the market-data feed and the order path (Ch. 82) and keeps the kernel stack for everything else: the retransmission and snapshot channels (Ch. 72), drop copy and order-status (Ch. 104–105), the control plane (Ch. 102), telemetry export (Ch. 99), the venue's FIX session on a less critical venue (Ch. 105). Those sockets ride a path the book has so far described in one line — "NIC IRQ → driver → IP/TCP → socket buffer → `epoll_wait` → `read()` → copy" (Ch. 63 §63.2) — and measured only end to end: ~5–6 µs for a loopback round trip, ~8 µs wire-to-application with the defaults, ~3 µs with busy-poll (Ch. 63 §63.3, Ch. 75 §75.3). Nothing has said which *stage* owns which microsecond, so when the recovery channel's p99.9 doubles after a kernel update there is no place to look.
+Every HFT system bypasses the kernel for the market-data feed and the order path (Ch. 82) and keeps the kernel stack for everything else: the retransmission and snapshot channels (Ch. 72), drop copy and order-status (Ch. 105–106), the control plane (Ch. 103), telemetry export (Ch. 100), the venue's FIX session on a less critical venue (Ch. 106). Those sockets ride a path the book has so far described in one line — "NIC IRQ → driver → IP/TCP → socket buffer → `epoll_wait` → `read()` → copy" (Ch. 63 §63.2) — and measured only end to end: ~5–6 µs for a loopback round trip, ~8 µs wire-to-application with the defaults, ~3 µs with busy-poll (Ch. 63 §63.3, Ch. 75 §75.3). Nothing has said which *stage* owns which microsecond, so when the recovery channel's p99.9 doubles after a kernel update there is no place to look.
 
 The second reason is jitter on cores that never open a socket. The kernel stack runs most of its receive work in **softirq** context — on whichever CPU the NIC's interrupt landed, or, when the budget runs out, in that CPU's `ksoftirqd` thread — and **transmit completions** and **RPS** re-steering can land it on a CPU that merely *sent* a packet or was named in a mask. An isolated hot core that sends one UDP datagram to a monitoring process has just volunteered to run the receive path for the reply, the loopback path for the whole message, and a `NET_RX` softirq it did not ask for. Ch. 61's noise catalog has a row for `ksoftirqd/N`; this chapter is the mechanism behind the row.
 
@@ -24,7 +24,7 @@ The second reason is jitter on cores that never open a socket. The kernel stack 
    stage  what happens                                                     context                 ~cost (µs, kernel path, 6326)
    ─────  ──────────────────────────────────────────────────────────────── ─────────────────────── ──────────────────────────────
     1  NIC DMAs the frame into a pre-posted RX buffer, writes a            hardware                 0.6–1.0 after the wire (PCIe write
-       descriptor, raises MSI-X (or not: coalescing — Ch. 75)                                       + DDIO into L3 — Ch. 76, 86)
+       descriptor, raises MSI-X (or not: coalescing — Ch. 75)                                       + DDIO into L3 — Ch. 76, 87)
     2  hardirq handler: ack, napi_schedule(): mark the queue's NAPI         hardirq, IRQ's CPU       0.5–1.5 (interrupt entry/exit;
        instance, raise NET_RX                                                                        + 1–150 µs if the CPU was in C-state — Ch. 60)
     3  NET_RX softirq → net_rx_action(): poll NAPI instances round-robin    softirq, same CPU        0.2–0.5 per poll round
@@ -72,18 +72,18 @@ The signatures are Ch. 61's: `irq:softirq_entry vec=NET_RX` on the hot core, `sc
     4  BQL (byte queue limits, dql): dequeue only while bytes-in-flight to the      process                  ~0 while under the limit; when the ring
        NIC < limit (auto-tuned from completions) — bounds ring-buffer bloat                                   is "full" the packet waits for a completion
     5  driver ndo_start_xmit: write a TX descriptor, ring the doorbell (an MMIO     process                  0.2–0.5 + the PCIe posted write
-       write — Ch. 86); the NIC DMAs the frame and puts it on the wire                                      (NIC: ~0.5–1 µs to the wire)
+       write — Ch. 87); the NIC DMAs the frame and puts it on the wire                                      (NIC: ~0.5–1 µs to the wire)
     6  TX completion: IRQ (or the next NAPI poll) → NET_TX softirq → free skbs,     softirq, TX IRQ's CPU    0.3–0.8 per batch; MSG_ZEROCOPY
        advance BQL, wake a socket blocked on SNDBUF                                                          notifications land here (Ch. 66)
 ```
 
-The transmit path is cheaper than receive — no interrupt, no wake-up on the critical half — *if* three things hold: the neighbour entry is present (an ARP resolution on the first order after a quiet spell is a millisecond-class stall — pin it with `ip neigh replace … nud permanent`), the qdisc is `mq` with `pfifo_fast` or `noqueue` rather than a pacing qdisc (`fq`/`fq_codel` are the *desktop* default and some distributions set `net.core.default_qdisc = fq_codel`; `fq` is also what `tcp_bbr` and `SO_TXTIME`/ETF need — Ch. 79 uses it deliberately), and the BQL limit is not being hit (a saturated TX ring means the datapath is bandwidth-bound and the latency is queueing; `/sys/class/net/<if>/queues/tx-N/byte_queue_limits/{limit,inflight}` shows the state — on the author's VM's `virtio_net` queue the auto-tuned limit sits at 440 KB). The doorbell is a posted MMIO write (Ch. 86 §86.2) — cheap to issue, but the NIC's DMA read of the descriptor and the frame is the first *non-posted* half of the trip, which is why wire-out is ~1 µs after `sendmsg` returns even on a perfect path.
+The transmit path is cheaper than receive — no interrupt, no wake-up on the critical half — *if* three things hold: the neighbour entry is present (an ARP resolution on the first order after a quiet spell is a millisecond-class stall — pin it with `ip neigh replace … nud permanent`), the qdisc is `mq` with `pfifo_fast` or `noqueue` rather than a pacing qdisc (`fq`/`fq_codel` are the *desktop* default and some distributions set `net.core.default_qdisc = fq_codel`; `fq` is also what `tcp_bbr` and `SO_TXTIME`/ETF need — Ch. 79 uses it deliberately), and the BQL limit is not being hit (a saturated TX ring means the datapath is bandwidth-bound and the latency is queueing; `/sys/class/net/<if>/queues/tx-N/byte_queue_limits/{limit,inflight}` shows the state — on the author's VM's `virtio_net` queue the auto-tuned limit sits at 440 KB). The doorbell is a posted MMIO write (Ch. 87 §87.2) — cheap to issue, but the NIC's DMA read of the descriptor and the frame is the first *non-posted* half of the trip, which is why wire-out is ~1 µs after `sendmsg` returns even on a perfect path.
 
 ### 64.2.4 The two taxes: netfilter/conntrack, and namespaces
 
 **Netfilter** is a set of hooks (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING, at the IP layer and again for `arp`/`bridge`) that each packet passes on the way in and out. With *no* tables loaded the hooks are empty function-pointer lists and cost nothing measurable. With *any* ruleset present (`iptables`/`nft`), each hook traverses its chains — and the moment a rule mentions connection state (`ct state`, `-m conntrack`, any NAT), the **conntrack** module is engaged on every packet: a flow-tuple hash lookup, a per-connection entry (created on the first packet, timed out later), and for UDP a "connection" that exists only as a bookkeeping entry. §64.3 measures it at ~0.25 µs per packet per hook on the author's VM — a 10 % tax on the fixed part of the path, and a cache-line footprint (the conntrack entry, its hash bucket) that competes with the application's. A box that has ever had Docker installed has an `iptables-nft` ruleset with NAT, `ct state` rules and a bridge — and therefore conntrack on every packet of every socket, hot or not.
 
-**Network namespaces** are free in themselves (a namespace is a separate set of tables), but *getting a packet between them* is not: the usual `veth` pair is a virtual device whose transmit is the peer's receive — the whole of §64.2.1 stages 3–9 again, in softirq, on the sending CPU, plus a bridge or NAT hop if the container is on a Docker-style bridge network. Measured as an extra ~5–10 µs per crossing on a kernel-stack path, it is the single largest avoidable stage on a containerised host. The alternatives that keep a namespace but skip the second stack pass are `macvlan`/`ipvlan` (a sub-interface of the physical NIC, one stack pass) and, for real isolation, an SR-IOV virtual function handed to the namespace (its own queues, its own IRQs — Ch. 75). The hot box's rule is simpler: hot sockets live in the root namespace, and the Kubernetes question is answered by Ch. 102's process topology, not by a CNI plugin.
+**Network namespaces** are free in themselves (a namespace is a separate set of tables), but *getting a packet between them* is not: the usual `veth` pair is a virtual device whose transmit is the peer's receive — the whole of §64.2.1 stages 3–9 again, in softirq, on the sending CPU, plus a bridge or NAT hop if the container is on a Docker-style bridge network. Measured as an extra ~5–10 µs per crossing on a kernel-stack path, it is the single largest avoidable stage on a containerised host. The alternatives that keep a namespace but skip the second stack pass are `macvlan`/`ipvlan` (a sub-interface of the physical NIC, one stack pass) and, for real isolation, an SR-IOV virtual function handed to the namespace (its own queues, its own IRQs — Ch. 75). The hot box's rule is simpler: hot sockets live in the root namespace, and the Kubernetes question is answered by Ch. 103's process topology, not by a CNI plugin.
 
 ## 64.3 Measure it: the loopback echo with softirq attribution, a conntrack tax, and the per-stage trace
 
@@ -242,13 +242,13 @@ The table is the chapter's thesis in numbers: the *fixed* stages sum to ~2.8 µs
 
 ### 64.4.1 Attribution: anchor to the wire, trace the path, read the counters first
 
-Before tracing, read the four counters that say whether the path is *healthy* — they cost nothing and are the Ch. 113 telemetry rows for this layer:
+Before tracing, read the four counters that say whether the path is *healthy* — they cost nothing and are the Ch. 114 telemetry rows for this layer:
 
 ```
    grep -E 'NET_RX|NET_TX' /proc/softirqs            # per-CPU: network softirqs must be ZERO on hot cpus, flat on the rest
    cat /proc/net/softnet_stat                        # per-CPU hex: col 1 processed, col 2 dropped (backlog full), col 3 time_squeeze
    nstat -az | grep -E 'UdpRcvbufErrors|UdpInErrors|TcpExtTCPBacklogDrop|TcpExtListenDrops|IpInDiscards'   # socket-level drops
-   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'    # NIC/driver drops (Ch. 113 §113.2)
+   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'    # NIC/driver drops (Ch. 114 §114.2)
    tc -s qdisc show dev eth0                         # backlog, drops, requeues per TX queue — a nonzero backlog is queueing latency
    cat /sys/class/net/eth0/queues/tx-*/byte_queue_limits/{limit,inflight}
 ```
@@ -274,7 +274,7 @@ Then trace as in §64.3 (3): **anchor** to the hardware RX timestamp (or, for TX
    #    thread over a ring (Ch. 67) and let IT call sendmsg; loopback runs the RX path in the sender's context
 ```
 
-Item 5 is the one that surprises: the hot thread's telemetry `sendto()` to a local collector costs the hot core a full loopback receive pass (§64.3 (1)) — ~1.5 µs plus an `sk_buff` allocation and free, in softirq context, on the isolated core. The Ch. 99 design (telemetry over shared memory, exported by a housekeeping process) exists for this reason as much as for the syscall.
+Item 5 is the one that surprises: the hot thread's telemetry `sendto()` to a local collector costs the hot core a full loopback receive pass (§64.3 (1)) — ~1.5 µs plus an `sk_buff` allocation and free, in softirq context, on the isolated core. The Ch. 100 design (telemetry over shared memory, exported by a housekeeping process) exists for this reason as much as for the syscall.
 
 ### 64.4.3 Trimming stages on the sockets that stay in the kernel
 
@@ -305,7 +305,7 @@ Each line removes a *variable* row of §64.2.1/§64.2.3; none of them makes the 
    # and keep container runtimes off the box: Docker installs NAT + ct state rules + a bridge + br_netfilter on the ROOT namespace
 ```
 
-`notrack` removes the per-packet lookup for those flows while leaving the policy in place for everything else; it is the right answer when the security team's ruleset cannot go away (Ch. 100 §100.4's threat model wants the box firewalled at the switch and the cross-connect anyway — Appendix K). Verify with §64.3 (2)'s harness against the real socket, not with a reading of the rules.
+`notrack` removes the per-packet lookup for those flows while leaving the policy in place for everything else; it is the right answer when the security team's ruleset cannot go away (Ch. 101 §101.4's threat model wants the box firewalled at the switch and the cross-connect anyway — Appendix K). Verify with §64.3 (2)'s harness against the real socket, not with a reading of the rules.
 
 ### 64.4.5 Namespaces: one stack pass, or none
 
@@ -314,7 +314,7 @@ A hot socket lives in the root namespace. Where a namespace is mandated (multi-t
 ## 64.5 Pitfalls & anti-patterns: the stage you forgot was running
 
 - **`ksoftirqd/N` on an isolated core.** A managed NIC vector or an RPS mask that names the hot core; the signature is `NET_RX` moving in `/proc/softirqs` for that CPU and `sched_switch → ksoftirqd/N` in Ch. 61's trace. `isolcpus=managed_irq`, `rps_cpus=0`, and check `effective_affinity_list`, not `smp_affinity`.
-- **Sending from the hot thread.** One `sendto()` to a local process = the whole loopback RX path in the hot core's softirq context (§64.3 (1): one `NET_RX` per message on the *sender's* CPU). Telemetry and logs leave the hot thread through shared memory (Ch. 97, 99), and a housekeeping thread owns the socket.
+- **Sending from the hot thread.** One `sendto()` to a local process = the whole loopback RX path in the hot core's softirq context (§64.3 (1): one `NET_RX` per message on the *sender's* CPU). Telemetry and logs leave the hot thread through shared memory (Ch. 98, 100), and a housekeeping thread owns the socket.
 - **`time_squeeze` nobody reads.** Column 3 of `softnet_stat` incrementing means `net_rx_action` hit its budget and deferred the rest to `ksoftirqd` — on a housekeeping core that is a capacity warning; on a hot core it is Ch. 61's bug. It is also the one counter `nstat` does not show.
 - **Docker was installed once.** `iptables-nft` NAT and `ct state` rules, a bridge, `br_netfilter`: conntrack on every packet of every socket, forever, including after the containers are gone. `nft list ruleset` must be empty, not "default."
 - **`fq_codel` as the default qdisc.** Several distributions set `net.core.default_qdisc=fq_codel`; it adds a flow hash, timestamps and CoDel's state to every packet and can *delay* a packet by design. `pfifo_fast` under `mq` on the order NIC; `fq` only where ETF/BBR need it (Ch. 79).
@@ -333,12 +333,12 @@ A hot socket lives in the root namespace. Where a namespace is mandated (multi-t
 2. With a real NIC and two hosts (or a NIC in loopback through a switch), reproduce §64.3 (3)'s table with `trace-cmd` or `bpftrace`. Which stage carries the p99.9? Turn GRO and coalescing off one at a time and re-run: attribute each knob to its stage.
 3. Add one `ct state` rule, then a `notrack` rule for the harness's ports, and measure both against the empty ruleset. Does `notrack` fully recover the baseline? Now `modprobe -r nf_conntrack` — what has to be removed first, and how would you detect in production that the module came back?
 4. Run the server inside a network namespace connected by (a) a `veth` pair and a bridge, (b) `macvlan`, (c) if you have one, an SR-IOV VF. Measure the three with the harness and read `/proc/softirqs` for the extra `NET_RX` passes.
-5. Point an RPS mask at an isolated core (`echo 4 > rps_cpus` on the NIC's queue) and watch `/proc/softirqs`, `/proc/interrupts` (`CAL`) and `rtla osnoise` (Ch. 61) on that core while traffic flows. Then write the Ch. 113 telemetry check that would have caught it in a second.
+5. Point an RPS mask at an isolated core (`echo 4 > rps_cpus` on the NIC's queue) and watch `/proc/softirqs`, `/proc/interrupts` (`CAL`) and `rtla osnoise` (Ch. 61) on that core while traffic flows. Then write the Ch. 114 telemetry check that would have caught it in a second.
 
 **Checklist**
 
 - [ ] The RX path is known stage by stage for the sockets that stay in the kernel, with a measured per-stage median and p99 anchored to the NIC hardware timestamp (§64.3 (3)), and re-measured after every kernel or driver change.
-- [ ] `NET_RX`/`NET_TX` in `/proc/softirqs` are zero on the hot cores for the whole trading day (Ch. 113 samples them); `time_squeeze` is flat on every core.
+- [ ] `NET_RX`/`NET_TX` in `/proc/softirqs` are zero on the hot cores for the whole trading day (Ch. 114 samples them); `time_squeeze` is flat on every core.
 - [ ] NIC queues and their vectors live on housekeeping cores (`isolcpus=managed_irq`, `effective_affinity_list` verified); `rps_cpus` is 0 (or names housekeeping cores only); `xps_cpus` maps TX queues to housekeeping cores.
 - [ ] No hot thread calls `sendmsg`/`sendto` on a kernel socket; bytes leave through a ring to a housekeeping thread that owns the socket.
 - [ ] GRO/LRO and interrupt coalescing are off on the latency NIC; the root qdisc is `mq` + `pfifo_fast` (or `noqueue`), `fq`/ETF only where Ch. 79 uses it; BQL `inflight` never approaches `limit`.
@@ -359,7 +359,7 @@ A hot socket lives in the root namespace. Where a namespace is mandated (multi-t
 ## 64.8 Additional Reading
 
 - Ch. 63 (*Linux Native I/O*) — the syscall layer above this path; Ch. 65–66 (io_uring, zero-copy) — removing syscalls and copies from stages 1 and 10; Ch. 75 (*NIC Features & Offloads*), Ch. 76 (DDIO) and Ch. 77 (flow steering) — the hardware end of stages 1–4; Ch. 81 (XDP) and Ch. 82 (kernel bypass) — the two ways to leave the path.
-- Ch. 61 (*Hunting Residual Noise*) — the `ksoftirqd`/softirq row of the noise catalog and the tracers that catch it; Ch. 113 (*Network Health Telemetry & Drop Forensics*) — this chapter's counters as a continuous signal and the drop-attribution ladder.
+- Ch. 61 (*Hunting Residual Noise*) — the `ksoftirqd`/softirq row of the noise catalog and the tracers that catch it; Ch. 114 (*Network Health Telemetry & Drop Forensics*) — this chapter's counters as a continuous signal and the drop-attribution ladder.
 - Christian Benvenuti, *Understanding Linux Network Internals* (O'Reilly, 2005) — dated in detail, still the clearest book-length account of `netif_receive_skb`, the softirq machinery and the qdisc layer.
 - Appendix C.3 (the RPS/XPS, backlog and busy-poll knobs now pointed at their mechanism here), Appendix I.8 (the one-liners), Appendix F (BQL, NAPI, softirq, conntrack, `veth`).
 

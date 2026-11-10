@@ -81,7 +81,7 @@ Method consequences. **Top-down as the book uses it (Ch. 2 §2.2.2) does not exi
 
 ## Q.6 Memory model, atomics and spin loops (Ch. 41–43): what does not change
 
-Nothing in Part VI changes: Zen is **x86-TSO**, `lock`-prefixed RMWs are full barriers, `mfence`/`lfence`/`sfence` have the same semantics, and every listing in Ch. 41–48 is correct as written. Two numbers move: the **contended-line transfer** is CCD-topology-dependent (Ch. 19 — 19 ns inside, 85+ across, vs the 45–65 ns band of the monolithic reference machine), so an SPSC pair that straddles CCDs is 4× slower and a false-sharing bug 4× more expensive; and **`pause`** is ~65 cycles (Zen 2+), which changes Ch. 43's backoff arithmetic and the Ch. 49 poll-loop duty cycle. `lock cmpxchg16b` is single-instruction and fast on all Zen (Ch. 43's DWCAS note); `clwb`/`clflushopt` are present; `movdir64b` (Ch. 86's doorbell write) is Zen 4+.
+Nothing in Part VI changes: Zen is **x86-TSO**, `lock`-prefixed RMWs are full barriers, `mfence`/`lfence`/`sfence` have the same semantics, and every listing in Ch. 41–48 is correct as written. Two numbers move: the **contended-line transfer** is CCD-topology-dependent (Ch. 19 — 19 ns inside, 85+ across, vs the 45–65 ns band of the monolithic reference machine), so an SPSC pair that straddles CCDs is 4× slower and a false-sharing bug 4× more expensive; and **`pause`** is ~65 cycles (Zen 2+), which changes Ch. 43's backoff arithmetic and the Ch. 49 poll-loop duty cycle. `lock cmpxchg16b` is single-instruction and fast on all Zen (Ch. 43's DWCAS note); `clwb`/`clflushopt` are present; `movdir64b` (Ch. 87's doorbell write) is Zen 4+.
 
 ## Q.7 Firmware knobs, clocks and power (Ch. 6, 7, 60; Appendix C.1)
 

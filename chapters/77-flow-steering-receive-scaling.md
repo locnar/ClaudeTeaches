@@ -23,7 +23,7 @@ Receiving a packet is a chain from wire to queue to core to cache, and each link
 ```
    wire -> NIC -> [which RX queue?] -> [which core polls it?] -> [which L3? (DDIO)] -> decode
                         │                      │                      │
-                     RSS (hash)          queue<->core map        NIC-local socket (Ch.18,86)
+                     RSS (hash)          queue<->core map        NIC-local socket (Ch.18,87)
                      or flow steering     (IRQ affinity /         + CAT ways (Ch.58)
                      (exact match)         poll assignment)
 ```
@@ -80,7 +80,7 @@ The lessons: a cross-core handoff (RSS to the wrong core) adds cache-transfer + 
   ```
 
   (Queue → core is the IRQ-affinity/`irqbalance` setup of Ch. 56; on an i40e/ice part these rules program **Intel Flow Director**.) For bypass paths (Ch. 82) the same rule is a **DPDK `rte_flow`** (ETH/IPV4/UDP pattern → QUEUE action — the programmable flow API that matches many fields). This is the core technique: deterministic feed → queue → core.
-- **`rte_flow` for rich steering (DPDK / bypass).** On a DPDK path (Ch. 82), `rte_flow` expresses sophisticated rules — match on multicast group, VLAN, protocol; actions of queue, RSS-to-a-subset, drop (filter unwanted traffic in NIC hardware — Ch. 75; the hardware analogue of Ch. 81's XDP drop, and defence in depth in front of the parser, Ch. 100), mark (tag for the app). Steer each feed to its core and drop everything you don't subscribe to *at the NIC*, before it costs a cycle.
+- **`rte_flow` for rich steering (DPDK / bypass).** On a DPDK path (Ch. 82), `rte_flow` expresses sophisticated rules — match on multicast group, VLAN, protocol; actions of queue, RSS-to-a-subset, drop (filter unwanted traffic in NIC hardware — Ch. 75; the hardware analogue of Ch. 81's XDP drop, and defence in depth in front of the parser, Ch. 101), mark (tag for the app). Steer each feed to its core and drop everything you don't subscribe to *at the NIC*, before it costs a cycle.
 - **Combine steering with the full chain (Ch. 58, 76).** Steer the feed to the isolated core's queue (Ch. 56), on the NIC's NUMA node (Ch. 18) so DDIO lands it in that socket's L3 (Ch. 76), in CAT-protected ways (Ch. 58). Steering, pinning, NUMA, DDIO, and CAT together are the complete RX isolation: the right packet, on the right core, in the right cache, protected. Any one missing undermines the rest (§77.5).
 
 ### 77.4.3 aRFS, `SO_REUSEPORT`, and batched receive

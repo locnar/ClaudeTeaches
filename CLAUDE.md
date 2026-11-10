@@ -519,13 +519,13 @@ Code & content guidelines:
   - **IX — Market Data, NIC & Fabric** (70–80): decoding, text protocols on the hot path — branch-free parsing &
     formatting (Ch. 68, added 2026-11-10 P3-6C), reliable multicast, multicast membership & dark-feed detection
     (Ch. 70), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (81–85): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (81–86): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (86–91): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (87–92): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (89–93, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (97–117): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (98–118): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
     topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
     kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
