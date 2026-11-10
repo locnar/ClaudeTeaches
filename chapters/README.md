@@ -1425,6 +1425,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 99.4.6 Divergence forensics and determinism auditing
   - 99.4.7 Checkpointing the core: consistent snapshots without stalling the hot path
   - 99.4.8 Segment lifecycle: reattach, epochs and torn-write recovery
+  - 99.4.9 The host side of the lifecycle: the trading unit, privileges, boot-to-ready and the readiness gate
 - 99.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 - 99.6 Exercises & checklist
 
@@ -1751,6 +1752,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - H.4 Concurrency & execution (`std::atomic_ref`, `std::jthread`, `std::execution` senders/receivers)
 - H.5 Numerics & bit manipulation (`std::bit_cast`, `<bit>`, `std::byteswap`, saturating arithmetic, `from_chars`/`to_chars`)
 - H.6 Feature-test macros & graceful degradation
+- H.7 Linux kernel feature availability — the version table the book depends on, and choosing the kernel
 
 ### [Appendix I — Tooling Command Cookbook](appendix-I-tooling-cookbook.md)
 - I.1 `perf`: stat, record/report, annotate

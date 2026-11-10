@@ -332,6 +332,101 @@ Ch. 34 §34.4.1 and Ch. 65 §65.4.2 defer the question of what a process does wh
 
 The run that produced those numbers found the writer's last record with **all seven payload words written and the commit word still holding the previous lap's value** — a torn write that a payload-only check would have accepted, and that the commit-word rule rejects in one compare. The committed prefix validated clean (0 bad words in the last 4096 records), ownership moved to epoch 2, and the robust mutex returned `EOWNERDEAD` and was made consistent. Three rules follow. **Never fix up a header**: a wrong magic, version or fingerprint is a deployment error (Ch. 113 §113.4.2's compatibility window exists so a new binary attaches only to layouts it was built for). **Epoch stamps make the tail safe for readers**: a consumer that applied records from the dead writer's final, uncommitted lap sees an epoch it no longer trusts and re-reads from the last committed `seq` — the single-writer discipline (§99.4.2) is what makes "roll back to seq N" meaningful. **Robust mutexes recover the lock, not the data**: after `EOWNERDEAD` the state under the lock is whatever the dead holder left; the recovering process validates it against an invariant or rebuilds it from the journal (Ch. 104) before marking the mutex consistent — and on the hot path there should be no mutex to recover (Ch. 41).
 
+### 99.4.9 The host side of the lifecycle: the trading unit, privileges, boot-to-ready and the readiness gate
+
+The supervisor of §99.4.3 is itself supervised — by `systemd`, which also decides *when* the trading processes may start, *what* they may do, *where* they run and *how fast the box gets there after a reboot*. The unit file is where Appendix C's per-process knobs, Ch. 97 §97.4.6's privilege drop and Appendix M's readiness gate meet, and it is version-controlled with the release (Appendix C.6):
+
+```ini
+# /etc/systemd/system/trading@.service — one instance per role/shard (trading@strategy-3.service); the supervisor is a sibling unit.
+[Unit]
+Description=Trading role %i
+After=network-online.target hugepages.service nic-bind.service prefetch-msr.service ptp4l.service phc2sys.service
+Requires=hugepages.service nic-bind.service prefetch-msr.service      # fail if the substrate is not there — never start cold
+Wants=network-online.target
+StartLimitIntervalSec=60                                              # §99.4.3's restart cap, at the unit level
+StartLimitBurst=3
+
+[Service]
+Type=notify                                                           # READY=1 is sent by the process — after warm-up and the gate, not at exec
+NotifyAccess=main
+ExecStartPre=/usr/local/sbin/host-attest --release /etc/trading/release.json   # Appendix M.2: refuse to start on a drifted box
+ExecStartPre=+/usr/sbin/auditctl -a task,never                        # Ch. 97 §97.4.9: this unit's tasks are not audited (`+` = run as root)
+ExecStart=/opt/trading/bin/role --config /etc/trading/%i.toml
+TimeoutStartSec=120                                                   # warm-up (Ch. 60) must finish in this; otherwise the start FAILS loudly
+WatchdogSec=2                                                         # WATCHDOG=1 from the supervisor loop at ≤ 1 s, or systemd kills and restarts
+Restart=on-failure
+RestartSec=200ms
+# --- placement (Appendix C.4) ---
+CPUAffinity=2-7                                                       # the hot cores; the process pins each thread within this set (Ch. 54)
+AllowedCPUs=2-7                                                       # the cgroup v2 cpuset, so forks/children cannot escape either
+NUMAPolicy=bind
+NUMAMask=0
+CPUQuota=                                                             # explicitly NONE (Ch. 57 §57.4.4): no cpu.max on this unit
+IOSchedulingClass=idle                                                # the only disk I/O is the journal writer's, on a housekeeping thread
+# --- limits (Ch. 34, 57, 84) ---
+LimitMEMLOCK=infinity                                                 # mlockall + VFIO DMA pins + hugetlb
+LimitRTPRIO=99                                                        # SCHED_FIFO from an unprivileged user
+LimitNOFILE=65536
+LimitCORE=infinity                                                    # Ch. 103: bounded by the piped handler, not by the limit
+TasksMax=512
+# --- privileges (Ch. 97 §97.4.6) ---
+User=trading
+Group=trading
+AmbientCapabilities=CAP_SYS_NICE CAP_IPC_LOCK CAP_NET_RAW CAP_NET_ADMIN   # RT priority & affinity; mlock; raw/bypass sockets; multicast joins + flow steering
+CapabilityBoundingSet=CAP_SYS_NICE CAP_IPC_LOCK CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_PTRACE
+NoNewPrivileges=yes                                                   # also required for seccomp filters (Ch. 97 §97.4.6)
+ProtectSystem=strict
+ReadWritePaths=/var/lib/trading /dev/shm /dev/hugepages /var/log/trading
+PrivateTmp=yes
+ProtectKernelTunables=yes                                             # the knobs were set by the boot units, not by this one
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_PACKET AF_NETLINK
+SystemCallArchitectures=native
+# NOT set: MemoryDenyWriteExecute (breaks JIT-ed/`dlopen`ed strategies — Ch. 98), SystemCallFilter (the process installs its own with TSYNC),
+# ProtectKernelLogs/ProtectClock (ptp4l needs them — a separate unit), DeviceAllow (VFIO: /dev/vfio/* must be allowed if the role owns a device)
+
+[Install]
+WantedBy=trading.target
+```
+
+The pieces, and what each buys:
+
+- **`Type=notify` + `READY=1` after the warm-up and the gate.** A `simple` unit is "started" when `exec` returns — long before the segments are mapped, the book is warm (Ch. 60) and Appendix M's checks have passed. With `Type=notify`, `After=`-ordered dependants (the strategy waits for the feed handler; the gateway for the risk gate) start only when the process says so, and `TimeoutStartSec` turns a warm-up that hangs into a failed start with a log line instead of a silent cold process. `sd_notify` is one datagram; the whole protocol fits in twenty lines, no `libsystemd` needed:
+
+```cpp
+// sdnotify.cpp — READY=1 only after warm-up and the readiness checks; WATCHDOG=1 from the supervisor loop, no libsystemd.
+// Build: g++ -O2 -std=c++20 sdnotify.cpp -o sdnotify
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+static bool sd_notify(const char* state) {                 // one datagram on $NOTIFY_SOCKET; Type=notify units block on READY=1
+    const char* path = std::getenv("NOTIFY_SOCKET"); if (!path) return false;
+    int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0); if (fd < 0) return false;
+    sockaddr_un a{}; a.sun_family = AF_UNIX; std::strncpy(a.sun_path, path, sizeof a.sun_path - 1);
+    if (path[0] == '@') a.sun_path[0] = '\0';               // abstract namespace
+    bool ok = sendto(fd, state, std::strlen(state), 0, reinterpret_cast<sockaddr*>(&a), sizeof a) >= 0;
+    close(fd); return ok;
+}
+int main() {
+    // ... map and pre-fault segments (Ch. 34), pin and warm hot threads (Ch. 60), run the §C.5 checks, drop capabilities (Ch. 97) ...
+    sd_notify("STATUS=warming\n");
+    bool warm = true;                                         // the warm-up and the readiness gate (Appendix M) decide this
+    if (!warm) { sd_notify("STATUS=warm-up failed\n"); return 1; }
+    sd_notify("READY=1\nSTATUS=armed\n");                      // systemd now starts After= dependants and begins WatchdogSec= accounting
+    for (int i = 0; i < 3; ++i) { sd_notify("WATCHDOG=1\n"); usleep(100000); }   // from the supervisor loop at < WatchdogSec/2
+}
+```
+
+  The `WATCHDOG=1` datagram is sent by the **supervisor thread on a housekeeping core** (§99.4.3's loop, which already reads the hot threads' heartbeats from shared memory), never by a hot thread — the hot thread's liveness is proven by its heartbeat word, the process's by the datagram, and `WatchdogSec=2` makes systemd the supervisor of last resort (`SIGABRT`, a core — Ch. 103 — and a restart).
+- **Capabilities, named.** `AmbientCapabilities=` grants exactly what setup needs to an *unprivileged* user: `CAP_SYS_NICE` (`SCHED_FIFO`, `sched_setaffinity` onto isolated cores, `mbind`), `CAP_IPC_LOCK` (`mlockall` beyond `LimitMEMLOCK` — kept anyway for VFIO's `MAP_DMA` accounting), `CAP_NET_RAW` (`AF_PACKET`, raw sockets, `SO_BINDTODEVICE`), `CAP_NET_ADMIN` (`ethtool` flow steering — Ch. 74, multicast on a specific interface — Ch. 71). The process then **drops** them after setup (Ch. 97 §97.4.6: `capset` to the empty set before the hot threads are spawned, `PR_CAP_AMBIENT_CLEAR_ALL`), which the bounding set above makes irreversible. `CAP_SYS_PTRACE` is in the bounding set only so a forensics helper spawned by the supervisor can attach (Ch. 103) — never ambient. What is *not* here is as deliberate: no `CAP_SYS_RAWIO` (`resourceN`/`/dev/mem` — Ch. 84 says VFIO instead), no `CAP_SYS_ADMIN` (the knobs are set by the boot units — next bullet), no `CAP_BPF`/`CAP_PERFMON` (the observability sidecar's, Ch. 97 §97.4.6).
+- **Unit ordering: the substrate first.** `hugepages.service` (reserve per node — Ch. 17), `nic-bind.service` (`driverctl` the bypass NIC to `vfio-pci`, pin the kernel NIC's vectors — Ch. 84 §84.4.1, Ch. 54), `prefetch-msr.service` (the per-core `wrmsr` — Ch. 12 §12.4.3, signed and early so lockdown allows it), `irq-affinity.service`, `resctrl.service` (Ch. 56), `ptp4l`/`phc2sys` (Ch. 75 — the clock must be *servoed* before `READY`, which the Appendix M.3 gate checks) — each a `oneshot` with `RemainAfterExit=yes`, ordered with `After=`/`Requires=`, so a missing piece fails the trading unit instead of leaving it to discover a cold box at the open. `systemd-analyze critical-chain trading@strategy-3.service` prints the resulting dependency path with timings.
+- **Boot-to-ready as a number.** A trading host that reboots intraday (a kernel panic, a forced restart — Ch. 99 §99.4.4's warm restart assumes the *host* stayed up) has a budget from power-on to `armed`: firmware POST (30–90 s on a dual-socket server — the part you cannot shorten except by `kexec`, which skips it entirely: `kexec -l` the same kernel at boot, `systemctl kexec` for a software reboot in ~5 s instead of ~2 min, signed kernel only under lockdown), kernel + initramfs (early microcode — Ch. 6 §6.4.5, the IOMMU, `isolcpus`), the substrate units above (hugepage reservation of 64 GiB ≈ 2 s; NIC bind + FLR ≈ 1 s; PTP servo convergence ≈ 30–60 s — the long pole), then the unit's own warm-up (Ch. 60 — segment pre-fault, book rebuild from the snapshot, Ch. 99 §99.4.7, predictor warming) and Appendix M's gate. `systemd-analyze blame` and `critical-chain` attribute each second; the Appendix M.5 re-arm window says whether the sum fits before the next session. Measure it on a lab box after every release — it is a latency number like any other, with a budget.
+- **Live patching: not during the session.** `kpatch`/`livepatch` replace a kernel function by rewriting its entry with `ftrace`'s `text_poke`, which sends an **IPI to every CPU** (the `CAL` row — Ch. 59), and the consistency model stalls tasks at kernel entry until each has transitioned — a few µs on the hot core per patch, and a scheduling hazard on a core that never enters the kernel (the transition never completes until it does; `klp_transition` falls back to signalling the task, Ch. 52 §52.4.3). The same applies to a `systemctl daemon-reexec`, a `modprobe` of anything that patches text, and `perf`'s own `text_poke` for uprobes (Ch. 78). All of it is a maintenance-window event; the in-session rule is that the kernel's text does not change.
+
+The unit, the boot units, the release fingerprint they are checked against and the kernel's version table (Appendix H.7 — which kernel first carried each feature this chapter and the book depend on) are one artefact (Appendix C.6); Appendix M is the gate that runs on top of it every trading day.
+
 ## 99.5 Pitfalls & anti-patterns: shared fate, cascading restarts
 
 - **Shared fate through a back door.** The whole point is isolation, but a shared resource silently re-couples the fault domains: a shared lock (cross-process mutex — Ch. 41) one process can hold while dying (leaving it locked), a shared disk a core dump floods (Ch. 103 §103.4.4), a shared core the dead process's restart-storm steals (Ch. 54), or shared memory a writer corrupts (§99.4.2). Audit for *every* shared resource and ensure one process's failure can't stall or corrupt another through it. Isolation you didn't verify is isolation you don't have.
@@ -343,6 +438,8 @@ The run that produced those numbers found the writer's last record with **all se
 - **Restart that's up-but-cold.** Declaring recovery done when the process is *alive* rather than *warm-and-correct* (Ch. 60, §99.3). The first ticks after a cold restart are slow — measure warm-and-live, not process-alive.
 - **Heartbeat that only catches exits.** Relying on `SIGCHLD` alone misses *hangs* (a live-but-stuck process). Use heartbeats to catch the hang (§99.4.3).
 - **Raw pointers in shared memory.** Segments map at different addresses per process; raw pointers stored in shared memory are garbage in another process (Ch. 34, 98). Use offsets (§99.4.1).
+- **A `Type=simple` unit "started" cold, or a hand-crafted restart script.** `exec` returned, so systemd started the dependants and the gate thought the role was up — while the segments were still faulting in and the book was empty. `Type=notify`, `READY=1` after warm-up and the gate, `TimeoutStartSec` as the alarm, `WatchdogSec` as the backstop, and the substrate units as `Requires=` (§99.4.9).
+- **Live-patching the kernel (or `perf`-probing it) in the session.** A `kpatch`/`livepatch` apply, a `text_poke` for a uprobe, a module load — each is an IPI to the hot core and a transition that may stall a syscall-free task indefinitely (§99.4.9). Maintenance windows only; the in-session kernel text is immutable.
 - **Core dump stalls the survivors.** A synchronous, huge, on-the-hot-disk core dump that freezes the box — and a kill-switch that waits for `SIGCHLD`, i.e. for the dump to finish. Make dumping small, bounded and off-path, and trigger the kill-switch from the fault handler (Ch. 103 §103.4.3–§103.4.4).
 
 ## 99.6 Exercises & checklist

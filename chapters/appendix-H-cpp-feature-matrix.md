@@ -120,14 +120,45 @@ The pattern that makes all of the above portable across the toolchain spread.
   The hot-path code writes `app::expected<Price, ParseError>` and never sees the version question; the shim absorbs it. Do the same for `flat_map`, `print`, `bit_cast`, and `span`. This is the concrete mechanism behind the Preface's convention of showing the C++17/20 fallback where the target toolchain lacks the feature.
 - **Compiler-mode flags.** Selecting the standard: GCC/Clang `-std=c++23` (or `-std=c++2b` on slightly older releases), `-std=c++26`/`-std=c++2c` for the draft; libc++ additionally needs `-stdlib=libc++`. See Appendix D.4 for the `-std=`/`-stdlib=` flag entry.
 
-## H.7 References
+## H.7 Linux kernel feature availability — the version table the book depends on
+
+The C++ matrix above has a kernel twin: every "since kernel *x.y*" scattered through Parts VII–XIII, in one place, so that choosing a kernel — or reading a distro's backport list — is a lookup rather than a grep. The columns: the mainline version that first carried the feature; how to check it on the running kernel; and the chapter that uses it. Distro kernels carry backports (RHEL 9's 5.14 has io_uring and AF_XDP features from well beyond 5.14; Ubuntu's HWE kernels track mainline within months), so the *check* column is the authority, not the version.
+
+| Feature | Mainline | How to check | Used by |
+|---|---|---|---|
+| `io_uring` (base; `IORING_SETUP_SQPOLL`, registered buffers/files) | 5.1 (SQPOLL/registration 5.1–5.6) | `io_uring_setup` succeeds; `liburing`'s `io_uring_probe` lists opcodes | Ch. 63 |
+| `io_uring` `IORING_SETUP_IOPOLL`, multishot `recv`/`accept`, `IORING_SETUP_SINGLE_ISSUER`/`DEFER_TASKRUN`, zero-copy send (`SEND_ZC`), `IORING_OP_SENDMSG_ZC`, NAPI busy-poll | 5.1 / 5.19–6.0 / 6.1 / 6.0 / 6.1 / 6.9 | `io_uring_probe`; `IORING_FEAT_*` flags from `io_uring_setup` | Ch. 63, 64 |
+| `AF_XDP` (`XDP_ZEROCOPY`, need-wakeup, multi-buffer) | 4.18 (ZC 4.20; need-wakeup 5.4; multi-buffer 6.6) | `bpftool feature`; `ethtool -k` / driver `xdp` support; `ip link set … xdp` | Ch. 78 |
+| eBPF CO-RE / BTF, `bpftrace`, fentry/fexit, kfuncs, BPF LSM | 5.2–5.5 / 5.7 / 6.x | `/sys/kernel/btf/vmlinux` exists; `bpftool btf dump`; `bpftrace --info` | Ch. 78, 97 |
+| `MSG_ZEROCOPY` (TCP; UDP 5.0), `TCP_ZEROCOPY_RECEIVE`, devmem TCP (`SO_DEVMEM_*`) | 4.14 / 4.18 / 6.12 | `setsockopt` success; `getsockopt(TCP_ZEROCOPY_RECEIVE)` | Ch. 64 |
+| `SO_BUSY_POLL`/`SO_PREFER_BUSY_POLL`/`SO_BUSY_POLL_BUDGET`; per-NAPI busy-poll (`netdev` genetlink, epoll-based NAPI busy poll) | 3.11 / 5.11 / 6.x (6.12+) | `sysctl net.core.busy_poll`; `ynl`/`netdev-genl` tools | Ch. 61, 62 |
+| `SO_TXTIME` / `etf` qdisc, `SOF_TIMESTAMPING_*` (hardware RX/TX, `TX_SCHED`), PHC `PTP_SYS_OFFSET_PRECISE`/`PTP_SYS_OFFSET_EXTENDED` | 4.19 / 3.17+ / 4.10, 5.0 | `ethtool -T <if>`; `testptp -c` | Ch. 72, 75, 76 |
+| `MADV_POPULATE_READ`/`WRITE`; `MADV_COLLAPSE`; `MCL_ONFAULT`; `memfd_create` + `MFD_HUGETLB`; `MREMAP_DONTUNMAP`; `userfaultfd` (unprivileged sysctl) | 5.14 / 6.1 / 4.4 / 3.17 + 4.14 / 5.7 / 4.3 (sysctl 5.11) | `madvise` returns 0 not `EINVAL`; `/proc/sys/vm/unprivileged_userfaultfd` | Ch. 34 §34.4.3 |
+| Transparent huge pages: `khugepaged` `max_ptes_none` controls; multi-size THP (mTHP) | 2.6.38 / 6.8 | `/sys/kernel/mm/transparent_hugepage/hugepages-*/` | Ch. 17 |
+| `isolcpus=managed_irq`; cgroup v2 `cpuset.cpus.partition=isolated`; `nohz_full` on isolated partitions at runtime | 5.6 / 5.x (6.3 for `isolated` semantics) / 6.14+ | `cat /sys/devices/system/cpu/isolated`; `cpuset.cpus.partition` reads `isolated` | Ch. 57 |
+| EEVDF fair scheduler; `sched_setattr` slice requests; `PREEMPT_DYNAMIC`; `PREEMPT_RT` in mainline; `PREEMPT_LAZY`; fair deadline server replacing the RT throttle | 6.6 / 6.6 / 5.12 / 6.12 / 6.13 / 6.12 | `/sys/kernel/debug/sched/{base_slice_ns,preempt,fair_server/}`; `uname -v` for `PREEMPT_RT` | Ch. 57 |
+| `SCHED_DEADLINE` (`SCHED_FLAG_RECLAIM`/GRUB, `HRTICK_DL`) | 3.14 (4.13; 5.x) | `sched_setattr` succeeds; `features` lists `HRTICK_DL` | Ch. 57 §57.2.2 |
+| `rtla` (`osnoise`/`timerlat`/`hwnoise`) tracers | 5.14 (hwnoise 6.2) | `rtla --help`; `/sys/kernel/tracing/available_tracers` lists `osnoise` | Ch. 59 |
+| Intel RDT `resctrl` (CAT/MBA/CMT/MBM; AMD QoS 5.x) | 4.10 (MBA 4.12) | `mount -t resctrl`; `/sys/fs/resctrl/info/` | Ch. 56 |
+| PM QoS `/dev/cpu_dma_latency`; per-CPU `pm_qos_resume_latency_us`; `intel_uncore_frequency` sysfs | 2.6.25 / 4.x / 5.6 | the files exist | Ch. 58 |
+| VFIO (`vfio-pci`, Type1 IOMMU, `enable_unsafe_noiommu_mode`); IOMMUFD backend; `driverctl` | 3.6 / 4.5 / 6.2 / userspace | `/dev/vfio/vfio`; `/sys/kernel/iommu_groups/` | Ch. 84 |
+| seccomp `SECCOMP_FILTER_FLAG_TSYNC` / `SPEC_ALLOW` / user notification; `spec_store_bypass_disable=prctl` default | 3.17 / 4.17 / 5.0 / 5.16 | `/sys/devices/system/cpu/vulnerabilities/spec_store_bypass` text | Ch. 97 §97.4.6, §97.4.9 |
+| Kernel lockdown LSM; `msr.allow_writes`; `vulnerabilities/old_microcode`; late microcode load refusal for feature-changing revisions | 5.4 / 5.9 / 6.11 / 6.6 | `/sys/kernel/security/lockdown`; `dmesg | grep msr` | Ch. 6 §6.4.5, Ch. 12 §12.4.3, Ch. 97 §97.4.9 |
+| `kexec`/`kexec_file_load` (signed); `systemctl kexec` | 2.6.13 / 3.17 | `/sys/kernel/kexec_loaded` | Ch. 99 §99.4.9 |
+| Memory tiering (`memory_tiers`), `numa_balancing=2`, CXL Type 3 as a NUMA node | 6.1 / 6.1 / 5.19+ | `/sys/devices/virtual/memory_tiering/`; `numactl -H` | Ch. 9 §9.2.5, Ch. 18 §18.2.4 |
+| `MSG_ZEROCOPY` for UDP, `SO_INCOMING_NAPI_ID`, `SO_INCOMING_CPU` | 5.0 / 4.12 / 4.4 | `getsockopt` | Ch. 61, 74 |
+| `perf` PMU: `perf c2c`, `perf mem` with data-source, top-down (`-M TopdownL1`), uncore `imc` events, `perf stat --interval`; Intel PT decode | 4.2 / 4.x / 5.x / 4.x / 3.x / 4.1 | `perf list`; `ls /sys/bus/event_source/devices/` | Ch. 2, 9, 42, 108 |
+
+**Choosing the kernel.** The book's reference kernel is the current LTS (6.18 — Appendix L.3); the features above make the practical floor **6.6** (EEVDF, `MADV_COLLAPSE`, `rtla`, multi-buffer AF_XDP, `io_uring` single-issuer) and the comfortable floor **6.12** (mainline `PREEMPT_RT`, the fair deadline server, devmem TCP). Four reasonable choices: (1) the **distro LTS kernel** (RHEL 9/10, Ubuntu LTS + HWE) — slowest to carry features, best-tested with the vendor NIC drivers (`ice`, `mlx5`, Onload/`sfc`) and what the NIC vendors certify against; (2) the **distro's RT kernel** (`kernel-rt`, Ubuntu `linux-realtime`) — only if Ch. 57 §57.4.3's measurement says the box blocks or takes IRQs on working cores; (3) a **mainline LTS built in-house** with the config the book assumes (`NO_HZ_FULL`, `RCU_NOCB_CPU`, `PREEMPT_DYNAMIC`, `SCHED_HRTICK`, `HZ_1000` or `HZ_250` — a deliberate choice, Ch. 57 §57.2.2 — `TRANSPARENT_HUGEPAGE_MADVISE`, no `DEBUG_*`, lockdown as policy) — the most features, the most ownership, signed and reproducible (Ch. 28), and the one that needs the vendor drivers rebuilt (DKMS or in-tree) and re-qualified; (4) a **vendor-tuned distribution** (the exchanges' and some NIC vendors' recommended images) — rarely worth the lock-in. Whatever the choice: one kernel per fleet, pinned in the release, re-qualified by Appendix M.6 and Ch. 57's `cyclictest` after every change, never updated in place by a package manager's timer.
+
+## H.8 References
 
 - **cppreference** — the *C++ compiler support* and *C++ feature-test macros* pages: the authoritative, continuously-updated matrix this appendix summarizes. Check these for your exact toolchain before relying on any row above.
 - The **libstdc++** ("Implementation Status → C++ 2023/2026") and **libc++** ("Implementation Status") pages, and the GCC/Clang release notes — the library-vs-language split (H.1) is documented there.
 - The **WG21 papers** cited per row (P0323 `expected`, P0122 `span`, P0009 `mdspan`, P0429/P1222 `flat_map`/`flat_set`, P2093 `print`, P0645 `format`, P2300 `std::execution`, P0553/P0556 `<bit>`, P0476 `bit_cast`, P1272 `byteswap`, P0543 saturating, P0067 `to_chars`, P1007 `assume_aligned`, P2590 `start_lifetime_as`, P1928 `simd`, P0843 `inplace_vector`, P0154 interference sizes).
 - The chapters that use each feature: Ch. 4, 10, 14, 21–26, 32, 35–42, 44, 49–50, 68, 94–97.
 
-## H.8 Additional Reading
+## H.9 Additional Reading
 
 - **Appendix D** (Compiler Flag Reference) — the `-std=`/`-stdlib=` flags (D.4) that select these standards and libraries.
 - **Part XII** (Ch. 90 §90.4.5, Ch. 93 §93.4.3) and **Appendix B** (B.3) — where a feature's *absence* (or a whole missing capability) is an argument for another language; and how `constexpr`, `std::expected`, coroutines and `bit_cast`-style punning compare with their Rust/Zig counterparts (B.1–B.2).
