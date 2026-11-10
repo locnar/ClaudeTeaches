@@ -37,8 +37,8 @@ What it does, in order:
      Part header (copied from chapter N unless --part is given), the Prerequisites/Leads-into block,
      the §1–§8 section headings and a teaser pointing at the (moved) chapter N+2; inserts a matching
      README outline block after chapter N's block.
-  6. Appends an ("insert", N) step to STEPS in tools/review/stale_crossrefs.py so the stale-reference
-     heuristic keeps mapping pre-Phase-3 numbers through this insertion.
+  6. Appends an ("insert", N) step to STEPS in tools/review/renumber_history.py, the record that lets
+     `renumber_history.py when FILE NEEDLE N…` date any number in the book and map it to today's.
   7. Prints a per-file change summary and the list of suspicious lines, then `git diff --stat`.
 
   --new-part (with --part): the inserted chapter OPENS A NEW PART. The Part's roman numeral R is read
@@ -51,8 +51,9 @@ What it does, in order:
   Every shifted prose line is printed so the wording can be checked by hand.
 
 After running: write the chapter, fill the README outline, rewrite chapter N's teaser and the new
-chapter's Prerequisites, update CLAUDE.md's counts, then run tools/review/sweep.py and
-tools/review/stale_crossrefs.py.
+chapter's Prerequisites, update CLAUDE.md's counts, then run the three checks:
+tools/review/sweep.py (structure), tools/review/check_refs.py (every reference resolves) and
+tools/review/check_hints.py (it resolves to the right topic). All three must exit 0.
 """
 import argparse
 import os
@@ -575,18 +576,18 @@ TODO
             rlines[end:end] = block
             open(rpath, "w", encoding="utf-8").write("\n".join(rlines))
 
-    # 5. stale_crossrefs.py step chain
-    spath = os.path.join(root, "tools/review/stale_crossrefs.py")
+    # 5. renumber_history.py step chain
+    spath = os.path.join(root, "tools/review/renumber_history.py")
     if os.path.exists(spath):
         stext = open(spath, encoding="utf-8").read()
         marker = "    # INSERT_STEPS_END"
         if marker in stext:
             stext = stext.replace(marker, f'    ("insert", {N}),  # Ch. {k} {args.slug}\n{marker}')
-            print(f"  stale_crossrefs.py: appended ('insert', {N}) step")
+            print(f"  renumber_history.py: appended ('insert', {N}) step")
             if not args.dry_run:
                 open(spath, "w", encoding="utf-8").write(stext)
         else:
-            print("  WARNING: stale_crossrefs.py has no INSERT_STEPS_END marker; add the step by hand")
+            print("  WARNING: renumber_history.py has no INSERT_STEPS_END marker; add the step by hand")
 
     # 6. summary
     print(f"\n{R.changed} line(s) rewritten in total.")

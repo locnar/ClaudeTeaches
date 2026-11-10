@@ -65,7 +65,7 @@ The threading/atomics and async surface (Part VI).
 |---|---|---|---|---|---|
 | `std::atomic_ref` (Ch. 41 §41.4.3, Ch. 46, Ch. 67 — atomic access to plain wire/shm fields; same `mov` as the plain read) | P0019 | libstdc++ 10 | libc++ 19 (late) | `__cpp_lib_atomic_ref >= 201806` | atomic ops on a `std::atomic*` view, or compiler atomics builtins |
 | `std::jthread` / `std::stop_token` (Ch. 42) | P0660 | libstdc++ 10 | libc++ 20 (18–19 only with `-fexperimental-library`) | `__cpp_lib_jthread >= 201911` | `std::thread` + manual join + a `std::atomic<bool>` stop flag |
-| `std::barrier` / `std::latch` (Ch. 41) | P1135 | libstdc++ 11 | libc++ 11 | `__cpp_lib_barrier`, `__cpp_lib_latch` | condition-variable + counter |
+| `std::barrier` / `std::latch` (Ch. 42) | P1135 | libstdc++ 11 | libc++ 11 | `__cpp_lib_barrier`, `__cpp_lib_latch` | condition-variable + counter |
 | `std::hardware_destructive_interference_size` (Ch. 44) | P0154 | libstdc++ 12 (`-Winterference-size` warns when it leaks into an ABI) | libc++ 19 (macro only from 19) | `__cpp_lib_hardware_interference_size >= 201703` | `constexpr std::size_t kLine = 64;` — and note the value is a *tuning default*, not a hardware query: 64 on GCC x86-64, **256** on GCC AArch64 (Appendix A.3) |
 | `std::atomic<T>::wait` / `notify_one` / `notify_all` (Ch. 41 §41.4.3, Ch. 43 — measured: ≈3.4 µs one-way wake vs ≈300 ns busy-poll on the VM) | P1135 | libstdc++ 11 | libc++ 11 | `__cpp_lib_atomic_wait >= 201907` | spin with `pause` then `futex(2)` (Ch. 43), or a condition variable |
 | `std::execution` — senders/receivers (Ch. 52) | P2300 | not in libstdc++ yet | not in libc++ yet | `__cpp_lib_senders` (when shipped) | the **stdexec** reference implementation (NVIDIA), or a hand-rolled executor |

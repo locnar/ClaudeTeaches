@@ -238,7 +238,7 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
    sysctl net.ipv4.igmp_max_memberships net.ipv4.conf.eth0.rp_filter   # 20 by default (the 21st join fails ENOBUFS); strict rp_filter drops the feed
    # --- network health & drop forensics (Ch. 115): which LAYER dropped it
    ethtool -S eth0 | grep -iE 'missed|out_of_buffer|nodesc'          # host ring full (poll too slow)        — layer 2b
-   ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 85)
+   ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 87)
    ethtool -S eth0 | grep -iE 'crc|symbol|fec|pause'                 # link/PHY/FEC and pause frames         — layer 1 / fabric
    awk '{print NR-1, strtonum("0x"$1), strtonum("0x"$2), strtonum("0x"$3)}' /proc/net/softnet_stat   # cpu processed dropped time_squeeze (NAPI, layer 3)
    nstat -az TcpExt:TCPTimeouts Tcp:RetransSegs TcpExt:TCPSpuriousRTOs   # an RTO on the order session = a 200 ms+ stall (Ch. 69)

@@ -332,9 +332,9 @@ A spike that has been attributed is still not finished. Two hand-offs close it:
 3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3, ch. 33 "Intel® Processor Trace" (packets, ToPA, PTWRITE); Vol. 3 Sec. 18.17 (invariant TSC).
 4. Linux man pages: `clock_gettime(2)` (`CLOCK_MONOTONIC`, `CLOCK_BOOTTIME`, `CLOCK_REALTIME`), `dmesg(1)` (`--time-format`), `journalctl(1)` (`-o short-monotonic`, `--since=@`), `proc(5)` (`/proc/interrupts`, `/proc/softirqs`, `/proc/vmstat`).
 5. Linux `Documentation/driver-api/ptp.rst` — `PTP_SYS_OFFSET_PRECISE` and cross-timestamping (Ch. 78).
-6. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — Ch. 2 "Methodologies" (the USE and drill-down methods this chapter's loop specialises), Ch. 15–16 (`perf`, ftrace).
+6. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — ch. 2 "Methodologies" (the USE and drill-down methods this chapter's loop specialises), ch. 13–14 (`perf`, ftrace).
 7. Corbet, J. "Deferred user-space stack unwinding" and related LWN coverage of perf's overwrite/snapshot modes.
-8. Jain, R. *The Art of Computer Systems Performance Analysis*, Wiley 1991 — Ch. 2 "Common Mistakes" (comparing unconverted measurements).
+8. Jain, R. *The Art of Computer Systems Performance Analysis*, Wiley 1991 — ch. 2 "Common Mistakes" (comparing unconverted measurements).
 
 ## 113.8 Additional Reading
 

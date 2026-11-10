@@ -340,12 +340,12 @@ The `std::terminate` path (an uncaught exception, a `noexcept` violation, `std::
 
 ## 108.8 Additional Reading
 
-- Kerrisk, M. *The Linux Programming Interface*, No Starch Press 2010 — Ch. 24–27 (signals: fundamentals, handlers, advanced features — `sigaltstack`, `SA_SIGINFO`, the realtime semantics) and Ch. 47 (resource limits).
+- Kerrisk, M. *The Linux Programming Interface*, No Starch Press 2010 — ch. 20–22 (signals: fundamentals, handlers, advanced features — `sigaltstack`, `SA_SIGINFO`, the realtime semantics) and ch. 36 (resource limits).
 - Drepper, U. "Signal handling in glibc" and the glibc wiki page *Async-signal-safe functions*.
-- Gregg, B. *Systems Performance*, 2nd ed. — Ch. 15 "perf" and the discussion of frame pointers vs DWARF for stack walking in production.
+- Gregg, B. *Systems Performance*, 2nd ed. — ch. 13 "perf" and the discussion of frame pointers vs DWARF for stack walking in production.
 - Poimboeuf, J. "SFrame-based stack unwinding", LWN.net 2023–2025 — the kernel's path to unwinding user stacks without frame pointers or DWARF (Ch. 27 §27.4.4).
 - Chromium project, *Crashpad Overview Design* — why the crash handler lives out of process.
-- Love, R. *Linux System Programming*, 2nd ed., O'Reilly 2013 — Ch. 12 "Signals".
+- Love, R. *Linux System Programming*, 2nd ed., O'Reilly 2013 — ch. 10 "Signals".
 
 ---
 

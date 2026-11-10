@@ -268,6 +268,10 @@ STRONG_AFTER = re.compile(r"(?:$|[)\];:,*|'’\"”}]|\.(?:$|[\s)*'’\"”])|\s
 IMPLICIT_ITEM = re.compile(r"(?:\s?§[\d.]+)?\s\([^()]{1,200}\)(?:,\s(?:and\s)?|\s(?:and|&)\s)(\d{1,3})(?=\s\(|[),;|]|\s\||,\s\d|–\d)")
 EXT_STRONG = r"\d(?:st|nd|rd|th)\sed\.\)?|Vol\.\s?\d+[A-Z]?|[Mm]anual|(?:C\d\d|C\+\+\d\d|ISO\s[^,;]{0,20})\sstandard|Supplement|Handbook"
 EXT_CITE = re.compile(r"((?<![*:])\*|\*\*|" + EXT_STRONG + r")[,;:]?\s((?:Chs?\.|Chapters?)\s?\d+(?:[–-]\d+)?|§\s?\d+\.\d+(?:\.\d+)*)")
+# "… Wiley 1991 — Ch. 2", "2nd ed. — Ch. 13", and a chapter number followed by a quoted chapter title: Ch. 2 "Methodologies"
+EXT_CITE_STRONG = re.compile(r"(?:(?:(?:19|20)\d{2}|\d(?:st|nd|rd|th)\sed\.|Press|Wiley|Reilly|Wesley|Kaufmann|Springer|Pearson)\)?,?\s(?:[—–-]\s)?(?=Ch))"
+                             r"((?:Chs?\.|Chapters?)\s\d+(?:[–-]\d+)?)")
+EXT_CITE_QUOTED = re.compile(r"((?:Chs?\.|Chapters?)\s\d+(?:[–-]\d+)?)(?=\s[\"“])")   # only meaningful in a References section
 PART_RANGE_PAREN = re.compile(r"\*{0,2}\s\((?:Ch\.\s|Chapters\s)?(\d{1,3})\s?[–-]\s?(\d{1,3})\)")
 
 
@@ -385,6 +389,10 @@ def scan_line(line):
     for xm in EXT_CITE.finditer(line):
         if not xm.group(1).startswith("**"):
             refs.append(Ref("extcite", xm.group(2), None, None, xm.start(2), xm.end(2), xm.group(2), frozenset()))
+    for rx, fl in ((EXT_CITE_STRONG, "strong"), (EXT_CITE_QUOTED, "quoted")):
+        for xm in rx.finditer(line):
+            if not any(r.kind == "extcite" and r.start == xm.start(1) for r in refs):
+                refs.append(Ref("extcite", xm.group(1), None, None, xm.start(1), xm.end(1), xm.group(1), frozenset({fl})))
     # --- standalone § references
     for s in SEC.finditer(line):
         if any(a <= s.start() < b for a, b in taken):
@@ -562,7 +570,11 @@ def validate(ix, root):
             strong = re.search(r"(?:" + EXT_STRONG + r")[,;:]?\s$", before)
             num = re.search(r"\d+", r.a).group(0)
             ours = re.search(r"Ch(?:\.|apter)\s?%s\s\([^()]{0,80}$" % num, before)   # "Ch. 6 (*System Setup*, §6.2.3)"
-            if strong or (in_refs_section and not ours):
+            if "quoted" in r.flags:
+                if not in_refs_section:
+                    continue
+                ours = None
+            if strong or "strong" in r.flags or (in_refs_section and not ours):
                 add("ERROR", "ext-citation", label, i, inf,
                     f"'{r.a}' cites an external work in the book's own reference spelling — write it in lower case "
                     f"('ch. N', 'sec. N.M') so insert_chapter.py never renumbers it", line, r)
@@ -654,6 +666,7 @@ SELF_TEST = [
     ("Ch. 1 (first), 3 (third) and Ch. 2.", ["list-implicit"]),
     ("Intel SDM Vol. 3A §8.10.1 and the C11 standard §7.17; Smith, *A Book*, 2nd ed., Ch. 3.", ["ext-citation"] * 3),
     ("Intel SDM Vol. 3A sec. 8.10.1; Smith, *A Book*, 2nd ed., ch. 9; RFC 793 §3.7.", []),
+    ("- Jones, R. *Another Book*, Wiley 1991 — Ch. 2 \"Common Mistakes\"; the Ch. 3 \"keep it off the chain\" rule; IEEE 1588 — Ch. 3", ["ext-citation"]),
     ("the generic §N.3 block, and Ch. 12, 64 bytes wide", ["ch-missing"]),
 ]
 

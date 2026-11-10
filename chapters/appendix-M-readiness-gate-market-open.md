@@ -69,14 +69,14 @@ cat /sys/devices/system/cpu/vulnerabilities/* | sort -u        == the baseline m
 sudo rdmsr -p 0 0x34                                           == baseline SMI count (unchanged since last night's value: no SMI storm overnight — Ch. 6 §6.4.4)
 # --- cache partitioning (Ch. 58)
 cat /sys/fs/resctrl/hotpath/schemata; cat /sys/fs/resctrl/hotpath/cpus_list   == baseline CBM masks and hot cpus
-# --- NIC and PCIe (Ch. 75, 77, 85, 115)
+# --- NIC and PCIe (Ch. 75, 77, 87, 115)
 ethtool -g <feednic> | awk '/^Current/,0'                      == baseline ring sizes (RX 4096 ...)
 ethtool -c <feednic> | grep -E 'Adaptive|rx-usecs'              == Adaptive RX: off ; rx-usecs: 0
 ethtool -k <feednic> | grep -E 'generic-receive-offload|large-receive-offload'   == off / off
 ethtool -l <feednic> | awk '/^Current/,0' | grep Combined       == baseline queue count
 ethtool -a <feednic> | grep -E 'RX|TX'                          == off / off (flow control — Ch. 115 §115.2.3; on only by lossless-fabric design, Ch. 84)
 ethtool <feednic> | grep -E 'Speed|Duplex|Link detected'        == baseline speed, Full, yes
-cat /sys/bus/pci/devices/<nic bdf>/current_link_{speed,width}  == baseline (e.g. 16.0 GT/s PCIe, 16) — Ch. 85
+cat /sys/bus/pci/devices/<nic bdf>/current_link_{speed,width}  == baseline (e.g. 16.0 GT/s PCIe, 16) — Ch. 87
 cat /sys/bus/pci/devices/<nic bdf>/aer_dev_correctable | awk '{s+=$2} END{print s}'   == baseline (no overnight growth)
 cat /sys/class/net/<feednic>/carrier_changes                   == baseline (no overnight flaps)
 # --- hardware health (Ch. 114 §114.4.3)

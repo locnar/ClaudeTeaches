@@ -315,7 +315,7 @@ Three instructions and a store per stage, exactly as §99.3 predicted (GCC 13.3 
 5. European Commission. *Commission Delegated Regulation (EU) 2017/574 (MiFID II RTS 25)* — level of accuracy of business clocks (divergence from UTC and timestamp granularity by trading activity).
 6. IEEE Std 1588-2019, *Precision Clock Synchronization Protocol*; Linux `PTP_SYS_OFFSET_PRECISE` ioctl, `Documentation/driver-api/ptp.rst`.
 7. Linux man pages: `tshark(1)`, `join(1)`; *PCAP Next Generation (pcapng) Capture File Format*, IETF draft-ietf-opsawg-pcapng (interface description block, `if_tsresol`).
-8. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — Ch. 4 "Observability Tools" (tracing vs sampling, the cost of instrumentation).
+8. Gregg, B. *Systems Performance*, 2nd ed., Addison-Wesley 2020 — ch. 4 "Observability Tools" (tracing vs sampling, the cost of instrumentation).
 
 ## 99.9 Additional Reading
 

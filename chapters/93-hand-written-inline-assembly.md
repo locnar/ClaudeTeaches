@@ -296,7 +296,7 @@ Compiled at `-O2`, **both GCC 13.3 and Clang 18.1 produce a program that never t
 2. **Hoist or not.** Build `nonvolatile.cpp` with GCC and Clang; find the `rdtsc` in each `-S`; explain in one sentence why Clang's loop reads the same timestamp every iteration and GCC's does not — and why both are allowed.
 3. **Beat the compiler, fairly.** Take Ch. 70's `decode()` and write a NASM version; measure out-of-line vs out-of-line, then vs inlined, as §93.3 does. Then inline *your* instruction selection as an `asm` statement inside the C++ function with `"=r"` outputs and compare again.
 4. **A doorbell on the reference machine.** With a NIC or FPGA BAR scratch register (Ch. 87 §87.3 — never a live doorbell), measure `movdir64b` vs four `vmovdqa` to a write-combining mapping with `sfence`; count PCIe TLPs with the device's counters if it exposes them.
-5. **`rdpmc` per stage.** Using Ch. 120 §120.4.4's `perf_event_open` + `mmap` setup, replace the `rdtscp` stage stamps of Ch. 94 (tracing) with `rdpmc` core-cycle reads in one stage; compare the two distributions and the cost of the read itself.
+5. **`rdpmc` per stage.** Using Ch. 120 §120.4.4's `perf_event_open` + `mmap` setup, replace the `rdtscp` stage stamps of Ch. 99 (tracing) with `rdpmc` core-cycle reads in one stage; compare the two distributions and the cost of the read itself.
 
 Checklist for every `asm` statement in a review:
 

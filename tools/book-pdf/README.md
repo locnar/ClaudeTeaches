@@ -53,7 +53,7 @@ chapters/*.md ──► preprocess.py ──► build/book.md ──► pandoc (
 ```
 
 - **`preprocess.py`** concatenates the files in reading order (preface, Ch. 1–120,
-  Appendices A–L; discovered from the `chapters/` directory, not hard-coded) and fixes them up for LaTeX:
+  Appendices A–S; discovered from the `chapters/` directory, not hard-coded) and fixes them up for LaTeX:
   - emits each **Part divider once** (the source repeats the Part header in every file);
   - rewrites `# Chapter N — Title` → `# Title` and strips manual section numbers
     (`## 48.4 …` → `## …`) so **LaTeX auto-numbers** them — the numbers come out identical

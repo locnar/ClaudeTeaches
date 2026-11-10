@@ -1,0 +1,220 @@
+# Reviewed rows of tools/review/check_hints.py (file<TAB>reference<TAB>hint). Regenerate with --write-baseline
+# ONLY after reading every new MISMATCH row; a row here means "read by a person: the target is right".
+CLAUDE.md	§N.2	Mental model
+CLAUDE.md	§N.4	Techniques
+chapters/00-preface.md	Chapters 2	will be taught to measure first
+chapters/01-the-latency-mindset.md	Ch. 30	this book apply
+chapters/02-measure-first-profiling-pmu.md	Ch. 3	whole subject
+chapters/02-measure-first-profiling-pmu.md	Ch. 76	by source
+chapters/04-reading-the-machine-asm.md	Ch. 2	theme
+chapters/05-debugging-low-latency-optimized-code.md	Appendix L L.3	measured here on the usual VM
+chapters/05-debugging-low-latency-optimized-code.md	Ch. 103	as its own recorder
+chapters/06-system-setup-for-low-latency.md	Ch. 59	tutorials
+chapters/07-choosing-clocking-hot-path-cpu.md	Ch. 18	noisy neighbour
+chapters/09-dram-subsystem-below-l3.md	Ch. 33 §33.3	that does not fit in L2
+chapters/100-zero-overhead-application-telemetry.md	Ch. 98 §98.5	test
+chapters/101-secure-programming-low-latency.md	Ch. 4	elide
+chapters/102-hot-reload-live-reconfiguration.md	Appendix E	per read
+chapters/102-hot-reload-live-reconfiguration.md	Ch. 46	constraints
+chapters/102-hot-reload-live-reconfiguration.md	Ch. 47	read side
+chapters/103-process-topology-deterministic-state-machine.md	Appendix K	enable it
+chapters/103-process-topology-deterministic-state-machine.md	Ch. 38	each mutation
+chapters/104-pre-trade-risk-gate-kill-switch.md	Ch. 101 §101.4.3	imul + jo
+chapters/104-pre-trade-risk-gate-kill-switch.md	Ch. 103 §103.4.6	and unreplayable
+chapters/104-pre-trade-risk-gate-kill-switch.md	Ch. 105	shape
+chapters/105-idempotent-order-entry-order-state-recovery.md	Ch. 31	preallocated
+chapters/106-order-entry-gateway-session-layer.md	Ch. 39	vectorise the checksum loop at -O2
+chapters/107-quoting-engine-market-making-mechanics.md	Ch. 79 §79.3	TX stamp
+chapters/108-crash-handling-core-dumps-post-mortem.md	Ch. 100	scraped elsewhere
+chapters/108-crash-handling-core-dumps-post-mortem.md	Ch. 27 §27.4.4	btcost
+chapters/108-crash-handling-core-dumps-post-mortem.md	Ch. 27 §27.4.4	fpcost
+chapters/110-line-rate-capture-timing-faithful-replay.md	Ch. 55 §55.3	the oversleep on this VM
+chapters/111-sequencer-total-order-replicated-consumers.md	Ch. 103 §103.4.3	demoted
+chapters/111-sequencer-total-order-replicated-consumers.md	Ch. 49 §49.3	method
+chapters/111-sequencer-total-order-replicated-consumers.md	Ch. 72	machinery
+chapters/112-failover-without-split-brain-leases-fencing.md	Ch. 106 §106.3	method
+chapters/112-failover-without-split-brain-leases-fencing.md	Ch. 113	on every record, so the post-mortem
+chapters/112-failover-without-split-brain-leases-fencing.md	Ch. 30	its lease
+chapters/113-latency-spike-forensics-anomaly-triggered-diagnostics.md	Ch. 13	the shadow of the next message
+chapters/113-latency-spike-forensics-anomaly-triggered-diagnostics.md	Ch. 78 §78.3	a fresh pair every second from
+chapters/113-latency-spike-forensics-anomaly-triggered-diagnostics.md	Ch. 78 §78.4.1	pairs
+chapters/113-latency-spike-forensics-anomaly-triggered-diagnostics.md	Ch. 78 §78.5	breaks it, which is one of the fingerprints
+chapters/115-network-health-telemetry-drop-forensics.md	Ch. 64	precursor of 2b
+chapters/115-network-health-telemetry-drop-forensics.md	Ch. 69	TCPSpuriousRTOs, TCPLossProbes, TCPRcvQDrop
+chapters/115-network-health-telemetry-drop-forensics.md	Ch. 82 §82.5	statistics read zero and prove nothing
+chapters/116-testing-latency-critical-code.md	Appendix K K.9	DR runbook
+chapters/116-testing-latency-critical-code.md	Ch. 105	idempotency
+chapters/116-testing-latency-critical-code.md	Ch. 105 §105.2.3	the invariants DST asserts
+chapters/116-testing-latency-critical-code.md	Ch. 111 §111.3	failed it on the first case
+chapters/116-testing-latency-critical-code.md	Ch. 78	hold-over policy
+chapters/119-release-engineering-measuring-changes-in-production.md	Ch. 56	the deploy plan reserves a core per role for exactly this
+chapters/119-release-engineering-measuring-changes-in-production.md	Ch. 62 §62.4.1	mechanism
+chapters/12-software-prefetching-nontemporal-stores.md	Ch. 87 §87.4.1	release-store flag is exactly the bug
+chapters/120-production-profiling-end-to-end-case-study.md	Appendix C	than production
+chapters/120-production-profiling-end-to-end-case-study.md	Ch. 27	is enforced
+chapters/120-production-profiling-end-to-end-case-study.md	Ch. 40	primitives
+chapters/120-production-profiling-end-to-end-case-study.md	Chapter 1	thesis
+chapters/13-cpu-pipelines-and-execution.md	Ch. 10	same idea
+chapters/13-cpu-pipelines-and-execution.md	Ch. 4	warning
+chapters/15-branch-prediction-branchless.md	Ch. 1	The whole book's north-star
+chapters/15-branch-prediction-branchless.md	Ch. 14	elevated
+chapters/15-branch-prediction-branchless.md	Ch. 37	the limit case of this technique
+chapters/16-indirect-calls-virtual-dispatch.md	Ch. 10	come from
+chapters/16-indirect-calls-virtual-dispatch.md	§15.2.1	mono does it get, and why
+chapters/16-indirect-calls-virtual-dispatch.md	§16.4.3	variant+visitor
+chapters/17-virtual-memory-tlb-huge-pages.md	Appendix I	than whenever khugepaged gets to it
+chapters/17-virtual-memory-tlb-huge-pages.md	Ch. 31	mallopt
+chapters/18-numa-architecture.md	Ch. 6	discover it
+chapters/20-timekeeping-tsc-rdtsc-clocks.md	Ch. 3	and relate to amortizing over N
+chapters/21-compile-time-mechanics.md	Ch. 1	a simple runtime build would do
+chapters/22-template-metaprogramming-zero-cost.md	Ch. 16 §16.4.1	trick
+chapters/22-template-metaprogramming-zero-cost.md	Ch. 21	copy
+chapters/23-compile-time-protocol-decoders.md	Ch. 22 §22.4.4	extension
+chapters/23-compile-time-protocol-decoders.md	Ch. 70 §70.3	vs hand-written
+chapters/24-the-cost-of-abstractions.md	Appendix L	barrier
+chapters/24-the-cost-of-abstractions.md	Ch. 14	exist whether or not you throw
+chapters/24-the-cost-of-abstractions.md	Ch. 14	with -fno-exceptions/-fno-rtti if code size matters
+chapters/24-the-cost-of-abstractions.md	Ch. 27	Know the trade-offs
+chapters/25-cost-of-modern-idioms-strings-without-allocation.md	Appendix L L.3	VM-measured
+chapters/25-cost-of-modern-idioms-strings-without-allocation.md	Ch. 30	category of things that must
+chapters/25-cost-of-modern-idioms-strings-without-allocation.md	Ch. 98	and configuration
+chapters/27-build-toolchain-for-speed.md	Ch. 14 §14.3	measurement
+chapters/27-build-toolchain-for-speed.md	Ch. 5	and the post-mortem
+chapters/28-build-systems-build-time-hygiene-hermetic-toolchains.md	Appendix H	keeps the TU building on both
+chapters/28-build-systems-build-time-hygiene-hermetic-toolchains.md	Ch. 4	requirement that you read -O2
+chapters/29-static-analysis-performance-contracts.md	Ch. 40 §40.4.6	the chapters whose rules this one enforces
+chapters/30-memory-management-fundamentals.md	Ch. 1	north-star of this book
+chapters/32-hotpath-hostile-stl-cache-friendly-containers.md	Appendix L L.2	VM-measured
+chapters/32-hotpath-hostile-stl-cache-friendly-containers.md	Ch. 3	promise
+chapters/32-hotpath-hostile-stl-cache-friendly-containers.md	Ch. 41	each destruction atomically decrements
+chapters/32-hotpath-hostile-stl-cache-friendly-containers.md	§33.3	Its headline measurement
+chapters/33-limit-order-book-engineering.md	Appendix M	must treat it as "not trustworthy"
+chapters/33-limit-order-book-engineering.md	Ch. 72 §72.4.4	be backed out and attribution survives
+chapters/34-memory-mapping.md	Ch. 17	docs
+chapters/35-fixed-point-floating-point-arithmetic.md	Ch. 101	billion
+chapters/35-fixed-point-floating-point-arithmetic.md	Ch. 101	rescale
+chapters/37-bit-manipulation-integer-tricks.md	Ch. 45	ops
+chapters/38-fast-hashing-checksums-key-design.md	Appendix L	shape
+chapters/38-fast-hashing-checksums-key-design.md	Ch. 109 §109.4.2	be damaged
+chapters/39-simd-vectorization.md	Ch. 35	and FP-reassoc permission
+chapters/39-simd-vectorization.md	Ch. 35	then FP-reassoc
+chapters/41-cpp-memory-model-atomics.md	Ch. 44	the end
+chapters/42-multithreading-concurrency-foundations.md	Ch. 45	occasional
+chapters/43-spinlocks-backoff-contention-control.md	Ch. 54	holder gets descheduled by the OS
+chapters/44-false-sharing-thread-safety-anomalies.md	Ch. 70	ABI, or serialization
+chapters/45-lock-free-data-structures.md	Ch. 44	that dominate
+chapters/47-safe-memory-reclamation.md	Ch. 31	benign
+chapters/47-safe-memory-reclamation.md	Ch. 53	SMR
+chapters/48-the-disruptor-pattern.md	Ch. 30	in place
+chapters/48-the-disruptor-pattern.md	Ch. 43	deployment
+chapters/49-threading-topologies-hot-loop.md	Ch. 103 §103.2.1	figure
+chapters/49-threading-topologies-hot-loop.md	Ch. 59	layout
+chapters/51-coroutines-async-models.md	Ch. 30	ns 1.000 a malloc+free per coroutine
+chapters/52-std-execution-senders-receivers.md	Ch. 48	Hand-written inline
+chapters/53-concurrency-correctness-tooling.md	Ch. 41	trustworthy
+chapters/55-timers-deadlines-without-jitter.md	Ch. 59	layout
+chapters/57-smt-hyperthreading.md	Ch. 8	the resources a busy sibling steals
+chapters/58-cache-allocation-intel-rdt.md	Ch. 2	can't manage what you can't measure
+chapters/59-realtime-scheduling-kernel-tuning.md	Appendix S §S.2	µs with no spinner at all
+chapters/59-realtime-scheduling-kernel-tuning.md	Ch. 57	P-states/turbo fixed, SMIs minimized, HT handled
+chapters/59-realtime-scheduling-kernel-tuning.md	Ch. 57	handle HT
+chapters/61-hunting-residual-noise-isolated-cores.md	Ch. 54	hunt
+chapters/64-anatomy-linux-network-datapath.md	Ch. 54	waking a sleeper
+chapters/64-anatomy-linux-network-datapath.md	Ch. 61	bug
+chapters/64-anatomy-linux-network-datapath.md	Ch. 63 §63.3	the same row is ~5–6 µs
+chapters/65-io-uring-deep-dive.md	Ch. 31 §31.5	the CQE
+chapters/65-io-uring-deep-dive.md	Ch. 54	dream
+chapters/67-inter-process-communication.md	Ch. 34	slots
+chapters/67-inter-process-communication.md	Ch. 41	Cross-process memory ordering
+chapters/67-inter-process-communication.md	Ch. 41 §41.4.3	clean it up after a crash
+chapters/67-inter-process-communication.md	Ch. 54	no notification
+chapters/70-zero-copy-wire-market-data-decoding.md	Ch. 68	The hardest operational reality
+chapters/70-zero-copy-wire-market-data-decoding.md	Ch. 72	machinery
+chapters/70-zero-copy-wire-market-data-decoding.md	Ch. 72	subject
+chapters/71-branch-free-parsing-formatting.md	Ch. 23	technique
+chapters/71-branch-free-parsing-formatting.md	Ch. 70	verdict stands
+chapters/71-branch-free-parsing-formatting.md	Ch. 70 §70.3	method
+chapters/71-branch-free-parsing-formatting.md	Ch. 70 §70.3	own lesson
+chapters/71-branch-free-parsing-formatting.md	Ch. 70 §70.3	the baseline
+chapters/74-multicast-group-management-dark-feed.md	Ch. 70	problem
+chapters/77-flow-steering-receive-scaling.md	Ch. 76	measurement
+chapters/78-clock-synchronization-ptp.md	Ch. 120	breakdown
+chapters/79-precise-scheduled-transmission.md	Ch. 54	delayed it
+chapters/79-precise-scheduled-transmission.md	Ch. 54	tight, or the host was late
+chapters/80-network-fabric-switching.md	Appendix K K.2	handoff may or may not permit
+chapters/81-ebpf-bpftrace-xdp.md	Ch. 54	hunt
+chapters/82-kernel-bypass-userspace-networking.md	Ch. 75	APIs
+chapters/83-infiniband-verbs-rdma.md	Ch. 30	and made known to the NIC
+chapters/83-infiniband-verbs-rdma.md	Ch. 41	Memory ordering across RDMA
+chapters/83-infiniband-verbs-rdma.md	Ch. 84	Exercise 1 is this experiment
+chapters/84-lossless-ethernet-rdma-congestion.md	Ch. 120	counts, ECN marks, and RDMA retransmits
+chapters/84-lossless-ethernet-rdma-congestion.md	Ch. 90	Design for incast
+chapters/85-transport-beyond-tcp.md	Ch. 83	eRPC
+chapters/86-encrypted-web-protocol-venues-cloud.md	Appendix S	VMs
+chapters/86-encrypted-web-protocol-venues-cloud.md	Ch. 82 §82.4.2	to speak TLS to the venue
+chapters/86-encrypted-web-protocol-venues-cloud.md	Part XI	the boundary a cloud NIC's virtual function still crosses
+chapters/87-pcie-host-device-boundary.md	Ch. 41	Order the descriptor-then-doorbell write
+chapters/87-pcie-host-device-boundary.md	Ch.8	it to host mem
+chapters/87-pcie-host-device-boundary.md	Part XI	latency-critical work that can't afford the round-trip goes
+chapters/88-userspace-drivers-kernel-modules.md	Ch. 18 §18.5	descriptor write and every completion poll
+chapters/89-gpu-computing-cuda.md	Ch. 15	Kernels avoid warp divergence
+chapters/89-gpu-computing-cuda.md	Ch. 15	Warp divergence
+chapters/90-distributed-computing-mpi.md	Ch. 83	fast inter-node
+chapters/91-fpga-acceleration.md	Ch. 120	with sub-nanosecond precision
+chapters/91-fpga-acceleration.md	Ch. 75	output
+chapters/92-smartnics-dpus.md	Ch. 81	and telemetry
+chapters/92-smartnics-dpus.md	Ch. 81	its own cores, so housekeeping, telemetry
+chapters/93-hand-written-inline-assembly.md	Ch. 87 §87.4	movdir64b
+chapters/93-hand-written-inline-assembly.md	Ch. 87 §87.4	via asm vs the intrinsic
+chapters/94-rust-for-the-hot-path.md	Appendix B B.1	caution
+chapters/94-rust-for-the-hot-path.md	Appendix E	bare-metal figure is a quarter
+chapters/94-rust-for-the-hot-path.md	Ch. 45	C++
+chapters/95-language-interop-abi-boundaries.md	Ch. 27 §27.4.2	only the waist is exported
+chapters/95-language-interop-abi-boundaries.md	Ch. 65	the SDKs this chapter wraps
+chapters/96-managed-runtimes-measured.md	Appendix L L.3	bare metal. On the reference machine
+chapters/96-managed-runtimes-measured.md	Ch. 16	story
+chapters/96-managed-runtimes-measured.md	Ch. 61	hypervisor territory
+chapters/96-managed-runtimes-measured.md	Ch. 62	with runtime-specific tools
+chapters/96-managed-runtimes-measured.md	Ch. 95	and so P/Invoke needs no pinning
+chapters/97-choosing-a-language-per-latency-tier.md	Appendix L	with four additions
+chapters/97-choosing-a-language-per-latency-tier.md	Ch. 103	tier
+chapters/97-choosing-a-language-per-latency-tier.md	Ch. 32	observation
+chapters/97-choosing-a-language-per-latency-tier.md	Ch. 62	boxed book, not a Rust cost
+chapters/97-choosing-a-language-per-latency-tier.md	Ch. 96 §96.3	histogram
+chapters/97-choosing-a-language-per-latency-tier.md	§96.4.7	pricer reads at its own pace
+chapters/99-in-band-latency-tracing-budget-attribution.md	Ch. 11	that carries it pads to 128
+chapters/99-in-band-latency-tracing-budget-attribution.md	Ch. 70	the encoder
+chapters/99-in-band-latency-tracing-budget-attribution.md	§100.2.2	added back into an end-to-end number
+chapters/appendix-A-arm-graviton.md	Ch. 3	on ARM, but verify per-part. Measure
+chapters/appendix-B-beyond-cpp.md	Ch. 93	the measured treatment this appendix summarises
+chapters/appendix-C-system-tuning-checklist.md	Ch. 120	Re-verify after every change
+chapters/appendix-D-compiler-flag-reference.md	Ch. 14	Two-edged
+chapters/appendix-D-compiler-flag-reference.md	Ch. 27	lzcnt/tzcnt, etc
+chapters/appendix-D-compiler-flag-reference.md	Ch. 3	a captured/replayed session, Ch
+chapters/appendix-D-compiler-flag-reference.md	Ch. 3	a fact
+chapters/appendix-E-latency-numbers.md	Ch. 3	The meta-point
+chapters/appendix-F-glossary.md	Appendix J J.1	the thing you race to
+chapters/appendix-F-glossary.md	Ch. 108 §108.4.4	into a 60 MB, sub-second one
+chapters/appendix-F-glossary.md	Ch. 30	both forbidden on the hot path
+chapters/appendix-F-glossary.md	Ch. 35	and book layout
+chapters/appendix-G-annotated-bibliography.md	Ch. 3	promise
+chapters/appendix-G-annotated-bibliography.md	Ch. 38	sources
+chapters/appendix-G-annotated-bibliography.md	Ch. 8	multiprocessors. The "why" beneath Part II
+chapters/appendix-H-cpp-feature-matrix.md	Ch. 22	Deducing this
+chapters/appendix-H-cpp-feature-matrix.md	Ch. 39	mdspan
+chapters/appendix-H-cpp-feature-matrix.md	Ch. 94 §94.4.5	Part XII
+chapters/appendix-I-tooling-cookbook.md	Appendix A	C side of the waist, cross-compiled
+chapters/appendix-I-tooling-cookbook.md	Ch. 114	done # who stopped
+chapters/appendix-I-tooling-cookbook.md	Ch. 14	to fix
+chapters/appendix-I-tooling-cookbook.md	Ch. 2	Interpreting
+chapters/appendix-I-tooling-cookbook.md	Ch. 81	Interpreting
+chapters/appendix-L-benchmark-harness.md	Ch. 1 §1.3	caveat
+chapters/appendix-L-benchmark-harness.md	Ch. 3	rests on
+chapters/appendix-M-readiness-gate-market-open.md	Appendix E	range
+chapters/appendix-M-readiness-gate-market-open.md	Ch. 62	the first-message latency is within budget
+chapters/appendix-O-hot-path-anti-pattern-catalogue.md	Appendix B	top-down analysis
+chapters/appendix-P-attributes-builtins-ub-catalogue.md	Ch. 4	is on, at the shipping -O2
+chapters/appendix-Q-amd-zen-companion.md	Appendix C C.1	rows
+chapters/appendix-Q-amd-zen-companion.md	Ch. 39	no licence yes, licence levels 1/2
+chapters/appendix-Q-amd-zen-companion.md	Ch. 43	DWCAS note
+chapters/appendix-R-x86-generation-cheat-sheet.md	Ch. 8	the microarchitectural quantities tabulated

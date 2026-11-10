@@ -472,8 +472,8 @@ Code & content guidelines:
   it could be (current numbering: Ch. 6, 17, 20, 52, 57, 59, 62, 73, 84, 93, 109; Appendices A, C, L, M).
 
 ## Status / Workflow
-- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 114
-  chapters and appendices A–S — see Phases 2–3, the six 2026-11-09 insertions and the three 2026-11-10 insertions below).
+- Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 120
+  chapters and appendices A–S — see Phases 2–3, the six 2026-11-09 insertions and the four 2026-11-10 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
   **STATUS: COMPLETE — front matter (`00-preface.md`) + 120 chapters + 19 appendices (A–S);
