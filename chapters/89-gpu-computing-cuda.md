@@ -123,6 +123,8 @@ Hiding the transfer cost by overlapping it with compute (the key throughput tech
 
 ### 89.4.3 Where GPUs pay off (risk, pricing/Greeks, Monte-Carlo, backtesting, ML inference)
 
+*(Monte-Carlo paths on the GPU draw from a **counter-based** generator — `curand`'s Philox/XORWOW with one stream per path, `output = f(key, counter)` — so path *k* is the same number on every launch configuration and on the CPU reference; Appendix L.8 has the generator costs and the seeding discipline.)*
+
 The trading workloads that fit the GPU (big, parallel, latency-insensitive — off the hot path):
 
 - **Risk calculation.** Portfolio risk (VaR, stress scenarios, sensitivities) across thousands of positions × scenarios — massively parallel, run periodically (intraday/overnight), latency budget in seconds. A canonical GPU win — independent computations across a large grid.

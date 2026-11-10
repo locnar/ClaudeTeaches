@@ -124,6 +124,8 @@ The two lock-free publication mechanisms (Ch. 46–47), chosen by config size an
 
 ### 102.4.2 Versioned configuration and safe reclamation
 
+*(The same versioning applied to shared-memory record layouts across independently deployed processes — per-message versions, additive evolution, compatibility windows, fingerprints — is Ch. 67 §67.4.4.)*
+
 Replacing a version raises the question Ch. 47 answers: **when is it safe to free the old one?** A reader may still be using v1 at the instant you publish v2.
 
 - **Version the config** (a monotonically increasing version number in each snapshot) so you can tell which is live, log which version made a decision (ties Ch. 109 capture — record the config version with each order for replay), and detect a stuck reader.

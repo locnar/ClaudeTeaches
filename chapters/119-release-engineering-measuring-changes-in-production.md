@@ -112,7 +112,7 @@ Segment* attach(const char* name, const LayoutWindow& w) {
 }
 ```
 
-- **Two-step layout changes** (read-both, then write-new) are the only intraday-safe kind; a one-step change is a pre-open restart of every process on the segment.
+- **Two-step layout changes** (read-both, then write-new) are the only intraday-safe kind — the additive-only field rules, length-driven skipping, layout fingerprints and the mixed-version test behind this window are Ch. 67 §67.4.4; a one-step change is a pre-open restart of every process on the segment.
 - **Message versions** ride the same rule: an SBE header's `schemaId`/`version`/`blockLength` (Ch. 70) is read before the body and a version outside the window is a refusal with a counter (Ch. 100), not a decode.
 - **The readiness gate (Appendix M.4) checks the windows**: every process's declared window vs every live segment's version, before arming.
 

@@ -531,11 +531,12 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 35.2.2 Rounding and tick-size handling
   - 35.2.3 Denormals and the FTZ/DAZ flags
   - 35.2.4 FP op latency/throughput; NaN/Inf traps
-- 35.3 Measure it: denormal slowdown; FP op latencies
+- 35.3 Measure it: denormal slowdown; FP op latencies; the fill update in `int64`/`__int128`, `double` and `decimal64`
 - 35.4 Techniques
   - 35.4.1 Scaled-integer price math
   - 35.4.2 Enabling FTZ/DAZ
   - 35.4.3 Cross-build determinism on the hot path
+  - 35.4.4 Position, P&L, fees and FX as integer arithmetic
 - 35.5 Verify the codegen: FP flags and instruction selection
 - 35.6 Pitfalls & anti-patterns: float equality, accumulated error
 - 35.7 Exercises & checklist
@@ -962,6 +963,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 67.4.1 Lock-free cross-process ring buffers
   - 67.4.2 Shared-memory layout and addressing
   - 67.4.3 Segment setup and cross-process synchronization
+  - 67.4.4 Schema evolution: versioning, compatibility windows and rolling upgrades
 - 67.5 Pitfalls & anti-patterns: pointers across address spaces
 - 67.6 Exercises & checklist
 
@@ -998,6 +1000,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 70.2.2 Fixed-layout structs vs bit-fields; endianness
   - 70.2.3 Redundant A/B multicast feeds
   - 70.2.4 Mechanical sympathy for UDP microbursts: hardware RX rings, software reorder buffers, market-open drops
+  - 70.2.5 The SBE message header: `schemaId`, `version`, `templateId`, `blockLength` — evolution built into the wire
 - 70.3 Measure it: decode latency per protocol
 - 70.4 Techniques
   - 70.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing (now Ch. 71; pointer)
@@ -1607,6 +1610,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 109.4.5 Feeding captures into replay, simulation and backtests
   - 109.4.6 Research to production: one decoder, two bindings (pybind11/nanobind, zero-copy NumPy views, parity tests, Arrow)
   - 109.4.7 Columnar tick storage: from the journal to Arrow and Parquet (kdb+/ClickHouse/QuestDB tier)
+  - 109.4.8 Compression: codecs, domain encodings and decompression-bound replay
 - 109.5 Pitfalls & anti-patterns: dropping under load; storage stalls bleeding into the hot path
 - 109.6 Exercises & checklist
 
@@ -1908,6 +1912,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - L.5 Benchmarking across languages (the Ch. 97 protocol: same box/core/capture, digest parity, warm vs cold windows, each toolchain's sink and asm)
 - L.6 Benchmarks as tests: the CI skeleton (Ch. 118) — CTest labels, `--benchmark_out=json`, `compare.py`, the A/A table and the artefact layout keyed by revision and runner class
 - L.7 The core-to-core map: placement input for every pinned pair (Ch. 19) — run `c2c` once per box and firmware mode, store the matrix, quote the pair's one-way latency with every two-core result
+- L.8 Generating inputs: PRNG choice, seeding, and keeping the generator out of the timed region — generator cost/state table, pre-generate outside the timed region, deterministic seeds recorded with the run, counter-based streams for parallel Monte-Carlo
 
 ### [Appendix M — Pre-Open Readiness Gate & Market-Open Playbook](appendix-M-readiness-gate-market-open.md)
 - M.1 The readiness state machine (cold → warming → syncing → reconciled → armed → trading → disarmed; one predicted branch on the order path)

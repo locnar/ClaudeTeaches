@@ -124,6 +124,21 @@ And FP op latencies (from Agner Fog / `llvm-mca`, Ch. 13), the numbers that driv
 
 Read it the Ch. 1 / Ch. 13 way: the denormal run is **~100× slower** with no code change — purely because the *values* drifted into the denormal range and triggered the microcode assist; FTZ/DAZ restores full speed. This is the cliff: invisible in the source, data-dependent, and a tail-latency disaster when a signal decays toward zero. **Set FTZ/DAZ on every hot thread** (§35.4.2). The op-latency table is the Ch. 13 lesson made concrete: a `div`/`sqrt` on a dependency chain costs ~4-5× an add and doesn't pipeline — hoist it or reciprocal-multiply. (And the headline reason prices are integers: none of this — denormals, representability, non-associativity — applies to `int64` price math.)
 
+
+**The applied composition — a fill into position, average entry and realized P&L.** §35.2.1 called decimal floating-point "too slow for the hot path" without a number; here is the number, and with it the one that matters more: whether the money comes out *exact*. `pnl.cpp` applies one million signed fills (prices at a 10⁻⁴ scale around 123.45, quantities 1–300, random side, a 0.0030/share fee at 10⁻⁶) to a position record in four representations — `int64` quantity with `__int128` cost and realized P&L (the §35.4.4 design), the same with `__builtin_mul_overflow` on the notional, `double`, and GCC's `std::decimal::decimal64` (TR 24733; libgcc's software decimal) — on the 4-vCPU KVM guest (GCC 13.3, `-O2 -march=native`, TSC 2.7 GHz):
+
+```
+representation                        cycles / fill     realized P&L after 1,048,576 fills     note
+int64 qty, __int128 cost (exact)         21.0            -11,185.7205                         the §35.4.4 design; conserves cash exactly
+  + __builtin_mul_overflow on notional   21.5            -11,185.7205                         the check is one jo on a flag already set
+double                                   18.6            -11,185.7186  (1.9e-3 off)           faster, and a different number
+decimal64 (libgcc software)             293              -11,185.7186  (1.9e-3 off)           14x the integer design: "too slow" measured
+naive: avg entry price rounded to the
+  tick after every fill (int64)          ~20             +873,122.96   (884,309 off)          the rounding-drift pitfall of §35.6, in full
+```
+
+The integer design is as fast as `double` (the `__int128` product is one `imul` + one `mul`, §35.5), it is the only one whose realized P&L plus open cost plus fees equals the cash flows *to the unit*, and it replays bit-exactly (Ch. 109). `double` drifts by 10⁻³ of a currency unit over a million fills — invisible on a screen, fatal to a reconciliation that expects equality. Software decimal is 14× slower for no gain here (its one virtue, exact decimal rounding, the integer design has by construction). And the "store the rounded average price" design is not an approximation but a bug: its error compounds with the position-to-fill-size ratio (§35.6).
+
 ## 35.4 Techniques
 
 ### 35.4.1 Scaled-integer price math
@@ -153,6 +168,41 @@ When bit-exact reproducibility matters — **deterministic replay** (Ch. 109, 12
 - **Avoid `-ffast-math` where you need determinism.** `-ffast-math` permits reassociation and other reorderings that make results depend on optimization level/compiler/FMA-contraction — *non-deterministic across builds* (Ch. 27). Determinism-critical FP code is built at *strict* FP (and may need `-ffp-contract=off` to stop FMA-vs-separate-ops differences).
 - **Pin the FP details that vary.** Use SSE/AVX (not x87 — its 80-bit intermediates vary), control FMA contraction (`-ffp-contract`), fix the rounding mode (default round-to-nearest-even), and keep the *same* compiler/flags across the systems that must agree. Document the FP build contract.
 - **Same code, same data, same bits — verify it.** Run the replay and a live computation and diff the outputs bit-for-bit (Ch. 109). A mismatch points at an FP-environment difference (flags, FMA, thread FTZ state) — track it down rather than tolerating "close enough," because replay/backtest validity depends on exactness.
+
+
+### 35.4.4 Position, P&L, fees and FX as integer arithmetic
+
+The fill-update state machine is where price × quantity × fee × FX meet, and the scale discipline of §35.4.1 is what keeps it exact. The design that §35.3 measured at 21 cycles per fill:
+
+```cpp
+// position.hpp — signed position, open cost and realized P&L as integers; the average entry price is DERIVED, never stored.
+// Scales: price 1e-4 (int64 ticks), qty 1 (signed: +long/-short), notional = price*qty at 1e-4, fees at 1e-6 per share.
+struct Position {
+    std::int64_t qty = 0;        // signed position
+    __int128     cost = 0;       // signed open notional at price scale: sum of px*q over the open lots (negative for a short)
+    __int128     realized = 0;   // realized P&L at price scale
+    std::int64_t fees = 0;       // at 1e-6
+};
+inline void apply_fill(Position& p, std::int64_t px, std::int64_t q /* +buy / -sell */, std::int64_t fee_per_share) {
+    p.fees += fee_per_share * (q < 0 ? -q : q);
+    if (p.qty == 0 || (p.qty > 0) == (q > 0)) { p.qty += q; p.cost += __int128(px) * q; return; }     // opening or adding: no rounding anywhere
+    const std::int64_t closed = std::min(q < 0 ? -q : q, p.qty < 0 ? -p.qty : p.qty);
+    const __int128 cost_closed = p.cost * closed / (p.qty < 0 ? -p.qty : p.qty);                     // exact proportional cost of the closed lots (truncation stays in p.cost)
+    const __int128 proceeds   = __int128(px) * closed * (p.qty > 0 ? 1 : -1);
+    p.realized += proceeds - cost_closed; p.cost -= cost_closed; p.qty += (q > 0 ? closed : -closed);
+    const std::int64_t rem = q + (q > 0 ? -closed : closed);
+    if (rem != 0) { p.qty += rem; p.cost += __int128(px) * rem; }                                    // flipped: the new position opens at px
+}
+inline std::int64_t avg_entry_px(const Position& p) { return p.qty ? div_round_half_away(p.cost, p.qty) : 0; }   // only when displayed; the rule is explicit
+```
+
+- **Store cost, derive the average.** The average entry price is a *division* and every division rounds; storing its rounded result and re-using it on the next fill is the drift of §35.3's last row. Store the exact open cost (`Σ px·q`, an integer at price scale) and compute the average only for display or for a limit check, with an explicit rounding rule (`div_round_half_away`, or the venue's rule for average-price reporting). The closing-lot cost `cost × closed / |qty|` truncates by less than one unit *and the remainder stays in `cost`*, so cash is conserved: `realized + cost + fees_at_scale == Σ cash flows`, exactly, after any number of fills — the invariant the property test (Ch. 116 §116.4.2) asserts.
+- **Realized vs unrealized, partial closes and flips.** A fill against the position closes `min(|q|, |qty|)` lots at the *proportional* cost and realizes `(px − avg) × closed` with the sign of the position; whatever remains opens a new position at `px`. Unrealized P&L is `mark × qty − cost`, computed against a mid or last price (the one place a `double` mark is acceptable — it is off the decision path and never fed back into `cost`); mark-to-market is a *view*, not a state transition.
+- **Scale composition.** `price(1e-4) × qty(1) → notional(1e-4)`; a fee of 0.0030 per share is 3,000 at 1e-6 — a *finer* scale than the price, and the per-venue fee schedule (maker/taker, tiers, per-contract vs per-share) is a `constexpr` table at that scale (Ch. 21, published with the symbology — Ch. 73 §73.4.1). Add fees to the P&L only after rescaling (`fees / 100` to reach 1e-4) with an explicit rounding rule, or keep P&L at the finer scale throughout; never add two numbers at different scales (the strong types of Ch. 22 §22.4.4 make it a compile error).
+- **FX for multi-currency books.** A rate is itself a scaled integer with *its own* scale (1e-8 is common) and a quoting convention (base/quote); converting a notional is `notional × rate / 10^rate_scale` with the rounding point *chosen and recorded* — at the fill, at the daily close, or at display — because different rounding points give different books, and a replay must round where production did. Keep per-currency positions native and convert for the aggregate view.
+- **`__int128` and when the 128-bit product is emitted.** `px × qty` with `int64` operands fits `int64` up to ~9 × 10¹⁸ — a notional of 92,000 at 1e-4 with 10⁶ shares is 9.2 × 10¹⁴, fine; `cost × closed` can exceed it (a 10⁶-share position at 1e-4 times 10⁵ closed = 10¹⁶ × 10⁵), hence `__int128` for the intermediate. GCC/Clang emit one `imul` for the low half and one `mul`/`imul` + `adc` for the high half (§35.5) — ~4 cycles, not a library call; the division `__int128 / int64` is the expensive op (`__divti3`, ~30–80 cycles) and it runs once per *closing* fill only.
+- **Checked arithmetic where the wire can push the operands.** `__builtin_mul_overflow(px, qty, &n)` on the notional (Ch. 101 §101.4.3) costs the `jo` on a flag the multiply already set (21.5 vs 21.0 cycles in §35.3); the pre-trade gate's accumulators (Ch. 104 §104.4.1) are this struct with limits checked on every update.
+- **Bit-exact replay.** Every operation is integer and in a fixed order, so the position after a day of fills is the same bits on every machine and every build (Ch. 103 §103.2.2) — which is what makes "the risk engine's position equals the drop-copy's" (Ch. 105 §105.4.5) a test with a yes/no answer.
 
 ## 35.5 Verify the codegen: FP flags and instruction selection
 
@@ -199,6 +249,8 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 - **NaN/Inf poisoning silently.** A bad market value (zero price, garbage decode — Ch. 70) producing a NaN propagates through the whole computation undetected (`NaN != NaN` defeats comparisons). Guard/validate inputs; consider checking for NaN/Inf at boundaries (FP traps are usually masked on the hot path).
 - **`-ffast-math` breaking determinism (or correctness).** Fast-math reassociates and assumes no NaN/Inf — changing results (non-deterministic across builds — §35.4.3, breaks replay Ch. 109) and miscompiling NaN-dependent code. Don't blanket-enable it on financial/replay-critical math; opt into specific relaxations and verify (§35.5).
 - **Accumulated error in long sums.** Summing many `double`s loses precision (small terms lost against a large running sum); use Kahan/compensated summation, or (better for money) integers. Order-dependent results also hurt determinism.
+- **A stored, rounded average entry price.** Each add recomputes `avg = (avg·qty + px·q)/(qty+q)` from the *rounded* previous average, so the error obeys `e_new = e_old·qty/(qty+q) + δ` with `|δ| < 1` unit — it does not shrink, it settles near `qty/q` units: a 160,000-share position built in 150-lot fills carries an average ~1,000 units (0.1 currency) wrong, and every close of 150 shares realizes ~15 currency units of fiction. §35.3's last row: +873,123 instead of −11,186 after a million fills. Store the cost; derive the average (§35.4.4).
+- **Fees at a finer scale than the price, truncated into the P&L.** 0.0030/share at the price's 1e-4 scale is 0 — fees vanish, or are rounded per fill and drift. Keep fees at their own scale and rescale once with a stated rule (§35.4.4).
 - **Mixing scales / unit confusion.** Adding a scaled price to an unscaled one, or a price to a quantity, silently — a classic fixed-point bug. Wrap in **strong types** (Ch. 22 §22.4.4 — the allowed-operations matrix) so the compiler catches it.
 - **Integer overflow in notional/price math (Ch. 101).** `price × qty` overflowing `int64` is a silent wrap — a correctness *and* security bug. Use `__int128` intermediates and check ranges; treat price/qty arithmetic as needing overflow safety (Ch. 101).
 - **x87 / 80-bit intermediates.** Legacy x87 FP uses 80-bit intermediates that vary by spill timing — non-deterministic and slow. Use SSE/AVX (default on x86-64); don't resurrect x87.
@@ -213,6 +265,8 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 4. **Div on the chain.** Write a latency-bound loop with a `div` in the carried dependency (Ch. 13); measure. Replace with reciprocal-multiply (hoist `1/b`); re-measure. Quantify using the op-latency table (§35.3).
 5. **NaN poisoning.** Feed a signal computation a single NaN (simulate a bad decode) and watch it corrupt all downstream output. Add input validation/NaN guard at the boundary and show it's contained (ties Ch. 70, 101).
 
+6. **The fill state machine.** Implement §35.4.4's `Position`; property-test `realized + cost + fees == Σ cash flows` exactly over 10⁷ random fills (Ch. 116); then replace `cost` with a stored rounded average and watch the invariant fail. Measure cycles per fill for the integer, `double` and `decimal64` versions and reproduce §35.3's table.
+
 **Checklist — fixed/floating-point arithmetic**
 
 - [ ] Prices, quantities, and notional are **scaled integers** (`int64`/`__int128`), ideally **strong-typed** (Ch. 22 §22.4.4) — never `double`; conversion to FP/string is at the **boundaries** only.
@@ -223,6 +277,7 @@ The verification habits: **for FP hot code, disassemble and confirm (1) the inst
 - [ ] **Tick rounding is exact integer arithmetic** with a compile-time tick(-band) table (Ch. 21, 32), with the rounding *direction* an explicit, tested rule.
 - [ ] Determinism-critical/replayed FP (Ch. 109) is built **strict** (no `-ffast-math`, `-ffp-contract=off`, SSE not x87), with a documented FP build contract; `-ffast-math` is **opt-in and verified** (§35.5).
 - [ ] **Integer overflow is handled** in price/qty/notional math (`__int128`, range checks — Ch. 101); scales aren't mixed (strong types catch it).
+- [ ] Position, P&L, fees and FX are the **integer fill state machine** of §35.4.4: open cost stored, average derived with an explicit rounding rule, fees at their own scale, the cash-conservation invariant property-tested, bit-exact on replay.
 
 ## 35.8 References
 

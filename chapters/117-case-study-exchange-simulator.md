@@ -2,7 +2,7 @@
 
 # Chapter 117 — Case Study: The Exchange Simulator
 
-> **Prerequisites:** Ch. 33 (the order book — the matching engine is the venue-side use of the same ladder, pool and FIFO), Ch. 32 §32.4.4 (slot maps and generational handles), Ch. 103 §103.2.2 (the deterministic single-threaded core — the simulator is one), Ch. 116 (deterministic simulation testing — the fault-injecting `SimVenue` of §116.4.3 is this chapter's engine grown up), Ch. 109–110 (captures and wire-level timestamps — where the latency model's samples come from), Ch. 99 §99.4.5 (exchange-provided timestamps), Ch. 55 (a simulated clock is a deadline queue), Appendix J.1/J.3 (price-time, pro-rata, auctions, order types, STP), Appendix L.5 (generators and seeds).
+> **Prerequisites:** Ch. 33 (the order book — the matching engine is the venue-side use of the same ladder, pool and FIFO), Ch. 32 §32.4.4 (slot maps and generational handles), Ch. 103 §103.2.2 (the deterministic single-threaded core — the simulator is one), Ch. 116 (deterministic simulation testing — the fault-injecting `SimVenue` of §116.4.3 is this chapter's engine grown up), Ch. 109–110 (captures and wire-level timestamps — where the latency model's samples come from), Ch. 99 §99.4.5 (exchange-provided timestamps), Ch. 55 (a simulated clock is a deadline queue), Appendix J.1/J.3 (price-time, pro-rata, auctions, order types, STP), Appendix L.8 (generators and seeds).
 >
 > **Leads into:** Ch. 118 (the CI latency gate drives the system through this harness), Ch. 119 (shadow runs — the simulator is the venue that is *not* real), Ch. 120 (the capstone consumes the harness this chapter builds: §120.4.3 no longer has to describe it), Ch. 107 (thresholds, budgets and the safe-state sequence are tuned against it), Ch. 111 (replay through the sequencer with the simulator as the venue).
 
@@ -103,7 +103,7 @@ The listing in §117.3 is the inner loop; the engine around it:
 - **`submit(side, px, qty, firm)`**: allocate a pool slot (free-list), then `while (qty > 0 && best_opposite crosses px) qty = match_level(...)`, then rest the remainder (`append` to the level's FIFO, bump `best_*` if it improves) or free the slot if nothing remains. Order types (Appendix J.3) are flags on the way in: **IOC** skips the rest step; **FOK** pre-walks the levels to check total available size before matching (one extra pass, no fills if short); **post-only** rejects if it would cross; **market** is a limit at the far end of the ladder with IOC.
 - **`cancel(id)`**: validate the handle's generation (Ch. 32 §32.4.4 — the simulator's pool reuses slots, exactly as the venue's does, which is why the order id the venue returns must carry a generation or the simulator will cancel the wrong order after a slot is reused: the benchmark's `live` vector hits that case and tolerates it; production code must not), unlink in O(1), fix the best cursor if the level emptied.
 - **Replace** (cancel/replace): the venue's semantics decide whether a size *decrease* keeps queue priority (most do) and whether a price change or a size increase loses it (all do); the simulator implements the venue's table, not a convenience.
-- **Determinism**: the engine reads no clock and no RNG; the *venue's* randomness (a randomized auction uncross time, a speed bump's jitter) arrives as an input event scheduled by the harness (§117.4.4) from the harness's seeded generator (Appendix L.5).
+- **Determinism**: the engine reads no clock and no RNG; the *venue's* randomness (a randomized auction uncross time, a speed bump's jitter) arrives as an input event scheduled by the harness (§117.4.4) from the harness's seeded generator (Appendix L.8).
 
 ### 117.4.2 Pro-rata and self-trade prevention as modes
 
@@ -197,7 +197,7 @@ Because the schedule is derived from the seed and the core is deterministic, a f
 - Appendix J.1 and J.3 — price-time priority, pro-rata, auctions, order types and TIF, STP; CME Group, *Matching Algorithms* (FIFO, Pro-Rata, Allocation, Threshold Pro-Rata, FIFO with LMM) and *Self-Match Prevention*; Nasdaq, *Self Match Prevention* and *Opening/Closing Cross* specifications; Deutsche Börse, *T7 Functional Reference* (matching principles, auctions, self-match prevention) — the venue rules §117.4.1–§117.4.3 parameterise.
 - J. Hasbrouck, *Empirical Market Microstructure* (OUP, 2007), and R. Huang and H. Stoll's queue-position literature; M. Gould et al., "Limit order books," *Quantitative Finance* 13 (2013) — the queue-position and fill-probability models of §117.2.4.
 - FoundationDB, *Testing Distributed Systems with Deterministic Simulation*; TigerBeetle, *VOPR* — deterministic simulation as the method §117.4.6 applies to a venue.
-- Ch. 33 (the book), Ch. 103 (the deterministic core), Ch. 116 (DST and property tests), Ch. 99/110 (the stamps the latency model is built from), Appendix L.5 (seeded generators and O(1) sampling) — the mechanisms composed here.
+- Ch. 33 (the book), Ch. 103 (the deterministic core), Ch. 116 (DST and property tests), Ch. 99/110 (the stamps the latency model is built from), Appendix L.8 (seeded generators and O(1) sampling) — the mechanisms composed here.
 
 ## 117.8 Additional Reading
 

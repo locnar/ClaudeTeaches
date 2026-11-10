@@ -264,14 +264,37 @@ The protocol (Ch. 19 §19.3): two threads, one fresh cache line per pair, strict
 
 What goes in the results block alongside §L.3's metadata: the two CPUs, their L3 domain (from step 2), the one-way latency from the map, and the map file's name. A two-core number without its pair is a number without a machine.
 
-## L.8 References
+## L.8 Generating inputs: PRNG choice, seeding, and keeping the generator out of the timed region
+
+Every harness in the book draws random inputs — keys, prices, indices, delays — and most of them use `std::mt19937` without comment. Three rules, with the numbers that justify them (`rng.cpp`, the 4-vCPU KVM guest, GCC 13.3, `-O2 -march=native`):
+
+```
+generator                        cycles/draw    state       notes
+std::mt19937_64                     3.8        2,504 B     fine, but 2.5 KB of state evicts the thing you are measuring
+std::mt19937 (32-bit)               3.5        5,000 B
+splitmix64                          1.0            8 B     the seeder; also a fine generator for inputs
+xoshiro256**                        2.7           32 B     the default: fast, tiny, passes BigCrush
+PCG64 (XSL-RR 128/64)               4.6           32 B     128-bit multiply per draw
+wyrand                              1.5            8 B
+Philox4x32-10 (per 128-bit block)  23.9            8 B     counter-based: reproducible parallel streams (Ch. 89 §89.4.3)
+rdrand64                          120              0       hardware entropy: seeds only, never per draw
+rdseed64                        2,920              0
+bounded integer in [0, 1000):   x % n  3.7   Lemire multiply-shift 2.9   nearly-divisionless 3.0   uniform_int_distribution 3.0
+doubles:  (x >> 11) * 2^-53  3.6     std::normal_distribution 20.3     sum of 12 uniforms 36.1
+```
+
+1. **Pre-generate outside the timed region.** The generator's cost (1–5 cycles) and, worse, its *state* (2.5 KB for `mt19937_64` — 40 cache lines competing with the data structure under test) belong outside the measurement: fill an input array before the loop (the L.1 skeleton's fixture), size it so it is L1-resident or deliberately not (whichever the experiment is about), and read it with a stride the prefetcher does not predict if the point is random access. A `% n` *inside* the loop is a 20–40-cycle `div`; use Lemire's multiply-shift (`(uint64_t)(((__uint128_t)x * n) >> 64)`, biased by 2⁻⁶⁴ — fine for inputs) or the nearly-divisionless rejection variant when exactness matters.
+2. **Seed deterministically and record the seed.** A fixed seed per run (`splitmix64(seed)` to expand one 64-bit seed into any generator's state) makes a benchmark reproducible and a failing property test (Ch. 116) shareable; `rdseed`/`getrandom` are for *choosing* the seed once (and for keyed hashes — Ch. 38 §38.4.6), never for draws. Record the seed, the generator and its version in the run's manifest (L.4): `std::normal_distribution`'s algorithm is not specified by the standard and differs between libstdc++ and libc++ (Ch. 1 §1.3's caveat), so a harness that must agree across toolchains uses its own transform (a Ziggurat or an inverse-CDF table — Ch. 117 §117.4.4's sampler is 3.7 cycles and bit-exact everywhere).
+3. **Reproducible parallel streams.** For Monte-Carlo on many threads or a GPU (Ch. 89), do not split one sequential stream: use a **counter-based** generator (Philox, Threefry — `curand`'s and Random123's) where output *k* of stream *s* is a pure function `f(key = s, counter = k)`, so path *k* is the same number on every machine, thread count and run — or jump-ahead functions (`xoshiro256**::jump()`) for a fixed number of streams. The engine's own randomness (backoff jitter — Ch. 43 §43.4.2; order randomization; a venue's randomized uncross) is *input* to the deterministic core (Ch. 103 §103.2.2): drawn by the shell from a seeded generator, journaled, replayed.
+
+## L.9 References
 
 - **Google Benchmark** documentation and User Guide — `benchmark::State`, `DoNotOptimize`/`ClobberMemory`, arguments/ranges, reporters and JSON output (L.1).
 - **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `HdrHistogram_c` libraries) — the basis of L.2; `hdr_histogram.h` documents the record-and-back-fill semantics of `hdr_record_corrected_value` and the false-return-on-out-of-range behaviour of `hdr_record_value` that L.2 relies on.
 - Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 20 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 62 (warming) — the warm-vs-cold discipline in L.3.
 - The `perf`, `taskset`, `chrt`, `cpupower`, `numactl` man pages (Appendix I) — the environment controls of L.3.
 
-## L.9 Additional Reading
+## L.10 Additional Reading
 
 - **Appendix I** (Tooling Command Cookbook) — the `perf stat`/pinning/`objdump` commands to run *alongside* a benchmark so the counters explain the timing.
 - **Appendix C** (System Tuning Checklist) — the box-level setup (isolation, governor, C-states) that makes a benchmark host quiet enough to trust.

@@ -73,7 +73,7 @@ struct Output { enum Kind : std::uint8_t { NewOrder, Cancel, Log } kind; std::ui
 
 struct State { std::int64_t best_bid = 0, best_ask = 0; std::int32_t position = 0; std::uint64_t next_order = 1, config_version = 0; };
 
-// apply(): pure. No clock, no syscall, no I/O, no globals, no randomness — the fold over the input stream.
+// apply(): pure. No clock, no syscall, no I/O, no globals, no randomness — the fold over the input stream. (The seed, and every draw the shell makes from it, is a journaled INPUT — Appendix L.8.)
 std::size_t apply(State& s, const Input& in, std::span<Output> out) noexcept {
     std::size_t n = 0;
     std::visit([&](const auto& e) {
