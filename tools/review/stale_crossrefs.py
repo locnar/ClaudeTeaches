@@ -63,6 +63,7 @@ STEPS = [
     ("insert", 53),  # Ch. 54 power-management-frequency-determinism
     ("insert", 57),  # Ch. 58 anatomy-linux-network-datapath
     ("insert", 27),  # Ch. 28 static-analysis-performance-contracts
+    ("insert", 31),  # Ch. 32 limit-order-book-engineering
     # INSERT_STEPS_END
 ]
 def old2new(n):

@@ -2,17 +2,17 @@
 
 # Chapter 22 — Compile-Time Protocol Decoders: From Schema to Code
 
-> **Prerequisites:** Ch. 20 (compile-time mechanics — `constexpr`/`consteval`, the template cost model; this chapter is the worked example §20.1 promised), Ch. 21 (templates as a design tool — type-based dispatch, `if constexpr`, the §21.4.6 concepts), Ch. 25 (aliasing and the sanctioned punning channels — every accessor generated here is a `memcpy` into a typed local), Ch. 34 (`std::byteswap`/`bswap`/`movbe`), Ch. 65 (the hand-written zero-copy decoder this chapter must match instruction for instruction).
+> **Prerequisites:** Ch. 20 (compile-time mechanics — `constexpr`/`consteval`, the template cost model; this chapter is the worked example §20.1 promised), Ch. 21 (templates as a design tool — type-based dispatch, `if constexpr`, the §21.4.6 concepts), Ch. 25 (aliasing and the sanctioned punning channels — every accessor generated here is a `memcpy` into a typed local), Ch. 35 (`std::byteswap`/`bswap`/`movbe`), Ch. 66 (the hand-written zero-copy decoder this chapter must match instruction for instruction).
 >
-> **Leads into:** Ch. 23 (the cost of abstractions — where the generated accessors' return types meet the calling convention, §23.4.5), Ch. 24 (`string_view` fields and symbols-as-integers, which the `Chars` encoding hands you), Ch. 27 (what the `consteval` parse costs the build and how to keep that cost bounded), Ch. 65 (the decode path proper: line arbitration, gaps, microbursts — this chapter only generates the field accessors it uses) and Ch. 99 (binary journal records are the same schema → layout problem, captured together with the schema version).
+> **Leads into:** Ch. 23 (the cost of abstractions — where the generated accessors' return types meet the calling convention, §23.4.5), Ch. 24 (`string_view` fields and symbols-as-integers, which the `Chars` encoding hands you), Ch. 27 (what the `consteval` parse costs the build and how to keep that cost bounded), Ch. 66 (the decode path proper: line arbitration, gaps, microbursts — this chapter only generates the field accessors it uses) and Ch. 100 (binary journal records are the same schema → layout problem, captured together with the schema version).
 
 ---
 
 ## 22.1 Why it matters: the venue document is the source of truth, and it changes
 
-Every feed handler in this book starts the same way: a venue publishes a PDF that says *AddOrder is 38 bytes: type at 0, sequence at 1 (8 bytes, big-endian), order id at 9, side at 17, quantity at 18 (4 bytes), symbol at 22 (8 chars), price at 30 (8 bytes, 4 implied decimals)*, and a developer transcribes it into a `#pragma pack(1)` struct and a decoder that `memcpy`s each field into a typed local and byte-swaps it (Ch. 65 §65.3). The transcription is where the bugs live. Nasdaq's ITCH 5.0 has fifty-odd message types; CME's SBE schemas have hundreds of fields across dozens of templates and *ship as XML* precisely so machines can read them; Eurex's EOBI, ASX's, B3's — every venue has its own, every one changes a few times a year, and the change note that moves `price` from offset 30 to 31 arrives as a line in a document, not as a compiler error. A feed handler that decodes the wrong offset does not crash. It trades on the wrong price.
+Every feed handler in this book starts the same way: a venue publishes a PDF that says *AddOrder is 38 bytes: type at 0, sequence at 1 (8 bytes, big-endian), order id at 9, side at 17, quantity at 18 (4 bytes), symbol at 22 (8 chars), price at 30 (8 bytes, 4 implied decimals)*, and a developer transcribes it into a `#pragma pack(1)` struct and a decoder that `memcpy`s each field into a typed local and byte-swaps it (Ch. 66 §66.3). The transcription is where the bugs live. Nasdaq's ITCH 5.0 has fifty-odd message types; CME's SBE schemas have hundreds of fields across dozens of templates and *ship as XML* precisely so machines can read them; Eurex's EOBI, ASX's, B3's — every venue has its own, every one changes a few times a year, and the change note that moves `price` from offset 30 to 31 arrives as a line in a document, not as a compiler error. A feed handler that decodes the wrong offset does not crash. It trades on the wrong price.
 
-The compile-time answer is to stop transcribing. Write the venue's field list *once*, as data — a schema string, a `constexpr` table — and have the compiler derive the offsets, the sizes, the byte-swap and the typed accessor for every field, `static_assert` the result against the numbers in the venue document, and emit *exactly* the load-plus-swap the hand-written decoder would have. Then a venue change is one edit to one string; a typo in a field name is a compile error that names the field; a layout mismatch is a `static_assert` that fails on the build server, not a position that is wrong at 09:30:00.000. Ch. 20 §20.1 promised "a SBE/protocol decoder whose field layout is resolved at compile time"; Ch. 65 used an external code generator and moved on. This chapter builds the decoder in the language, on shipping C++20 — class-type non-type template parameters (P0732, GCC 10 / Clang 12 — Appendix H.3), `consteval` parsing, `if constexpr` accessor generation — and proves two things the hot path cares about: the generated accessor is the same `movbe` as the hand-written one (§22.5), and the whole message decodes in the same 2.5 ns (§22.3). The cost moves entirely into the build, and §22.3 measures that too.
+The compile-time answer is to stop transcribing. Write the venue's field list *once*, as data — a schema string, a `constexpr` table — and have the compiler derive the offsets, the sizes, the byte-swap and the typed accessor for every field, `static_assert` the result against the numbers in the venue document, and emit *exactly* the load-plus-swap the hand-written decoder would have. Then a venue change is one edit to one string; a typo in a field name is a compile error that names the field; a layout mismatch is a `static_assert` that fails on the build server, not a position that is wrong at 09:30:00.000. Ch. 20 §20.1 promised "a SBE/protocol decoder whose field layout is resolved at compile time"; Ch. 66 used an external code generator and moved on. This chapter builds the decoder in the language, on shipping C++20 — class-type non-type template parameters (P0732, GCC 10 / Clang 12 — Appendix H.3), `consteval` parsing, `if constexpr` accessor generation — and proves two things the hot path cares about: the generated accessor is the same `movbe` as the hand-written one (§22.5), and the whole message decodes in the same 2.5 ns (§22.3). The cost moves entirely into the build, and §22.3 measures that too.
 
 ---
 
@@ -41,7 +41,7 @@ P2996 (*Reflection for C++26*, adopted into the C++26 working draft in 2025) add
 *Measured on the 4-vCPU Intel Xeon VM of Appendix L.2 (TSC 2.7 GHz, Linux 6.18, no isolation), GCC 13.3 and Clang 18.1, `-O2 -std=c++23 -march=x86-64-v3`; numbers are VM-measured and labelled as such — Appendix L.3 for the reference machine. The listing is complete and compiles as shown; the header it includes is §22.4.1–§22.4.2.*
 
 ```cpp
-// decode_bench.cpp — generated (this chapter) vs hand-written (Ch. 65 §65.3) decoder of one ITCH-like AddOrder.
+// decode_bench.cpp — generated (this chapter) vs hand-written (Ch. 66 §66.3) decoder of one ITCH-like AddOrder.
 // g++ -O2 -std=c++23 -march=x86-64-v3 decode_bench.cpp -o decode_bench && ./decode_bench
 #include "ct_decoder.hpp"                                   // §22.4.1–§22.4.2
 #include <chrono>
@@ -52,7 +52,7 @@ P2996 (*Reflection for C++26*, adopted into the C++26 working draft in 2025) add
 using AddOrderMsg = ct::Message<"type:u8 seq:u64be id:u64be side:u8 qty:u32be sym:c8 price:u64be">;
 using AddOrderL   = AddOrderMsg::L;
 
-// ---- Ch. 65's hand-written overlay/decoder, unchanged --------------------------------------------
+// ---- Ch. 66's hand-written overlay/decoder, unchanged --------------------------------------------
 #pragma pack(push, 1)
 struct AddOrder { std::uint8_t type; std::uint64_t seq, id; std::uint8_t side;
                   std::uint32_t qty; char sym[8]; std::uint64_t price; };
@@ -66,7 +66,7 @@ static_assert(AddOrderL::field<"qty">.offset   == 18 && offsetof(AddOrder, qty) 
 static_assert(AddOrderL::field<"sym">.offset   == 22 && offsetof(AddOrder, sym)   == 22);
 static_assert(AddOrderL::field<"price">.offset == 30 && offsetof(AddOrder, price) == 30);
 
-Parsed decode_hand(const std::uint8_t* p) {                 // Ch. 65: memcpy into a typed local + byteswap
+Parsed decode_hand(const std::uint8_t* p) {                 // Ch. 66: memcpy into a typed local + byteswap
     Parsed r;
     std::uint64_t seq; std::memcpy(&seq, p+1, 8);  r.seq = std::byteswap(seq);
     std::uint64_t id;  std::memcpy(&id,  p+9, 8);  r.id  = std::byteswap(id);
@@ -221,7 +221,7 @@ template <> struct enc_type<Enc::U32BE> { using type = std::uint32_t; };  templa
 template <> struct enc_type<Enc::U64BE> { using type = std::uint64_t; };  template <> struct enc_type<Enc::U64LE> { using type = std::uint64_t; };
 template <> struct enc_type<Enc::Chars> { using type = std::string_view; };
 
-template <class T> constexpr T bswap(T v) {                  // C++23 std::byteswap, or the builtins on C++20 (Ch. 34)
+template <class T> constexpr T bswap(T v) {                  // C++23 std::byteswap, or the builtins on C++20 (Ch. 35)
 #if defined(__cpp_lib_byteswap)
     return std::byteswap(v);
 #else
@@ -258,7 +258,7 @@ Return types follow the encoding, so `get<"price">()` is a `std::uint64_t` and `
 The schema string replaces the struct; the `static_assert`s replace the code review. Three kinds, all free:
 
 - **Against the published numbers.** `static_assert(AddOrderL::field<"price">.offset == 30)` and `static_assert(AddOrderL::size == 38)` transcribe the two numbers the venue document states for each field — and a transcription error in *either* the schema or the assertion fails the build. When the venue moves `price` to 31, the first build after the schema edit fails every assertion downstream until each is re-read against the new document. That is the workflow: the document's numbers live in `static_assert`s, the structure lives in the schema, and they check each other.
-- **Against the legacy struct during migration.** While the hand-written `#pragma pack(1)` struct still exists (Ch. 65), `static_assert(AddOrderL::field<"qty">.offset == offsetof(AddOrder, qty))` proves the two descriptions agree for every field, so the migration from struct to schema cannot silently change a layout. Delete the struct when the last consumer is gone.
+- **Against the legacy struct during migration.** While the hand-written `#pragma pack(1)` struct still exists (Ch. 66), `static_assert(AddOrderL::field<"qty">.offset == offsetof(AddOrder, qty))` proves the two descriptions agree for every field, so the migration from struct to schema cannot silently change a layout. Delete the struct when the last consumer is gone.
 - **Against the schema version.** Venues version their templates (SBE's `schemaId`/`version`/`blockLength` in the message header; ITCH's version in the feed name). Put the expected version in the schema (`Message<"v5.0 …">` or a second NTTP), make the decoder's first act a runtime check of the header's version word against the compile-time constant, and reject the session, not the message, on mismatch. For SBE specifically, `static_assert(Layout::size == 38 /* blockLength from the XML */)` catches the root-block drift, and the *runtime* `blockLength` from each header must be ≥ the compile-time one before any field past the known block is read (§22.6).
 
 ### 22.4.4 Message-type dispatch and repeating groups: what stays at runtime
@@ -270,7 +270,7 @@ The compile-time decoder resolves everything that is *fixed* in the schema. Two 
 
 ### 22.4.5 Keeping the build-time cost bounded
 
-§22.3 priced a message type at 4–6 ms of front-end time per instantiating TU. Three habits keep that from compounding: instantiate each venue's `Message<…>` set in *one* decoder translation unit and expose a small non-template interface (or `extern template` the instantiations — Ch. 27 §27.4.2); keep the `consteval` parser's complexity linear in the schema length (the duplicate-name check above is O(n²) in field count, which is fine at 60 fields and would not be at 6,000 — SBE schemas with thousands of fields want a sorted check); and watch `-ftime-trace`'s `InstantiateFunction` rows in CI the way Ch. 109 watches a latency percentile — a decoder header that goes from 300 ms to 3 s is a regression even though no runtime number moved.
+§22.3 priced a message type at 4–6 ms of front-end time per instantiating TU. Three habits keep that from compounding: instantiate each venue's `Message<…>` set in *one* decoder translation unit and expose a small non-template interface (or `extern template` the instantiations — Ch. 27 §27.4.2); keep the `consteval` parser's complexity linear in the schema length (the duplicate-name check above is O(n²) in field count, which is fine at 60 fields and would not be at 6,000 — SBE schemas with thousands of fields want a sorted check); and watch `-ftime-trace`'s `InstantiateFunction` rows in CI the way Ch. 110 watches a latency percentile — a decoder header that goes from 300 ms to 3 s is a regression even though no runtime number moved.
 
 ### 22.4.6 The C++26 reflection form (unverified: no shipping compiler implements it)
 
@@ -299,7 +299,7 @@ The accessor generation (§22.4.2) is unchanged — it consumes `FieldDesc`s and
 The claim "the compile-time decoder costs nothing at runtime" is an asm claim. **Verified** Clang 18.1 and GCC 13.3 output for the §22.3 listing (`-O2 -std=c++23 -march=x86-64-v3 -S -masm=intel`):
 
 ```asm
-; price_hand(const uint8_t*)  — Ch. 65's memcpy + byteswap          ; price_gen(const uint8_t*) — Message::get<"price">()
+; price_hand(const uint8_t*)  — Ch. 66's memcpy + byteswap          ; price_gen(const uint8_t*) — Message::get<"price">()
         movbe   rax, qword ptr [rdi + 30]                            ;         movbe   rax, qword ptr [rdi + 30]
         ret                                                          ;         ret
 ; GCC 13.3 emits the same two instructions for both (plus endbr64).  The schema string, the field table,
@@ -312,7 +312,7 @@ The claim "the compile-time decoder costs nothing at runtime" is an asm claim. *
 ; decode_hand / decode_gen (Clang 18.1) — identical instructions, two reordered:
         mov     rax, rdi
         vmovdqu xmm0, xmmword ptr [rsi + 1]             ; seq and id: one 16-byte load…
-        vpshufb xmm0, xmm0, xmmword ptr [rip + .LCPI]   ; …byte-swapped together (Ch. 65 §65.5)
+        vpshufb xmm0, xmm0, xmmword ptr [rip + .LCPI]   ; …byte-swapped together (Ch. 66 §66.5)
         vmovdqu xmmword ptr [rdi], xmm0
         movzx   ecx, byte ptr [rsi + 17]                ; side
         mov     byte ptr [rdi + 28], cl
@@ -340,10 +340,10 @@ Both name the misspelt field in the template argument; neither is short. Ch. 21 
 ## 22.6 Pitfalls & anti-patterns: compile-time layout, runtime data
 
 - **A compile-time offset for a runtime quantity.** The root block of an SBE message is fixed; a repeating group's entry stride (`blockLength`) and count are *in the header*. Striding by `Layout::size` instead of the header's `blockLength` works until the venue appends a field to the group entry — forward-compatible by the SBE rules, silently misaligned by your decoder (§22.4.4). Compile-time for the fixed part, header values for the variable part, always.
-- **Trusting `blockLength` without bounding it.** The converse: a header that *claims* a longer block than the datagram holds. The `static_assert` proves the schema; only a runtime `offset + size <= remaining` check proves the packet (Ch. 65 §65.6, Ch. 92). The generated accessor does not bounds-check — the caller checks the message length once against `Layout::size` before any `get<>()`.
+- **Trusting `blockLength` without bounding it.** The converse: a header that *claims* a longer block than the datagram holds. The `static_assert` proves the schema; only a runtime `offset + size <= remaining` check proves the packet (Ch. 66 §66.6, Ch. 93). The generated accessor does not bounds-check — the caller checks the message length once against `Layout::size` before any `get<>()`.
 - **Instantiating the same decoder in forty TUs.** 4–6 ms per message type per TU (§22.3) is invisible once and a minute of wall time across a large binary. One decoder TU per venue, `extern template` for the rest (§22.4.5, Ch. 27).
 - **The schema string as the *only* description.** A schema without the `static_assert`s against the document's numbers has merely moved the transcription error; the schema *and* the asserted offsets must both be re-read when the venue publishes a change (§22.4.3). Keep the document version in the schema's name.
-- **`reinterpret_cast` back into the overlay for "speed".** The `memcpy`-into-local form *is* the load (§22.5). A `reinterpret_cast<const uint64_t*>(p + 30)` dereference is strict-aliasing UB and a potentially misaligned access (Ch. 25 §25.6, Ch. 65 §65.6) for zero gain.
+- **`reinterpret_cast` back into the overlay for "speed".** The `memcpy`-into-local form *is* the load (§22.5). A `reinterpret_cast<const uint64_t*>(p + 30)` dereference is strict-aliasing UB and a potentially misaligned access (Ch. 25 §25.6, Ch. 66 §66.6) for zero gain.
 - **A `string_view` field that outlives the buffer.** `get<"sym">()` views the receive buffer; copy it into a `Sym8`/`uint64` key (Ch. 24 §24.4.4) before the buffer is recycled — the ring slot will be overwritten by the next datagram.
 - **Non-structural NTTP types.** A `fixed_string` with a private member, a `std::string_view` member, or a user-provided `operator==` is not structural and the template will not compile — the error messages for this are poor on both compilers; keep the NTTP type to public `char[N]` plus a defaulted comparison.
 - **Reflection-first design on today's toolchains.** No shipping GCC or Clang implements P2996 (§22.2.4); a decoder that *requires* it does not build. Build on the field table; let reflection replace the parser later.
@@ -387,7 +387,7 @@ Both name the misspelt field in the template argument; neither is short. Ch. 21 
 - Jason Turner, *"constexpr ALL the Things!"* (C++Now 2017) and Ben Deane, *"Using Types Effectively"* — the compile-time-parsing style the `consteval` schema parser follows.
 - Hana Dusíková, *"Compile Time Regular Expressions"* (CppCon 2018) — the canonical C++17/20 example of parsing a string literal into code at compile time, and the NTTP idioms that preceded P0732.
 - Daveed Vandevoorde and Barry Revzin, *"Reflection in C++26"* (CppCon 2024) — the P2996 design and the `^^`/`[: :]` syntax.
-- Ch. 20 (*Compile-Time Mechanics*) — the cost model this chapter instantiates; Ch. 65 (*Zero-Copy Wire Handling & Market-Data Decoding*) — the hand-written decoder and the receive path it feeds; Ch. 27 (*Build Systems & Build-Time Hygiene*) — pricing and bounding the build cost measured in §22.3; **Appendix H** — availability of class-type NTTPs, `std::byteswap`, `consteval` and reflection; **Appendix J** — the venue protocols.
+- Ch. 20 (*Compile-Time Mechanics*) — the cost model this chapter instantiates; Ch. 66 (*Zero-Copy Wire Handling & Market-Data Decoding*) — the hand-written decoder and the receive path it feeds; Ch. 27 (*Build Systems & Build-Time Hygiene*) — pricing and bounding the build cost measured in §22.3; **Appendix H** — availability of class-type NTTPs, `std::byteswap`, `consteval` and reflection; **Appendix J** — the venue protocols.
 
 ---
 

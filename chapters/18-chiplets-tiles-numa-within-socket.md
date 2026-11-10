@@ -2,17 +2,17 @@
 
 # Chapter 18 — Chiplets, Tiles & NUMA Within the Socket: the Core-to-Core Latency Map
 
-> **Prerequisites:** Ch. 17 (NUMA — nodes, first-touch, the distance matrix; this chapter is what happens when a *socket* is several of those), Ch. 8 (MESI coherence and the L3 — §8.2.1's "L3 is shared across the socket" is the assumption this chapter breaks), Ch. 7 (server vs client silicon, the ring and the mesh), Ch. 6 §6.4.2 (`lscpu`/`lstopo`). It uses the vocabulary of Ch. 36 (acquire/release) and Ch. 39 (HITM, cache-line ping-pong) in its harness — read §39.2 ahead if those are new.
+> **Prerequisites:** Ch. 17 (NUMA — nodes, first-touch, the distance matrix; this chapter is what happens when a *socket* is several of those), Ch. 8 (MESI coherence and the L3 — §8.2.1's "L3 is shared across the socket" is the assumption this chapter breaks), Ch. 7 (server vs client silicon, the ring and the mesh), Ch. 6 §6.4.2 (`lscpu`/`lstopo`). It uses the vocabulary of Ch. 37 (acquire/release) and Ch. 40 (HITM, cache-line ping-pong) in its harness — read §40.2 ahead if those are new.
 >
-> **Leads into:** Ch. 19 (the TSC — the instrument the harness times with), Ch. 40–43 (SPSC/MPMC queues, seqlocks and the Disruptor — every one of them is a cache-line handoff whose cost this chapter's map predicts), Ch. 44 (threading topologies — the hop-cost model gets its per-pair numbers here), Ch. 51 §51.4.3 (pinning *to the right cores* using the map), Ch. 53 (cache allocation — `resctrl` domains are L3 instances, which chiplets multiply), Ch. 62 (cross-process rings), Ch. 68–70 (NIC placement, DDIO, flow steering — the device sits in *one* domain), Appendix L §L.7 (the harness as a standing tool), Appendix Q (AMD companion). Ch. 17 said "make the distance to memory zero"; this chapter adds "and the distance between the two cores that talk."
+> **Leads into:** Ch. 19 (the TSC — the instrument the harness times with), Ch. 41–44 (SPSC/MPMC queues, seqlocks and the Disruptor — every one of them is a cache-line handoff whose cost this chapter's map predicts), Ch. 45 (threading topologies — the hop-cost model gets its per-pair numbers here), Ch. 52 §52.4.3 (pinning *to the right cores* using the map), Ch. 54 (cache allocation — `resctrl` domains are L3 instances, which chiplets multiply), Ch. 63 (cross-process rings), Ch. 69–71 (NIC placement, DDIO, flow steering — the device sits in *one* domain), Appendix L §L.7 (the harness as a standing tool), Appendix Q (AMD companion). Ch. 17 said "make the distance to memory zero"; this chapter adds "and the distance between the two cores that talk."
 
 ---
 
 ## 18.1 Why it matters: the two cores you pick decide the handoff
 
-Ch. 40's SPSC queue and Ch. 43's Disruptor are measured "with producer and consumer pinned to two cores." Which two? On the book's Ice Lake-SP reference box the question barely matters: one die, one mesh, one 24 MiB L3, and the one-way cache-line transfer between any two cores lands in a ~45–65 ns band. On the silicon most 2025–2026 fleets actually buy it matters enormously. An AMD EPYC socket is 8–16 **core complex dies (CCDs)**, each with its own 32 MiB L3, hanging off an I/O die; two cores in the same CCD exchange a line in ~20 ns, two cores in different CCDs in ~80–100 ns — through the I/O die and back. Intel's Sapphire/Emerald/Granite Rapids are 2–4 compute **tiles** stitched by EMIB into one logical mesh, with **Sub-NUMA Clustering** optionally cutting the socket into 2–3 NUMA nodes, each with its own L3 slices and memory controllers. A feed-handler → book → strategy → gateway chain (Ch. 94) is three handoffs; placed across CCDs it pays ~250 ns more than placed within one, per message — **larger than the entire difference between a good and a bad queue implementation**, and invisible to every tool in Ch. 40–43 because they measure the queue, not the distance.
+Ch. 41's SPSC queue and Ch. 44's Disruptor are measured "with producer and consumer pinned to two cores." Which two? On the book's Ice Lake-SP reference box the question barely matters: one die, one mesh, one 24 MiB L3, and the one-way cache-line transfer between any two cores lands in a ~45–65 ns band. On the silicon most 2025–2026 fleets actually buy it matters enormously. An AMD EPYC socket is 8–16 **core complex dies (CCDs)**, each with its own 32 MiB L3, hanging off an I/O die; two cores in the same CCD exchange a line in ~20 ns, two cores in different CCDs in ~80–100 ns — through the I/O die and back. Intel's Sapphire/Emerald/Granite Rapids are 2–4 compute **tiles** stitched by EMIB into one logical mesh, with **Sub-NUMA Clustering** optionally cutting the socket into 2–3 NUMA nodes, each with its own L3 slices and memory controllers. A feed-handler → book → strategy → gateway chain (Ch. 95) is three handoffs; placed across CCDs it pays ~250 ns more than placed within one, per message — **larger than the entire difference between a good and a bad queue implementation**, and invisible to every tool in Ch. 41–44 because they measure the queue, not the distance.
 
-The book's topology model so far is "socket + SMT sibling" (Ch. 17, 52). It cannot express a CCD, a tile, an SNC node or a V-Cache die, and `numactl --hardware` in the default firmware mode (NPS1, SNC off) hides all of them behind a single node. This chapter adds the missing level. §18.2 is the mechanism: what a chiplet socket is on AMD and Intel, what SNC/NPS modes expose, and why a cross-domain transfer costs what it does. §18.3 measures it with a 100-line **core-to-core ping-pong harness** that produces the latency matrix for every core pair and renders it as a heat-map whose *block structure* is the topology — the one experiment to run on every new box before anything is pinned. §18.4 turns the map into placement rules for queues, pipelines, IRQs and NICs, and into the SNC/NPS decision; §18.5 is what goes wrong.
+The book's topology model so far is "socket + SMT sibling" (Ch. 17, 53). It cannot express a CCD, a tile, an SNC node or a V-Cache die, and `numactl --hardware` in the default firmware mode (NPS1, SNC off) hides all of them behind a single node. This chapter adds the missing level. §18.2 is the mechanism: what a chiplet socket is on AMD and Intel, what SNC/NPS modes expose, and why a cross-domain transfer costs what it does. §18.3 measures it with a 100-line **core-to-core ping-pong harness** that produces the latency matrix for every core pair and renders it as a heat-map whose *block structure* is the topology — the one experiment to run on every new box before anything is pinned. §18.4 turns the map into placement rules for queues, pipelines, IRQs and NICs, and into the SNC/NPS decision; §18.5 is what goes wrong.
 
 ## 18.2 Mental model: a socket is a small cluster
 
@@ -41,7 +41,7 @@ A Zen-based EPYC or Ryzen package is a set of **CCDs** (core complex dies, TSMC-
    DRAM: local quadrant (NPS4) ~95–105 ns · far quadrant ~115–130 ns · other socket ~190+ ns
 ```
 
-Three firmware knobs shape what Linux sees. **NPS (nodes per socket)** = 1, 2 or 4 partitions the IOD's memory controllers into that many NUMA nodes, so a core's "local" DRAM is its quadrant's three channels (lower latency, a quarter of the bandwidth; the default NPS1 interleaves across all twelve). **"ACPI SRAT L3 Cache as NUMA Domain"** goes further and reports *every CCD* as a NUMA node — the only mode in which `numactl --hardware` tells you the L3 topology; with it off, the CCD boundaries are visible only in `/sys/devices/system/cpu/cpuN/cache/index3/shared_cpu_list` and in the heat-map. **Infinity Fabric clock** (FCLK) and the **"Determinism"/"Power" mode** set the IOD's speed and whether the fabric is allowed to downclock when idle — a fabric that sleeps adds the first-message tail of Ch. 55 to every cross-CCD hop.
+Three firmware knobs shape what Linux sees. **NPS (nodes per socket)** = 1, 2 or 4 partitions the IOD's memory controllers into that many NUMA nodes, so a core's "local" DRAM is its quadrant's three channels (lower latency, a quarter of the bandwidth; the default NPS1 interleaves across all twelve). **"ACPI SRAT L3 Cache as NUMA Domain"** goes further and reports *every CCD* as a NUMA node — the only mode in which `numactl --hardware` tells you the L3 topology; with it off, the CCD boundaries are visible only in `/sys/devices/system/cpu/cpuN/cache/index3/shared_cpu_list` and in the heat-map. **Infinity Fabric clock** (FCLK) and the **"Determinism"/"Power" mode** set the IOD's speed and whether the fabric is allowed to downclock when idle — a fabric that sleeps adds the first-message tail of Ch. 56 to every cross-CCD hop.
 
 On **Ryzen** (one or two CCDs, a smaller IOD, 2 memory channels) the same model holds at a smaller scale; the **X3D** parts add 64 MiB of stacked V-Cache to *one* CCD (on the two-CCD 7950X3D/9950X3D), making that CCD's L3 96 MiB at a few hundred MHz lower clock — a book that fits in 96 MiB but not in 32 MiB belongs on the V-Cache CCD, a core-bound strategy on the other, and the two must not be chained across the IOD if it can be helped (§18.4.1). Appendix Q carries the AMD-specific PMU names and knobs.
 
@@ -67,7 +67,7 @@ Sapphire Rapids (4th gen) is **four tiles** — each a quarter-mesh with ~15 cor
 
 ### 18.2.3 What a core-to-core transfer costs, and why the domain decides it
 
-A consumer's load of a line the producer just wrote (the SPSC handoff — Ch. 40) is a coherence transaction: the consumer misses in L1/L2, the request goes to the home agent (CHA on Intel, the CCD's L3 controller then the IOD's directory on AMD), the home finds the line **Modified** in the producer's cache and **snoops** it, the producer's cache forwards the data (a **HITM** — Ch. 39 §39.2), and the line changes state. The *path length* of that transaction is the topology:
+A consumer's load of a line the producer just wrote (the SPSC handoff — Ch. 41) is a coherence transaction: the consumer misses in L1/L2, the request goes to the home agent (CHA on Intel, the CCD's L3 controller then the IOD's directory on AMD), the home finds the line **Modified** in the producer's cache and **snoops** it, the producer's cache forwards the data (a **HITM** — Ch. 40 §40.2), and the line changes state. The *path length* of that transaction is the topology:
 
 ```
    path                                   one way (representative)   what sets it
@@ -82,7 +82,7 @@ A consumer's load of a line the producer just wrote (the SPSC handoff — Ch. 40
                                            ~130–200 ns (xGMI, Zen)
 ```
 
-Two consequences. First, **the handoff cost is the one-way latency, and a request/response pair costs two of them** — a strategy that asks the risk gate (Ch. 95) a question across CCDs waits ~180 ns for an answer that would have taken ~40 ns in-CCD. Second, **it is the same ratio for every lock-free structure in Part VI**: an MPMC queue's CAS on a contended head, a seqlock reader's re-check after a writer, a Disruptor's sequence barrier all move lines between the same two cores, so the map is a *multiplier* on all of them. The Ch. 37 false-sharing penalty likewise scales: two unrelated hot fields on one line, written by two cores in different CCDs, bounce at ~90 ns a throw instead of ~20.
+Two consequences. First, **the handoff cost is the one-way latency, and a request/response pair costs two of them** — a strategy that asks the risk gate (Ch. 96) a question across CCDs waits ~180 ns for an answer that would have taken ~40 ns in-CCD. Second, **it is the same ratio for every lock-free structure in Part VI**: an MPMC queue's CAS on a contended head, a seqlock reader's re-check after a writer, a Disruptor's sequence barrier all move lines between the same two cores, so the map is a *multiplier* on all of them. The Ch. 38 false-sharing penalty likewise scales: two unrelated hot fields on one line, written by two cores in different CCDs, bounce at ~90 ns a throw instead of ~20.
 
 ### 18.2.4 Reading the map: the four blocks
 
@@ -134,7 +134,7 @@ The harness: two threads, one cache line, a strict alternation of writes — A w
 #ifdef __cpp_lib_hardware_interference_size
 constexpr size_t kLine = std::hardware_destructive_interference_size;   // 64 on x86-64 with GCC
 #else
-constexpr size_t kLine = 64;        // Clang + libstdc++ does not define it (Ch. 39 §39.2); assume x86-64
+constexpr size_t kLine = 64;        // Clang + libstdc++ does not define it (Ch. 40 §40.2); assume x86-64
 #endif
 struct alignas(kLine) Line { std::atomic<uint32_t> v{0}; };
 
@@ -251,13 +251,13 @@ One block, ~62 ns everywhere: four vCPUs that the hypervisor scheduled onto one 
    ...
 ```
 
-**What the map predicts, and a check that it does.** The Ch. 40 SPSC queue (one line for the slot, `head`/`tail` on separate lines) moves one line per message in steady state plus the index line when the consumer catches up; its measured per-message handoff latency, same binary, same box, is **~44 ns in-CCD vs ~190 ns cross-CCD** on the Zen 4 part (representative), and ~110 ns on the 6326 for a far-mesh pair vs ~95 ns for a near one — within 10 % of "2 × one-way from the map." Three such handoffs in a feed → book → strategy → gateway chain is the ~250 ns of §18.1. The map is not a curiosity; it is the per-hop cost table Ch. 44's topology model needs.
+**What the map predicts, and a check that it does.** The Ch. 41 SPSC queue (one line for the slot, `head`/`tail` on separate lines) moves one line per message in steady state plus the index line when the consumer catches up; its measured per-message handoff latency, same binary, same box, is **~44 ns in-CCD vs ~190 ns cross-CCD** on the Zen 4 part (representative), and ~110 ns on the 6326 for a far-mesh pair vs ~95 ns for a near one — within 10 % of "2 × one-way from the map." Three such handoffs in a feed → book → strategy → gateway chain is the ~250 ns of §18.1. The map is not a curiosity; it is the per-hop cost table Ch. 45's topology model needs.
 
 ## 18.4 Techniques
 
 ### 18.4.1 Place the pipeline inside one L3 domain — and choose which domain
 
-The rule that follows from §18.2.4: **every pair of threads that hand each other cache lines on the hot path lives in one diagonal block.** For a Ch. 94 process-per-role topology that means the feed handler, book, strategy and gateway threads all sit in *one* CCD / tile / SNC node, and the shared-memory rings between them (Ch. 62) are allocated on that node's memory. The block is the budget: a Zen CCD gives you 8 cores (7 after you leave one for the domain's housekeeping — never core 0 of the socket, Ch. 51), an SPR tile ~15, an Ice Lake socket 16.
+The rule that follows from §18.2.4: **every pair of threads that hand each other cache lines on the hot path lives in one diagonal block.** For a Ch. 95 process-per-role topology that means the feed handler, book, strategy and gateway threads all sit in *one* CCD / tile / SNC node, and the shared-memory rings between them (Ch. 63) are allocated on that node's memory. The block is the budget: a Zen CCD gives you 8 cores (7 after you leave one for the domain's housekeeping — never core 0 of the socket, Ch. 52), an SPR tile ~15, an Ice Lake socket 16.
 
 Read the domains from the kernel, not from the part number:
 
@@ -293,36 +293,36 @@ Splitting the socket into nodes trades **lower local latency and less L3/memory-
                            NUMA-aware allocators place per CCD        noise (disable it: numa_balancing=0 — Appendix C.2)
 ```
 
-For the **hot box**, NPS4/SNC3 (or SNC2 on Ice Lake) with every hot process `numactl --cpunodebind=N --membind=N` is the right default: the hot path's bandwidth need is tiny, its latency need is total, and the node boundaries now *enforce* §18.4.1's placement rule instead of hiding it. For a **capture or replay box** (Ch. 99–100) that streams at 100 Gb/s, NPS1's interleaving wins. On AMD add "L3 as NUMA" whenever the node count is not already one-per-CCD, and set `kernel.numa_balancing=0` — automatic NUMA balancing migrates pages toward the CPU that touches them, which on a pinned hot box is a stall (the page's PTE is unmapped to detect the access — Ch. 29) that fixes nothing.
+For the **hot box**, NPS4/SNC3 (or SNC2 on Ice Lake) with every hot process `numactl --cpunodebind=N --membind=N` is the right default: the hot path's bandwidth need is tiny, its latency need is total, and the node boundaries now *enforce* §18.4.1's placement rule instead of hiding it. For a **capture or replay box** (Ch. 100–101) that streams at 100 Gb/s, NPS1's interleaving wins. On AMD add "L3 as NUMA" whenever the node count is not already one-per-CCD, and set `kernel.numa_balancing=0` — automatic NUMA balancing migrates pages toward the CPU that touches them, which on a pinned hot box is a stall (the page's PTE is unmapped to detect the access — Ch. 29) that fixes nothing.
 
 Measure the mode decision, do not reason it: Ch. 17 §17.3's `numactl`-bound pointer chase per node, before and after the switch, plus the `c2c` map (which does not change — the silicon is the same — but whose block boundaries now coincide with the node boundaries, which is the point).
 
 ### 18.4.3 IRQs, NIC queues and the device's domain
 
-A NIC is attached to **one** PCIe root, on one IOD quadrant or one I/O tile; its DMA writes land in that domain's memory controller and — with DDIO (Ch. 69) — in the L3 slices of that domain (on Intel; AMD has no DDIO equivalent, so RX data lands in DRAM and the first touch is a miss whichever CCD reads it). The consumer thread, the RX queue's interrupt (if it still has one — Ch. 51 §51.4.2) and the ring buffers all belong in the device's domain:
+A NIC is attached to **one** PCIe root, on one IOD quadrant or one I/O tile; its DMA writes land in that domain's memory controller and — with DDIO (Ch. 70) — in the L3 slices of that domain (on Intel; AMD has no DDIO equivalent, so RX data lands in DRAM and the first touch is a miss whichever CCD reads it). The consumer thread, the RX queue's interrupt (if it still has one — Ch. 52 §52.4.2) and the ring buffers all belong in the device's domain:
 
 ```
    DEV=$(readlink -f /sys/class/net/eth0/device)
    cat $DEV/numa_node $DEV/local_cpulist                      # the home node; the CPUs the kernel calls local
-   # RSS/flow steering (Ch. 70): the market-data queue's IRQ → a housekeeping core IN that domain,
+   # RSS/flow steering (Ch. 71): the market-data queue's IRQ → a housekeeping core IN that domain,
    # and the queue's consumer → a hot core in the same block of the map
    echo $(( 1 << 9 )) | xargs printf '%x\n' > /proc/irq/$(grep eth0-rx-2 /proc/interrupts | cut -d: -f1)/smp_affinity
-   # busy-poll / bypass (Ch. 75): no IRQ, but the polling thread still belongs in the device's domain
+   # busy-poll / bypass (Ch. 76): no IRQ, but the polling thread still belongs in the device's domain
 ```
 
-The domain's DRAM is where the NIC's descriptor rings and buffers must be allocated (`numa_node`-aware `mmap` + first-touch from a thread on that node — Ch. 17 §17.2.2; DPDK's `--socket-mem` per node — Ch. 75). A ring in the wrong domain costs the NIC a cross-fabric DMA *and* the consumer a cross-fabric read. On a two-NIC hot box (market data in, orders out — Ch. 7 §7.4.1), put both in slots homed on the **same** quadrant/tile so the feed → gateway chain never crosses; if the board makes that impossible, the order-entry NIC's domain is the one to cross *from*, because the egress hop is one line (the encoded order) while ingress is a stream.
+The domain's DRAM is where the NIC's descriptor rings and buffers must be allocated (`numa_node`-aware `mmap` + first-touch from a thread on that node — Ch. 17 §17.2.2; DPDK's `--socket-mem` per node — Ch. 76). A ring in the wrong domain costs the NIC a cross-fabric DMA *and* the consumer a cross-fabric read. On a two-NIC hot box (market data in, orders out — Ch. 7 §7.4.1), put both in slots homed on the **same** quadrant/tile so the feed → gateway chain never crosses; if the board makes that impossible, the order-entry NIC's domain is the one to cross *from*, because the egress hop is one line (the encoded order) while ingress is a stream.
 
 ### 18.4.4 `resctrl` domains, cross-domain traffic and the single-writer rule
 
 Three further consequences of "a socket is a cluster":
 
-- **Cache allocation is per L3 instance.** Ch. 53's CAT masks are programmed per `resctrl` domain = per L3; on a 4-CCD part there are four domains and a hot process pinned to CCD 0 is protected only by CCD 0's mask — the capture writer on CCD 3 cannot evict it anyway, and the mask you give CCD 3 is irrelevant to it. Plan capacity per domain: 32 MiB per CCD minus the housekeeping share, not "the socket's 128 MiB."
-- **Cross-domain traffic as a last resort, batched and one-way.** Where a hop *must* cross (a risk aggregator that sees every strategy's fills, a telemetry collector — Ch. 91), make it a single-writer, latest-value or batched publication (Ch. 41's seqlock, Ch. 45's conflation) so each crossing moves one line per *batch*, never a request/response pair. A cross-CCD futex wake (Ch. 49) is the worst case: a line transfer plus an IPI across the fabric.
+- **Cache allocation is per L3 instance.** Ch. 54's CAT masks are programmed per `resctrl` domain = per L3; on a 4-CCD part there are four domains and a hot process pinned to CCD 0 is protected only by CCD 0's mask — the capture writer on CCD 3 cannot evict it anyway, and the mask you give CCD 3 is irrelevant to it. Plan capacity per domain: 32 MiB per CCD minus the housekeeping share, not "the socket's 128 MiB."
+- **Cross-domain traffic as a last resort, batched and one-way.** Where a hop *must* cross (a risk aggregator that sees every strategy's fills, a telemetry collector — Ch. 92), make it a single-writer, latest-value or batched publication (Ch. 42's seqlock, Ch. 46's conflation) so each crossing moves one line per *batch*, never a request/response pair. A cross-CCD futex wake (Ch. 50) is the worst case: a line transfer plus an IPI across the fabric.
 - **Memory is per domain too.** Ch. 17's first-touch rule now applies at the CCD/tile level under NPS4/SNC: a ring allocated by the gateway thread in node 2 and consumed by a book thread in node 0 is "remote" within one socket. Allocate from the consumer's node and verify with `numastat -p <pid>` (per-node pages per process).
 
 ### 18.4.5 Reading the map for the second axis: SMT and hybrid blocks
 
-The map also shows the two topology facts earlier chapters handle one at a time. **SMT siblings** appear as the cheapest off-diagonal entries (~10 ns): useful for confirming `thread_siblings_list` and for the Ch. 52 decision (a sibling that *shares* L1/L2 with the hot thread hands lines over for free — and competes for everything else). On **hybrid client parts** (Ch. 7 §7.2.4) the E-core four-clusters appear as small tight blocks (shared L2) and P↔E pairs at ring latency; the hot pipeline goes on the P-core block, and a housekeeping thread that talks to it (the Ch. 89 logger's drain) sits on the E-cluster nearest it in the map — "nearest" being an empirical fact of the ring stop order that no datasheet publishes.
+The map also shows the two topology facts earlier chapters handle one at a time. **SMT siblings** appear as the cheapest off-diagonal entries (~10 ns): useful for confirming `thread_siblings_list` and for the Ch. 53 decision (a sibling that *shares* L1/L2 with the hot thread hands lines over for free — and competes for everything else). On **hybrid client parts** (Ch. 7 §7.2.4) the E-core four-clusters appear as small tight blocks (shared L2) and P↔E pairs at ring latency; the hot pipeline goes on the P-core block, and a housekeeping thread that talks to it (the Ch. 90 logger's drain) sits on the E-cluster nearest it in the map — "nearest" being an empirical fact of the ring stop order that no datasheet publishes.
 
 ## 18.5 Pitfalls & anti-patterns: the topology you cannot see
 
@@ -330,9 +330,9 @@ The map also shows the two topology facts earlier chapters handle one at a time.
 - **Adjacent CPU numbers are adjacent cores.** Linux enumerates SMT siblings as `N` and `N+cores`, and on AMD with SMT off CPUs 0–7 are CCD 0 — but with "L3 as NUMA" or on some firmware the enumeration interleaves CCDs. Pinning "producer on 4, consumer on 5" is a guess; the map is a measurement.
 - **The V-Cache CCD is the fast one.** On a 7950X3D/9950X3D the stacked-cache CCD runs a few hundred MHz *slower*; the core-bound strategy belongs on the plain CCD, the book on the V-Cache one — and a strategy that reads the book every message now crosses the IOD. Decide which of the two matters more with Ch. 7's clock-dependence table, or buy the single-CCD X3D part.
 - **Measuring the map with turbo on.** The one-way latency has a core-clock component (the spin loop, the L2 lookup) and a fabric component; with turbo on, a pair that happens to boost higher looks "closer." Run it under Ch. 7 §7.4.2's pinned ratio or Ch. 6's turbo-off, and say which.
-- **Forgetting the adjacent-line prefetcher.** Intel's spatial prefetcher pairs 64-byte lines into 128-byte chunks; two "separately aligned" hot fields 64 bytes apart can still travel together (Ch. 39 §39.2). Across CCDs that is a 90 ns false-sharing event per message. Pad to 128 where the two writers are in different domains.
+- **Forgetting the adjacent-line prefetcher.** Intel's spatial prefetcher pairs 64-byte lines into 128-byte chunks; two "separately aligned" hot fields 64 bytes apart can still travel together (Ch. 40 §40.2). Across CCDs that is a 90 ns false-sharing event per message. Pad to 128 where the two writers are in different domains.
 - **Cross-domain by memory placement.** Threads correctly in one CCD, the ring they share faulted in by a setup thread on another node (Ch. 17 §17.2.2's first-touch bug, now at CCD granularity under NPS4). `numastat -p` shows it; allocate from the consumer.
-- **Letting migration undo it.** A thread that is *not* pinned drifts; on a chiplet part a single migration across CCDs is a cold L3 *and* every subsequent handoff at 4× — a bimodal latency distribution that looks like a software bug. Pin (Ch. 51) and alarm on `cpu-migrations` (Ch. 104).
+- **Letting migration undo it.** A thread that is *not* pinned drifts; on a chiplet part a single migration across CCDs is a cold L3 *and* every subsequent handoff at 4× — a bimodal latency distribution that looks like a software bug. Pin (Ch. 52) and alarm on `cpu-migrations` (Ch. 105).
 - **Treating the IOD hop as free for the NIC.** A NIC on quadrant 3 feeding a consumer on CCD 0 pays the fabric on *every packet's DMA* and again on the read. Check `numa_node` before choosing the hot CCD, not after.
 - **Crossing domains with a request/response.** A synchronous query to a service on another CCD is two crossings (~180 ns) *plus* the service's own latency; restructure as a one-way publish (§18.4.4) or move the service into the block.
 
@@ -342,7 +342,7 @@ The map also shows the two topology facts earlier chapters handle one at a time.
 
 1. Run `c2c` on your development machine with SMT on. Identify the SMT-sibling pairs from the map alone, then confirm with `thread_siblings_list`. How much cheaper is a sibling handoff than a same-L3 one on your part?
 2. On a chiplet or multi-tile part (or a cloud instance that gives you ≥ 16 vCPUs), run the map and compare its block structure with `cache/index3/shared_cpu_list`. Do the blocks match the L3 domains exactly? If the instance is a VM, are the vCPUs you were given all in one domain?
-3. Build Ch. 40's SPSC queue and measure its per-message handoff latency for the cheapest and the most expensive pair in your map. Fit *handoff ≈ a + b × one-way*; what are *a* and *b*? Repeat for Ch. 43's Disruptor with a three-stage chain placed within one block and across blocks.
+3. Build Ch. 41's SPSC queue and measure its per-message handoff latency for the cheapest and the most expensive pair in your map. Fit *handoff ≈ a + b × one-way*; what are *a* and *b*? Repeat for Ch. 44's Disruptor with a three-stage chain placed within one block and across blocks.
 4. If you can change firmware: switch NPS1 → NPS4 (or SNC off → on), re-run Ch. 17 §17.3's node-bound pointer chase and the map. Which numbers changed, which did not, and what does `numactl --hardware` now show that it hid before?
 5. Write the pre-open check: a script that runs `c2c` on the hot cores for 60 s, bins the result into blocks, and diffs the block structure (not the raw ns) against a recorded baseline. Make it fail on a changed structure and merely warn on a ±15 % level shift.
 
@@ -353,7 +353,7 @@ The map also shows the two topology facts earlier chapters handle one at a time.
 - [ ] The hot block is the NIC's home domain (`numa_node`, `local_cpulist`); both NICs are homed on the same quadrant/tile where the board allows.
 - [ ] Rings, books and per-thread arenas are first-touched from the consuming node; `numastat -p` confirms zero remote pages for the hot processes.
 - [ ] NPS/SNC mode is a recorded decision (NPS4/SNC on for the hot box; NPS1 for streaming boxes), `numa_balancing=0`, and "L3 as NUMA" is on where the node count would otherwise hide the CCDs.
-- [ ] `resctrl` masks are planned per L3 instance, not per socket (Ch. 53).
+- [ ] `resctrl` masks are planned per L3 instance, not per socket (Ch. 54).
 - [ ] Cross-domain traffic that cannot be avoided is one-way and batched (seqlock snapshot, conflated publish), never request/response, never a cross-fabric futex wake.
 - [ ] Hot fields written from different domains are padded to 128 bytes on Intel (adjacent-line prefetcher).
 - [ ] Nothing hot is unpinned; `cpu-migrations` on the hot threads is alarmed at > 0.
@@ -369,8 +369,8 @@ The map also shows the two topology facts earlier chapters handle one at a time.
 
 ## 18.8 Additional Reading
 
-- Ch. 17 (*NUMA Architecture*) — the node-level rules this chapter applies within a socket; Ch. 8 (*The Memory Hierarchy & Caches*) — MESI, the L3 and the prefetchers; Ch. 39 (*False Sharing*) — HITM and `perf c2c`, the tools that see the transfers this chapter counts.
-- Ch. 44 (*Threading Topologies & the Hot Loop*) — the hop-cost model that consumes this chapter's numbers; Ch. 51 §51.4.3 — pinning with the map; Ch. 53 — `resctrl` per L3 instance.
+- Ch. 17 (*NUMA Architecture*) — the node-level rules this chapter applies within a socket; Ch. 8 (*The Memory Hierarchy & Caches*) — MESI, the L3 and the prefetchers; Ch. 40 (*False Sharing*) — HITM and `perf c2c`, the tools that see the transfers this chapter counts.
+- Ch. 45 (*Threading Topologies & the Hot Loop*) — the hop-cost model that consumes this chapter's numbers; Ch. 52 §52.4.3 — pinning with the map; Ch. 54 — `resctrl` per L3 instance.
 - Appendix Q (*AMD Zen Companion*) — the PMU events (`amd_l3`, `amd_df`) that count cross-CCD traffic, and the BIOS knob names; Appendix R — per-generation CCD/tile counts and L3 sizes; Appendix L §L.7 — the harness as part of the standing measurement kit.
 - Martin Thompson, *Mechanical Sympathy* blog, "Memory Barriers/Fences" and "Inter Thread Latency" — the original framing of a cache-line handoff as the unit of inter-thread cost.
 
