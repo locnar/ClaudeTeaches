@@ -326,4 +326,4 @@ inline u32 lb_simd(const u32* a /* padded to a multiple of 8 with 0xFFFFFFFF */,
 
 ---
 
-*Next: Ch. 32 — Limit Order Book Engineering.*
+*Next: Ch. 32 — Limit Order Book Engineering. The containers above were chosen for one structure: the limit order book. Ch. 32 builds it — market-by-order vs market-by-price, a dense tick ladder with re-centring and a cold overflow, the pool-backed order table behind three id maps, the BBO/depth split, snapshot rebuild — and replays five million captured-style events through it and through the `std::map`/`std::list` baseline to measure the distribution §31.4.5 only promised.*

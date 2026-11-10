@@ -463,13 +463,23 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 31.6 Exercises & checklist
 
 ### [32. Limit Order Book Engineering](32-limit-order-book-engineering.md)
-- 32.1 Why it matters: TODO
-- 32.2 Mental model: TODO
-- 32.3 Measure it: TODO
+- 32.1 Why it matters: the book is the data structure on the critical path
+- 32.2 Mental model
+  - 32.2.1 Market-by-price (L2) vs market-by-order (L3) vs top-of-book: memory and per-message work
+  - 32.2.2 Indexing price levels: dense ladder, sorted store, tree
+  - 32.2.3 Order identity: three id maps
+  - 32.2.4 The access distribution, and what a re-centre is
+- 32.3 Measure it: five million events through five books (ladder + direct-addressed ids / flat hash / `unordered_map`, the L2 ladder, the `std::map`/`std::list` baseline; the re-centre tail; allocations counted)
 - 32.4 Techniques
-  - 32.4.1 TODO
-- 32.5 Pitfalls & anti-patterns: TODO
-- 32.6 Exercises & checklist
+  - 32.4.1 The dense ladder with a cold overflow and re-centring
+  - 32.4.2 Occupancy bitmaps and finding the next best
+  - 32.4.3 The order table: pool, direct addressing, and the alternatives
+  - 32.4.4 BBO vs depth: the hot/cold split and publication
+  - 32.4.5 Snapshot rebuild and increment splice
+  - 32.4.6 Consolidated and multi-venue books (where they attach)
+- 32.5 Verify the codegen: the add/cancel fast path
+- 32.6 Pitfalls & anti-patterns: tick bands, crossed books, id reuse, L2 queue position, re-centring on every add
+- 32.7 Exercises & checklist
 
 ### [33. Memory Mapping](33-memory-mapping.md)
 - 33.1 Why it matters: shared memory and zero-copy I/O
