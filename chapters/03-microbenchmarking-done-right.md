@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 (*The Latency Mindset*) — you reason about the distribution and care about p99/p99.9, not the mean. Ch. 2 (*Measure First*) — you can read PMU counters and know whether a workload is memory- or compute-bound. For the hands-on parts: a Linux box, a C++20 compiler, [Google Benchmark](https://github.com/google/benchmark) and [HdrHistogram_c](https://github.com/HdrHistogram/HdrHistogram_c) (or the C++ port).
 >
-> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 104. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
+> **Leads into:** Ch. 4 (*Reading the Machine*) — when a benchmark result surprises you, the asm tells you why. The statistical rigor and tail-capture here underpin every "before/after" measurement in Parts II–XI and the latency-regression gates of Ch. 108. Appendix L (*Reproducible Benchmark & Measurement Harness*) packages this chapter's method as copy-paste code.
 
 ---
 
@@ -29,10 +29,10 @@ The thesis of this chapter: a microbenchmark is a controlled experiment, and lik
 
 A microbenchmark does not measure "how fast this code is." It measures **how fast this code is, in this loop, on this machine, in this microarchitectural state.** That last clause is where benchmarks go to die. The state includes:
 
-- **Cache contents.** A loop touching the same small buffer runs entirely from L1; the same code in production may miss to L3 or DRAM on every call (Ch. 7). A benchmark over a 64-element array and the same code over a 64-million-element order book are different measurements of the same function.
-- **Branch-predictor training.** Feed a branch the same outcome a million times and it predicts perfectly (near-zero cost); feed it random real-world data and it mispredicts (~15–20 cycles, Ch. 13). Benchmarks with fixed or trivially patterned inputs measure a branch predictor that has memorized the test.
+- **Cache contents.** A loop touching the same small buffer runs entirely from L1; the same code in production may miss to L3 or DRAM on every call (Ch. 8). A benchmark over a 64-element array and the same code over a 64-million-element order book are different measurements of the same function.
+- **Branch-predictor training.** Feed a branch the same outcome a million times and it predicts perfectly (near-zero cost); feed it random real-world data and it mispredicts (~15–20 cycles, Ch. 14). Benchmarks with fixed or trivially patterned inputs measure a branch predictor that has memorized the test.
 - **CPU frequency.** Turbo, C-states, and thermal throttling (Ch. 6) mean the core's clock depends on what ran before and how hot the chip is. The same instructions take a different number of *nanoseconds* at 2.0 GHz vs 3.5 GHz.
-- **Data layout and alignment** of the specific objects the benchmark allocated, which may differ from production (Ch. 9).
+- **Data layout and alignment** of the specific objects the benchmark allocated, which may differ from production (Ch. 10).
 
 The discipline that follows: **make the benchmark's microarchitectural state resemble production, and hold it constant across the variants you compare.** If you're comparing container A vs B, both must see the same input distribution, the same working-set size, the same warm-up, the same pinned core and frequency. The benchmark is only valid as a *relative* comparison under identical conditions — and even then, treat the absolute nanoseconds as the *best case* unless you've deliberately reproduced production's cold, unpredictable reality.
 
@@ -162,7 +162,7 @@ BM_FlatBinarySearch_median      31.0 ns  31.0 ns
 BM_FlatBinarySearch_stddev       0.6 ns
 ```
 
-Don't stop at "the hash map won." Ask Ch. 2's question — *why?* — because the answer decides whether the result generalizes. Binary search does ~12 dependent comparisons (`log2(4096)`) whose directions are unpredictable on random keys, so roughly half of them mispredict (~15–20 cycles each, Ch. 13); the hash map does one hash and (usually) one probe. Confirm with `perf stat` on each benchmark in isolation (`--benchmark_filter=`): you'll see the binary search paying in branch-misses, *not* cache misses — the 16 KiB sorted array (4096 × 4 B) sits entirely in the 48 KiB L1d. And note the caveat that makes this a *teaching* result, not a verdict: at `N = 4096` with random keys this is a branch-prediction story, not the cache-friendly regime where flat structures shine over node-based ones — change `N`, change the key distribution (sequential? clustered like price levels?), and the winner can flip. **That sensitivity is the lesson**: the benchmark is only an answer for the conditions you gave it. One more honesty note: consecutive iterations here are *independent*, so the out-of-order core overlaps one lookup with the next and the figures are **throughput per op**, not the latency a dependent hot path sees. To measure latency, feed each result into the next probe index (a dependent chain, as the HdrHistogram harness in §3.4.3 and Appendix L.1 do) — the numbers will be higher, and they are the ones a tick-to-trade budget cares about. The order-book case study (Ch. 28) revisits exactly this comparison under realistic access patterns and reaches a more nuanced conclusion.
+Don't stop at "the hash map won." Ask Ch. 2's question — *why?* — because the answer decides whether the result generalizes. Binary search does ~12 dependent comparisons (`log2(4096)`) whose directions are unpredictable on random keys, so roughly half of them mispredict (~15–20 cycles each, Ch. 14); the hash map does one hash and (usually) one probe. Confirm with `perf stat` on each benchmark in isolation (`--benchmark_filter=`): you'll see the binary search paying in branch-misses, *not* cache misses — the 16 KiB sorted array (4096 × 4 B) sits entirely in the 48 KiB L1d. And note the caveat that makes this a *teaching* result, not a verdict: at `N = 4096` with random keys this is a branch-prediction story, not the cache-friendly regime where flat structures shine over node-based ones — change `N`, change the key distribution (sequential? clustered like price levels?), and the winner can flip. **That sensitivity is the lesson**: the benchmark is only an answer for the conditions you gave it. One more honesty note: consecutive iterations here are *independent*, so the out-of-order core overlaps one lookup with the next and the figures are **throughput per op**, not the latency a dependent hot path sees. To measure latency, feed each result into the next probe index (a dependent chain, as the HdrHistogram harness in §3.4.3 and Appendix L.1 do) — the numbers will be higher, and they are the ones a tick-to-trade budget cares about. The order-book case study (Ch. 30) revisits exactly this comparison under realistic access patterns and reaches a more nuanced conclusion.
 
 ---
 
@@ -202,12 +202,12 @@ The trap on the *other* side: over-applying these barriers can *pessimize* the c
 
 The environment is a variable you must nail down, or run-to-run noise will swamp the effect you're chasing. The standard pre-flight for any latency benchmark:
 
-- **Pin the thread to an isolated core.** `taskset -c <cpu>` (or `sched_setaffinity`, Ch. 48) stops the scheduler from migrating your benchmark across cores mid-run, which trashes caches and confuses frequency. Ideally that core is `isolcpus`/`nohz_full` (Ch. 51) so nothing else runs on it.
+- **Pin the thread to an isolated core.** `taskset -c <cpu>` (or `sched_setaffinity`, Ch. 50) stops the scheduler from migrating your benchmark across cores mid-run, which trashes caches and confuses frequency. Ideally that core is `isolcpus`/`nohz_full` (Ch. 53) so nothing else runs on it.
 - **Fix the CPU frequency.** Set the governor to `performance` and, for the tightest results, disable turbo (`/sys/devices/system/cpu/intel_pstate/no_turbo`) so the clock is *constant* rather than ramping with load and temperature (Ch. 6). A benchmark whose result depends on whether turbo kicked in is measuring the thermal state, not your code.
-- **Warm up.** Discard the first iterations: the first calls pay cold I-cache/D-cache, cold branch predictor, cold TLB, and first-touch page faults (Ch. 26, 53). Google Benchmark's auto-iteration absorbs much of this, but for hand-rolled latency loops, explicitly run a warm-up phase before you start recording. **But** — and this ties back to §3.2.1 — warming up measures the *warm* path; if production runs cold (the first message after a quiet period), you must *also* measure the cold case deliberately. Both numbers are real; they answer different questions.
-- **Quiesce the machine.** Close other load, disable `irqbalance` and steer IRQs off your core (Ch. 48), and prefer a tuned box (Appendix C). Noisy neighbors are a tail source.
+- **Warm up.** Discard the first iterations: the first calls pay cold I-cache/D-cache, cold branch predictor, cold TLB, and first-touch page faults (Ch. 28, 56). Google Benchmark's auto-iteration absorbs much of this, but for hand-rolled latency loops, explicitly run a warm-up phase before you start recording. **But** — and this ties back to §3.2.1 — warming up measures the *warm* path; if production runs cold (the first message after a quiet period), you must *also* measure the cold case deliberately. Both numbers are real; they answer different questions.
+- **Quiesce the machine.** Close other load, disable `irqbalance` and steer IRQs off your core (Ch. 50), and prefer a tuned box (Appendix C). Noisy neighbors are a tail source.
 
-A frequency-independent cross-check: measure in **core cycles** (the PMU `cycles` event — `perf stat -e cycles`, or `rdpmc`; Ch. 17) as well as nanoseconds (`clock_gettime`/`rdtscp` — the TSC is a constant-rate clock, *not* a core-cycle counter, so it can only ever serve as the ns side of this check). If two runs disagree in ns but agree in cycles, the difference was frequency, not your code.
+A frequency-independent cross-check: measure in **core cycles** (the PMU `cycles` event — `perf stat -e cycles`, or `rdpmc`; Ch. 19) as well as nanoseconds (`clock_gettime`/`rdtscp` — the TSC is a constant-rate clock, *not* a core-cycle counter, so it can only ever serve as the ns side of this check). If two runs disagree in ns but agree in cycles, the difference was frequency, not your code.
 
 ### 3.4.3 Tail-latency capture with HdrHistogram
 
@@ -237,7 +237,7 @@ int main() {
     std::uint32_t x = 1;
     for (int i = 0; i < WARMUP; ++i) x = operation_under_test(x);  // warm, untimed
 
-    using clk = std::chrono::steady_clock;  // see Ch. 17 on clock choice
+    using clk = std::chrono::steady_clock;  // see Ch. 19 on clock choice
     for (int i = 0; i < MEASURE; ++i) {
         auto t0 = clk::now();
         x = operation_under_test(x);               // dependent chain: not elided
@@ -257,9 +257,9 @@ int main() {
 }
 ```
 
-Two caveats that matter here. First, **clock overhead and resolution** (Ch. 17): if the operation is only a few nanoseconds, two `clock::now()` calls may cost more than the work — measure the clock's own overhead and subtract it, or time *batches* of N ops and divide (accepting that batching hides per-op tail, a §3.2.2-flavored trade-off). Second, this back-to-back loop measures **service time**, so it is CO-immune by construction but does *not* show queueing tails; to measure response-time-under-load you'd drive it from a scheduled, CO-corrected generator (§3.2.2). Pick the one that matches your question. Appendix L §L.2 gives that generator as copy-paste code: the same loop paced to a fixed intended schedule, keeping this service-time histogram and a second response-time histogram (`end − intended`, one sample per op) side by side — and explains why `hdr_record_corrected_value`'s back-fill belongs only on an *unpaced* closed loop, never combined with pacing or mixed into the service-time histogram.
+Two caveats that matter here. First, **clock overhead and resolution** (Ch. 19): if the operation is only a few nanoseconds, two `clock::now()` calls may cost more than the work — measure the clock's own overhead and subtract it, or time *batches* of N ops and divide (accepting that batching hides per-op tail, a §3.2.2-flavored trade-off). Second, this back-to-back loop measures **service time**, so it is CO-immune by construction but does *not* show queueing tails; to measure response-time-under-load you'd drive it from a scheduled, CO-corrected generator (§3.2.2). Pick the one that matches your question. Appendix L §L.2 gives that generator as copy-paste code: the same loop paced to a fixed intended schedule, keeping this service-time histogram and a second response-time histogram (`end − intended`, one sample per op) side by side — and explains why `hdr_record_corrected_value`'s back-fill belongs only on an *unpaced* closed loop, never combined with pacing or mixed into the service-time histogram.
 
-The production sequel — recording into a shared-memory histogram with a few stores, scraping it off-core, and the rule that histograms merge by adding buckets while percentiles cannot be averaged across hosts or windows — is Ch. 86.
+The production sequel — recording into a shared-memory histogram with a few stores, scraping it off-core, and the rule that histograms merge by adding buckets while percentiles cannot be averaged across hosts or windows — is Ch. 90.
 
 ### 3.4.4 Statistical rigor: repetitions, variance, regression
 
@@ -269,7 +269,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - **Enough samples for the percentile you quote.** You cannot honestly state p99.9 from 1,000 samples — that's *one* event in the tail (Ch. 1). For p99.9 you want ≫ 10⁵ samples; for p99.99, ≫ 10⁶. State your sample count alongside the percentile.
 - **Compare, don't just measure.** The question is almost always "is B faster than A?", which is a *difference of distributions*, not of means. Tools like Google Benchmark's `compare.py` apply a U-test (Mann–Whitney) to tell you whether the difference is statistically significant or noise. A 2% "improvement" inside 5% run-to-run noise is nothing.
 - **Watch for multimodality.** A bimodal histogram (two humps) usually means two regimes — e.g. cache-hit vs cache-miss, or turbo vs non-turbo — and a single percentile summary hides it. Look at the histogram shape (Ch. 1's picture), not just the quantiles.
-- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 104.
+- **Gate regressions in CI.** Once a benchmark is trustworthy, store its baseline and fail the build when p99/p99.9 regresses beyond noise. This is how the hard-won wins of Parts II–XI don't silently rot; it's built out in Ch. 108.
 
 ---
 
@@ -280,9 +280,9 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - **Coordinated omission.** A scheduled/rate-limited loop that stalls inside a slow op and never records the requests that queued behind it (§3.2.2). Erases exactly the tail you care about. Use intended-time accounting or measure pure service time and say which.
 - **Unrepresentative microarchitectural state.** Tiny working set that fits in L1, fixed/patterned inputs the branch predictor memorizes, perfectly aligned freshly-mmap'd buffers — all flatter the code vs production (§3.2.1). Size the working set and randomize inputs to match reality, and treat clean-room numbers as best-case.
 - **Frequency and migration noise.** No pinning, no fixed governor, turbo ramping — the result reflects the thermal/scheduler state, not the code. Pin, fix frequency, cross-check in cycles (§3.4.2).
-- **The clock costs more than the work.** Timing single sub-10 ns ops with two `clock::now()` calls measures the clock. Subtract clock overhead or batch (Ch. 17).
+- **The clock costs more than the work.** Timing single sub-10 ns ops with two `clock::now()` calls measures the clock. Subtract clock overhead or batch (Ch. 19).
 - **One run, one number, no significance test.** Claiming a 3% win that's inside the noise. Repeat, report spread, run a significance test (§3.4.4).
-- **Benchmark drift / wrong build.** Benchmarking a debug build, a different `-march`, or stale flags vs what you ship (Ch. 2, 24). The benchmark must use production flags.
+- **Benchmark drift / wrong build.** Benchmarking a debug build, a different `-march`, or stale flags vs what you ship (Ch. 2, 26). The benchmark must use production flags.
 
 ---
 
@@ -291,7 +291,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 **Exercises**
 
 1. **Catch the optimizer red-handed.** Write a Google Benchmark of a small arithmetic function *without* `DoNotOptimize`. Note the (nonsense) time. Add `DoNotOptimize` and compare. Then read the inner loop in `perf annotate` or Godbolt (Ch. 4) and confirm the first version's work was deleted.
-2. **Make the working set bite.** Take `bench_lookup.cpp` and sweep `N` over {64, 1K, 64K, 1M}. Plot the per-op time for both containers vs `N`. At which size does the flat array's cache-friendliness stop helping? Explain using `perf stat` cache-miss counts (Ch. 2, 7).
+2. **Make the working set bite.** Take `bench_lookup.cpp` and sweep `N` over {64, 1K, 64K, 1M}. Plot the per-op time for both containers vs `N`. At which size does the flat array's cache-friendliness stop helping? Explain using `perf stat` cache-miss counts (Ch. 2, 8).
 3. **Build a coordinated-omission demo.** Write a scheduled loop (one op per fixed interval) where the op occasionally `sleep`s for 100× the interval. Record latency two ways: `now - prev` (naïve) and `now - intended_start(i)` (CO-corrected). Compare the p99.9 of each. By how much did the naïve version understate the tail?
 4. **Tail vs mean.** Use the HdrHistogram harness on an operation that occasionally misses cache. Report mean, p50, p99, p99.9, max. Which summary would have hidden the cache-miss tail? Tie back to Ch. 1's §1.3.
 5. **Is the win real?** Microbenchmark two implementations that differ by ~3%. Run 20 repetitions each and apply Google Benchmark's `compare.py`. Is the difference statistically significant, or inside the noise?
@@ -306,7 +306,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - [ ] I have **enough samples** for the percentile I quote (≫10⁵ for p99.9).
 - [ ] I ran **repetitions**, report the **spread**, and used a **significance test** before claiming a win.
 - [ ] I can **explain *why*** the winner won via PMU counters (Ch. 2) — the result generalizes only if I understand it.
-- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 104).
+- [ ] The benchmark uses **production build flags** and is wired into a **regression gate** (Ch. 108).
 
 ---
 
@@ -325,7 +325,7 @@ One run is an anecdote. The tail and the noise both demand repetition and a litt
 - nanobench (Martin Leitner-Ankerl) — a lightweight single-header alternative to Google Benchmark with built-in PMU integration and median/MdAPE reporting.
 - Appendix E (*Latency Numbers Every Trading Developer Should Know*) — the reference costs your benchmark results should be sanity-checked against.
 - Appendix L (*Reproducible Benchmark & Measurement Harness*) — the copy-paste Google Benchmark + HdrHistogram harness and environment script built from this chapter.
-- Ch. 17 (*Timekeeping: TSC, rdtsc & Clock Sources*) — measuring nanoseconds reliably, clock overhead, and why `steady_clock` may not be precise enough.
+- Ch. 19 (*Timekeeping: TSC, rdtsc & Clock Sources*) — measuring nanoseconds reliably, clock overhead, and why `steady_clock` may not be precise enough.
 
 ---
 
