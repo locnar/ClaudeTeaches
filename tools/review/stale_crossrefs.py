@@ -64,6 +64,7 @@ STEPS = [
     ("insert", 57),  # Ch. 58 anatomy-linux-network-datapath
     ("insert", 27),  # Ch. 28 static-analysis-performance-contracts
     ("insert", 31),  # Ch. 32 limit-order-book-engineering
+    ("insert", 36),  # Ch. 37 streaming-statistics-incremental-signals
     # INSERT_STEPS_END
 ]
 def old2new(n):

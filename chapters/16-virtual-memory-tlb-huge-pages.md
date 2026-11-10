@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (the memory hierarchy — the TLB is a cache, and a page-table walk is *itself* a sequence of memory accesses that hit or miss those same caches), Ch. 9–10 (data layout — footprint and access pattern drive TLB pressure), Ch. 13 (the I-TLB side, for hot *code*), Ch. 2–3 (top-down and benchmarking — §16.3).
 >
-> **Leads into:** Ch. 17 (NUMA — page placement is *where* a translated physical page lives, on which node), Ch. 29 (memory-management fundamentals — page faults, first-touch, the cost of growing the working set), Ch. 33 (`mmap`/`mlock`/pre-faulting — the syscall-level controls for the pages this chapter measures). Explicit huge pages and `mlockall` reappear in the system-tuning checklist (Appendix C) and hot-path warming (Ch. 58).
+> **Leads into:** Ch. 17 (NUMA — page placement is *where* a translated physical page lives, on which node), Ch. 29 (memory-management fundamentals — page faults, first-touch, the cost of growing the working set), Ch. 33 (`mmap`/`mlock`/pre-faulting — the syscall-level controls for the pages this chapter measures). Explicit huge pages and `mlockall` reappear in the system-tuning checklist (Appendix C) and hot-path warming (Ch. 59).
 
 ---
 
@@ -143,12 +143,12 @@ There are two ways to get 2 MB pages, and the choice is a classic latency trade-
 
 **Explicit huge pages (hugetlbfs / `MAP_HUGETLB`)** — pages **reserved at boot or via sysctl** (`vm.nr_hugepages`, or `hugeadm`), then requested explicitly via `mmap(..., MAP_HUGETLB, ...)`, a hugetlbfs file mapping, or `shmget(SHM_HUGETLB)`. 1 GB pages take `MAP_HUGETLB | MAP_HUGE_1GB`; reserve them at boot (`hugepagesz=1G hugepages=N`) for reliability — runtime allocation through `/sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages` works (Linux 3.16+) but needs 1 GB of physically contiguous memory, which `hugetlb_cma=<size>` (5.7+) sets aside for exactly that.
 
-- **Pros:** **deterministic** — the pages are pre-reserved, pinned (not swappable), never demoted, and faulted on first touch with no background daemon. No `khugepaged` jitter. This is the **HFT default** for the big hot regions: order books, market-data ring buffers, capture journals (Ch. 100), and (via linker/loader options or `hugetlbfs` text remapping) the hot **code** segment to cut iTLB misses (Ch. 13).
+- **Pros:** **deterministic** — the pages are pre-reserved, pinned (not swappable), never demoted, and faulted on first touch with no background daemon. No `khugepaged` jitter. This is the **HFT default** for the big hot regions: order books, market-data ring buffers, capture journals (Ch. 101), and (via linker/loader options or `hugetlbfs` text remapping) the hot **code** segment to cut iTLB misses (Ch. 13).
 - **Cons:** up-front reservation (memory carved out of the general pool at boot, reducing flexibility), allocation can fail if the pool is exhausted or fragmented (reserve early — ideally at boot, before fragmentation), and it requires explicit code/config rather than "just working."
 
 *Verify it, don't assume it.* `/proc/meminfo` shows the pool (`HugePages_Total`/`Free`/`Rsvd`; the per-node pools are under `/sys/devices/system/node/nodeN/hugepages/` — Ch. 17), `grep -E 'AnonHugePages|FilePmdMapped' /proc/<pid>/smaps_rollup` shows how much of the process is actually huge-page-backed, and `/proc/vmstat`'s `thp_fault_alloc`/`thp_fault_fallback`/`thp_collapse_alloc` tell you whether THP faults succeeded or fell back. On Linux 6.1+ `madvise(MADV_COLLAPSE)` collapses an existing region into huge pages synchronously, under your control, at warm-up time rather than whenever `khugepaged` gets to it (Appendix I has the one-liners).
 
-Practical recipe for a low-latency box (ties Appendix C): reserve explicit huge pages at boot, map the large hot data structures and (where possible) the hot text on them, **pre-fault and `mlock`** them during warm-up (Ch. 33, 58) so the first real message never pays a fault, and set THP to `madvise` or `never` to avoid compaction/collapse jitter. Use 1 GB pages for very large, long-lived regions (multi-GB capture buffers) where even the 2 MB page count would pressure the STLB.
+Practical recipe for a low-latency box (ties Appendix C): reserve explicit huge pages at boot, map the large hot data structures and (where possible) the hot text on them, **pre-fault and `mlock`** them during warm-up (Ch. 33, 59) so the first real message never pays a fault, and set THP to `madvise` or `never` to avoid compaction/collapse jitter. Use 1 GB pages for very large, long-lived regions (multi-GB capture buffers) where even the 2 MB page count would pressure the STLB.
 
 ### 16.4.2 Reducing TLB pressure via layout
 
@@ -166,9 +166,9 @@ The unifying point: **TLB pressure is a function of how many pages you touch and
 
 ## 16.5 Pitfalls & anti-patterns: THP stalls, fragmentation
 
-- **THP compaction/collapse jitter.** Leaving THP on `always` (with `defrag` permitting direct compaction) on a jitter-sensitive box invites unpredictable fault-time compaction and `khugepaged` collapse stalls in the middle of the hot path (§16.4.1) — great average, ugly p99.9 (Ch. 1). Prefer explicit huge pages + THP `madvise`/`never` on a latency box; measure jitter with and without (Ch. 6, 55).
+- **THP compaction/collapse jitter.** Leaving THP on `always` (with `defrag` permitting direct compaction) on a jitter-sensitive box invites unpredictable fault-time compaction and `khugepaged` collapse stalls in the middle of the hot path (§16.4.1) — great average, ugly p99.9 (Ch. 1). Prefer explicit huge pages + THP `madvise`/`never` on a latency box; measure jitter with and without (Ch. 6, 56).
 - **Allocating huge pages late / fragmentation failure.** Explicit huge pages need contiguous physical memory; request them **early** (boot-time reservation), because after the system has run a while, physical memory fragments and the *reservation* can silently come up short — writing N to `vm.nr_hugepages` may allocate fewer than N with no error. Read the pool back (`HugePages_Total` in `/proc/meminfo`); a later `mmap(MAP_HUGETLB)` then fails with `ENOMEM` (or a `MAP_NORESERVE` fault `SIGBUS`es) — explicit pages never degrade to 4 KB, only THP does. Reserve at boot, verify the pool, fail loudly if unavailable.
-- **Forgetting to pre-fault / `mlock`.** Mapping huge pages doesn't touch them; the **first** access still faults (a big fault for a 2 MB page — Ch. 29). On the hot path that fault is a latency spike on the first real message. Pre-fault and `mlock` during warm-up (Ch. 33, 58).
+- **Forgetting to pre-fault / `mlock`.** Mapping huge pages doesn't touch them; the **first** access still faults (a big fault for a 2 MB page — Ch. 29). On the hot path that fault is a latency spike on the first real message. Pre-fault and `mlock` during warm-up (Ch. 33, 59).
 - **Assuming the data cost moved.** Huge pages cut *translation*, not *data* latency. A random access to cold DRAM still costs the DRAM latency (Ch. 8); huge pages remove the *extra* page-walk on top. If you're DRAM-bandwidth/latency-bound, fix locality (Ch. 8–9), not just page size.
 - **Optimizing the TLB when you're not TLB-bound.** If the working set fits the 4 KB TLB reach (a few MB) or `dtlb_load_misses.walk_*` is low, huge pages buy nothing — and reserving them wastes memory. Measure the TLB counters first (§16.3); don't cargo-cult huge pages.
 - **1 GB pages used indiscriminately.** 1 GB pages want boot reservation (§16.4.1) and are coarse — internal fragmentation and inflexible. Reserve them only for genuinely huge, long-lived regions; 2 MB is the right granularity for most hot structures.
@@ -193,7 +193,7 @@ The unifying point: **TLB pressure is a function of how many pages you touch and
 - [ ] I measured **`dtlb_load_misses.walk_*`** (not just cache misses) and confirmed the hot path is **TLB-bound** before reaching for huge pages.
 - [ ] Large hot regions (books, ring buffers, capture buffers) use **explicit huge pages** (`MAP_HUGETLB`/hugetlbfs), reserved **early/at boot**, not late.
 - [ ] THP is set to **`madvise`/`never`** on the latency box (or measured to add no jitter), so neither fault-time compaction nor `khugepaged` collapse can stall the hot path.
-- [ ] Huge-page regions are **pre-faulted and `mlock`ed during warm-up** (Ch. 33, 58) — the first real message pays no fault.
+- [ ] Huge-page regions are **pre-faulted and `mlock`ed during warm-up** (Ch. 33, 59) — the first real message pays no fault.
 - [ ] Pre-faulting happens **on the right NUMA node / by the using thread** (Ch. 17) — no accidental remote placement of a coarse 2 MB/1 GB page.
 - [ ] I cut **page demand** via layout (contiguous/flat containers, hot/cold split, arena co-location — Ch. 9–10, 30–31), not page size alone.
 - [ ] Hot **code** TLB (iTLB) pressure is addressed (lean code, huge-page `.text` where it helps — Ch. 13) for large hot footprints.
@@ -213,7 +213,7 @@ The unifying point: **TLB pressure is a function of how many pages you touch and
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical TLB-miss analysis, huge-page experiments, and reading `dtlb_*` counters.
 - Kernel and `libhugetlbfs` documentation, and writeups on remapping a program's text/BSS onto huge pages (for the iTLB side, Ch. 13).
-- Ch. 17 (*NUMA*) — *where* the translated physical page lives, and first-touch placement of huge pages; Ch. 29 (*Memory Management Fundamentals*) — page faults and first-touch cost; Ch. 33 (*Memory Mapping*) — `mmap`/`mlock`/pre-faulting the pages this chapter measures; Ch. 58 (*Keeping the Hot Path Warm*) — pre-faulting and warming translations.
+- Ch. 17 (*NUMA*) — *where* the translated physical page lives, and first-touch placement of huge pages; Ch. 29 (*Memory Management Fundamentals*) — page faults and first-touch cost; Ch. 33 (*Memory Mapping*) — `mmap`/`mlock`/pre-faulting the pages this chapter measures; Ch. 59 (*Keeping the Hot Path Warm*) — pre-faulting and warming translations.
 - **Appendix C** (System Tuning Checklist) — the boot-time/`sysctl` huge-page and THP settings consolidated; **Appendix E** — the TLB-miss/page-walk latency numbers that frame this chapter.
 
 ---
