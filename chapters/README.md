@@ -1141,7 +1141,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part XI — Heterogeneous Computing & Hardware Acceleration
 
-*Pushing work off the CPU onto GPUs, FPGAs, and SmartNICs — and where the PCIe round-trip keeps them off the order path.*
+*The PCIe boundary and how user space crosses it (BARs, VFIO, DMA mappings, the driver/module split), then pushing work off the CPU onto GPUs, FPGAs, and SmartNICs — and where the PCIe round-trip keeps them off the order path.*
 
 ### [83. PCIe & the Host–Device Boundary](83-pcie-host-device-boundary.md)
 - 83.1 Why it matters: the round-trip floor under every offload
@@ -1158,12 +1158,20 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 83.6 Exercises & checklist
 
 ### [84. Userspace Drivers & Kernel Modules: UIO, VFIO and the Device Boundary](84-userspace-drivers-kernel-modules.md)
-- 84.1 Why it matters: TODO
-- 84.2 Mental model: TODO
-- 84.3 Measure it: TODO
+- 84.1 Why it matters: every bypass path stands on a userspace driver
+- 84.2 Mental model
+  - 84.2.1 Three routes to the device: `resourceN`, UIO, VFIO
+  - 84.2.2 IOMMU groups, ACS, and the DMA mapping
+  - 84.2.3 Interrupts to a process: eventfds, INTx and the two tiers
+  - 84.2.4 When to go kernel-side
+- 84.3 Measure it: an eventfd completion vs a polled one
 - 84.4 Techniques
-  - 84.4.1 TODO
-- 84.5 Pitfalls & anti-patterns: TODO
+  - 84.4.1 Binding the device, and checking the group is yours
+  - 84.4.2 A minimal VFIO driver in C++
+  - 84.4.3 The two-tier completion loop
+  - 84.4.4 DMA memory: pinned, huge, local, and few mappings
+  - 84.4.5 When the answer is a kernel module
+- 84.5 Pitfalls & anti-patterns: a DMA bug is a kernel bug
 - 84.6 Exercises & checklist
 
 ### [85. GPU Computing with CUDA](85-gpu-computing-cuda.md)

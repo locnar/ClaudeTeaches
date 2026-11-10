@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (memory hierarchy — PCIe is another, slower level), Ch. 34 (mmap — MMIO/BAR mapping is mmap of device memory), Ch. 52 (interrupts vs polling — MSI-X vs poll), Ch. 72/79/80 (the NIC/bypass/RDMA devices that sit behind PCIe), Ch. 73 (DDIO — where a DMA write lands), Ch. 1 (latency — the round-trip floor).
 >
-> **Leads into:** Ch. 85 (GPU — PCIe round-trip is why GPUs are off the order path), Ch. 86 (MPI), Ch. 87 (FPGA — on the NIC, behind/beside PCIe), Ch. 88 (SmartNICs/DPUs). Opens **Part XI** — and the PCIe round-trip is the **floor under every offload decision** in the rest of the book.
+> **Leads into:** Ch. 84 (userspace drivers — how a process actually obtains the BAR, the DMA mapping and the MSI-X vectors this chapter assumes), Ch. 85 (GPU — PCIe round-trip is why GPUs are off the order path), Ch. 86 (MPI), Ch. 87 (FPGA — on the NIC, behind/beside PCIe), Ch. 88 (SmartNICs/DPUs). Opens **Part XI** — and the PCIe round-trip is the **floor under every offload decision** in the rest of the book.
 
 ---
 
@@ -64,7 +64,7 @@ The model: **everything (GPU/NIC/FPGA/RDMA) is behind PCIe; the CPU accesses dev
 
 ## 83.3 Measure it: device-register round-trip and streaming bandwidth
 
-Measure the two PCIe costs that govern offload: the **device-register round-trip** (an MMIO read — the latency floor, and the posted/non-posted asymmetry) and the **streaming bandwidth** (bulk DMA — the transfer ceiling). The asymmetry between a register read and write is the headline. The round-trip needs nothing but a BAR mapped from sysfs:
+Measure the two PCIe costs that govern offload: the **device-register round-trip** (an MMIO read — the latency floor, and the posted/non-posted asymmetry) and the **streaming bandwidth** (bulk DMA — the transfer ceiling). The asymmetry between a register read and write is the headline. The round-trip needs nothing but a BAR mapped from sysfs (the register-only route; the production routes — UIO and VFIO, with DMA and interrupts — are Ch. 84 §84.2.1):
 
 ```cpp
 // mmio_lat.cpp — the posted/non-posted asymmetry, measured: time MMIO writes vs reads of one device register.
@@ -170,7 +170,7 @@ Devices talking *directly* — bypassing the host CPU/memory:
 
 **Exercises**
 
-1. **Read/write asymmetry.** With a mapped device BAR (via a driver or DPDK/VFIO — Ch. 79), time a posted MMIO **write** vs a non-posted MMIO **read** to a device register. Confirm the read is ~10-50× the write (§83.3). This is *the* PCIe lesson.
+1. **Read/write asymmetry.** With a mapped device BAR (via `resource0` for a scratch register, or VFIO as Ch. 84 §84.4.2 shows), time a posted MMIO **write** vs a non-posted MMIO **read** to a device register. Confirm the read is ~10-50× the write (§83.3). This is *the* PCIe lesson.
 2. **Descriptor-ring poll.** Observe how a NIC driver (Ch. 72, 79) or RDMA (Ch. 80) signals completions — confirm it's the device DMA-ing a completion into *host* memory that the CPU *polls*, not a device-register read (§83.2.3). Why is this designed this way?
 3. **Streaming bandwidth.** Measure host↔device DMA bandwidth (`cudaMemcpy` for a GPU — Ch. 85, or a DPDK bulk transfer) for increasing sizes; compute GB/s and compare to the link's theoretical (lanes × gen — check `lspci -vv`). Find the size where transfer dominates a microsecond compute (§83.3, ties Ch. 85).
 4. **NUMA device placement (Ch. 18).** Access a device (NIC/GPU) from a core on its NUMA node vs the other socket; measure the latency difference. Confirm the cross-socket penalty (§83.5, Ch. 18). Pin to the device's node.
@@ -203,4 +203,4 @@ Devices talking *directly* — bypassing the host CPU/memory:
 
 ---
 
-*Next: Ch. 84 — Userspace Drivers & Kernel Modules: UIO, VFIO and the Device Boundary.*
+*Next: Ch. 84 — Userspace Drivers & Kernel Modules, which discharges the prerequisite this chapter kept assuming: the three routes by which a process obtains a BAR (`resourceN`, UIO, VFIO) and what each costs in latency and safety, IOMMU groups and ACS, pinning and IOMMU-mapping DMA memory, MSI-X vectors as eventfds, a complete minimal VFIO driver in C++ with the eventfd-vs-poll completion cost measured, and when a kernel module — control plane in the kernel, data plane still polled from user space — is the right design.*
