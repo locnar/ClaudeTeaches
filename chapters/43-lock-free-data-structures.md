@@ -146,7 +146,7 @@ The ring buffer is the concrete structure behind bounded queues, and the details
 - **Pad head and tail to separate cache lines (Ch. 42).** The single most important layout rule (§43.3): producer-written `head` and consumer-written `tail` on **separate** lines, or they false-share and you lose 3-5×.
 - **Cache the opposite index (batching).** The producer reads `tail` only to check fullness; instead of reading it (a cross-core load) every push, **cache** the last-seen `tail` and only re-read when the cache says "full" — most pushes then need no cross-core read. Symmetrically for the consumer and `head`. This batching is the big throughput lever (§43.3) and the Disruptor's core trick (Ch. 46).
 - **Pre-allocate the buffer (Ch. 30, 34).** The ring's storage is allocated once at startup, pre-faulted and `mlock`ed (Ch. 34), ideally huge-page-backed (Ch. 17) and NUMA-local (Ch. 18). The hot path never allocates. For IPC, the ring lives in shared memory (Ch. 34, 65) with indices as offsets (Ch. 34).
-- **Element layout.** Store fixed-size POD elements inline (no pointers to chase — Ch. 32); for variable-size messages, a ring of fixed slots with an overflow strategy, or a separate byte-ring. Keep the element cache-friendly (Ch. 10).
+- **Element layout.** Store fixed-size POD elements inline (no pointers to chase — Ch. 32); for variable-size messages, a ring of fixed slots with an overflow strategy, or a separate byte-ring — double-mapped through a `memfd` so a message that straddles the end is still contiguous (Ch. 34 §34.4.3). Keep the element cache-friendly (Ch. 10).
 
 ### 43.4.3 Avoiding ABA (tagged pointers)
 

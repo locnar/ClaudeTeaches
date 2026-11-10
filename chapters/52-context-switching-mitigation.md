@@ -165,6 +165,7 @@ A signal is a context-switch-class event that nobody budgets for, because nobody
 - **`SCHED_OTHER` (default) for the hot thread on a contended system.** The default fair scheduler will preempt your thread; on a shared system use RT priority (`SCHED_FIFO` — Ch. 57). (On a fully isolated core it matters less, but it's cheap insurance.)
 - **An unmasked hot thread.** A process-directed signal — `SIGCHLD`, `SIGALRM`, `SIGPIPE`, an operator's `SIGUSR1` — lands on whichever thread is running, i.e. the hot one: ~1.1 µs plus a cold-restart penalty per delivery (§52.4.3, Ch. 103 §103.3). Mask everything asynchronous on the hot thread at start and funnel to a housekeeping thread.
 - **Mitigation cost ignored (Ch. 6).** Spectre/Meltdown mitigations (KPTI, retpolines) make *every* syscall and switch more expensive; on an isolated, syscall-free hot core you may disable some (`mitigations=off` on a trusted box — Ch. 6) to cut the cost — a deliberate, measured security/latency trade.
+- **The IPI that is not an interrupt from a device.** A sibling thread's `munmap`/`mprotect` sends a TLB-shootdown IPI to every core running the process — the hot core included — and `perf`/`rdmsr` from a monitor sends a function-call IPI; both show as `TLB`/`CAL` rows for the hot CPU in `/proc/interrupts`. Ch. 34 §34.5 measures the first; Ch. 59 catalogues both.
 
 ## 52.6 Exercises & checklist
 

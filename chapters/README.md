@@ -514,7 +514,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 34.4 Techniques
   - 34.4.1 Shared-memory regions
   - 34.4.2 Pre-faulting and `mlock`
-- 34.5 Pitfalls & anti-patterns: lazy faults on the hot path
+  - 34.4.3 Beyond `MAP_POPULATE`: the double-mapped ring, `mremap`, `MCL_ONFAULT`, `MADV_POPULATE_*`, `MADV_COLLAPSE`, `userfaultfd`
+- 34.5 Pitfalls & anti-patterns: lazy faults on the hot path; the self-inflicted TLB shootdown
 - 34.6 Exercises & checklist
 
 ## Part V — Numerics & Data Parallelism

@@ -150,7 +150,69 @@ The warming discipline that makes any mapping — allocator slab, book, shared r
 - **`madvise` to tune kernel behavior.** `MADV_WILLNEED` (prefetch), `MADV_HUGEPAGE` (encourage THP — but prefer explicit hugetlb on a jitter box, Ch. 17), `MADV_DONTNEED` (drop pages — a cold-path tool), `MADV_RANDOM`/`SEQUENTIAL` (readahead hints). Use deliberately; the defaults aren't tuned for latency.
 - **This is warm-up (Ch. 60).** Pre-faulting + `mlock` is the memory half of keeping the hot path warm — alongside cache/TLB/branch warming (Ch. 60). The first real message must hit memory that's mapped, faulted, resident, local, and huge-page-backed; all of that happens during startup, never on the path.
 
-## 34.5 Pitfalls & anti-patterns: lazy faults on the hot path
+### 34.4.3 Beyond `MAP_POPULATE`: the double-mapped ring, `mremap`, `MCL_ONFAULT`, `MADV_POPULATE_*`, `MADV_COLLAPSE`, `userfaultfd`
+
+*Toolchain and machine: Appendix L.3; the numbers in this section are measured on the 4-vCPU KVM guest (kernel 6.18, g++ 13.3 `-O2`; clang++ 18.1 within 3 % on every row) and are a guest's — nested paging makes every first touch dearer than bare metal — so the ratios are the lesson.*
+
+Five mapping tricks that §34.4.2's pre-fault-and-`mlock` discipline does not cover, each with the kernel version it needs:
+
+**(a) The double-mapped ("magic") ring.** A byte ring that carries variable-length messages (Ch. 43 §43.4.2's "separate byte-ring", Ch. 68 §68.4.4's reorder buffer, Ch. 65's IPC rings) has an end, and a message that straddles it is two pieces. The usual fixes — a bounce-buffer copy, or padding the tail and wasting it — cost a copy or a branch per message. The mapping fix makes the wrap disappear: back the ring with a `memfd` and map the *same* pages **twice, back to back**, so byte `size + k` is byte `k`. A reader at offset `off` with `off + len > size` reads straight through; a writer likewise. The second mapping costs page-table entries, not memory:
+
+```cpp
+// magic_ring.cpp — the double-mapped ring: a memfd mapped twice, back to back, so a message that straddles the end
+// of the ring is contiguous in virtual memory and needs no split copy.   Build: g++ -O2 -std=c++20 magic_ring.cpp
+#include <cstdint>
+#include <cstring>
+#include <sys/mman.h>
+#include <unistd.h>
+struct MagicRing {
+    std::uint8_t* base = nullptr; std::size_t size = 0;      // [base, base+size) and [base+size, base+2*size) alias
+    bool init(std::size_t sz) {                               // sz: a multiple of the page size (2 MiB for MFD_HUGETLB)
+        int fd = memfd_create("ring", MFD_CLOEXEC);           // MFD_HUGETLB (4.14+) for a 2 MiB-backed ring: one TLB entry per 2 MiB
+        if (fd < 0 || ftruncate(fd, sz) < 0) return false;
+        void* reserve = mmap(nullptr, 2 * sz, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);   // grab 2*sz of VA, contiguous
+        if (reserve == MAP_FAILED) return false;
+        void* a = mmap(reserve, sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
+        void* b = mmap(static_cast<std::uint8_t*>(reserve) + sz, sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
+        close(fd);                                            // the pages live on while mapped
+        if (a == MAP_FAILED || b == MAP_FAILED) return false;
+        base = static_cast<std::uint8_t*>(a); size = sz;
+        std::memset(base, 0, sz);                             // pre-fault (§34.4.2); mlock(base, 2*sz) on a real box
+        return true;
+    }
+    // a message at `off` of `len` bytes is always `base + off .. base + off + len`, even when off + len > size
+};
+```
+
+Measured against the split-copy alternative (a plain ring reassembling a straddling message into a bounce buffer before the same 8-byte-stride "decode"), 200,000 messages per row, every message straddling the end:
+
+```
+   straddling   64-byte message: split copy + decode   10.7 ns, in-place decode    4.6 ns
+   straddling  256-byte message: split copy + decode   27.5 ns, in-place decode   17.6 ns
+   straddling 1024-byte message: split copy + decode   64.1 ns, in-place decode   49.7 ns
+   straddling 4096-byte message: split copy + decode  200.9 ns, in-place decode  159.2 ns
+```
+
+The saving is the copy (~6 ns + 10 ns/KiB here) *and* the bounce buffer's cache lines *and* the branch — and, more valuable than any of them, the decoder (Ch. 68's overlay structs, `std::span`) sees contiguous bytes without a special case. The cost is virtual address space (2×), two TLB entries per page instead of one (use `MFD_HUGETLB` so it is two per 2 MiB), and the `MAP_FIXED` dance, which must reserve first (`PROT_NONE`) or it can clobber a neighbour. The same trick works for a hugetlbfs file and for a `shm_open` segment shared across processes (Ch. 65).
+
+**(b) `mremap` for cold-path growth.** An arena (Ch. 31) that must grow does not have to copy: `mremap(old, old_len, new_len, MREMAP_MAYMOVE)` moves the *page-table entries* to a larger virtual range — 128 → 256 MiB in **41 µs** vs **69 ms** for `mmap(POPULATE)` + `memcpy` of the same 128 MiB. The region may move, so it is for offset-addressed data (§34.4.1) or for control-plane structures on the cold path; `MREMAP_DONTUNMAP` (5.7+, with `MREMAP_MAYMOVE`) leaves the old range mapped and empty — a way to hand a populated region to a new address and keep the old one as a fresh, zero-filled buffer without faulting. Never on the hot path: it takes `mmap_lock` and triggers a TLB flush on every core running the process (§34.5).
+
+**(c) `MCL_ONFAULT`, `MADV_POPULATE_READ/WRITE`, and what to pre-fault with.** Four ways to turn virtual into resident, measured on 256 MiB (65,536 4 KiB pages):
+
+```
+   mmap + touch loop (one write per page)          562.8 ms  (8.59 us/page)    <- a page fault per page, each a VM exit in the guest
+   mmap(MAP_POPULATE)                               51.1 ms  (0.78 us/page)    <- one syscall, kernel-side fault loop
+   mmap + madvise(MADV_POPULATE_WRITE)  [5.14+]     61.8 ms  (0.94 us/page)    <- same, but on an EXISTING mapping, any range
+   mmap + mlock (populates and pins)                50.2 ms  (0.77 us/page)    <- populate + lock in one
+```
+
+`MAP_POPULATE` only exists at `mmap` time; **`MADV_POPULATE_WRITE`** (kernel 5.14) does the same for a range you already have — a sub-range of a huge arena, the pages a `mremap` just added, a shared segment another process created — and `MADV_POPULATE_READ` maps the zero page / file pages without dirtying them. Both are ~10× cheaper per page than touching from user space even on bare metal (no exception entry per page) and ~11× here. **`mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT)`** (4.4+) is the other half: plain `MCL_FUTURE` *populates* every future mapping at `mmap` time — including the 8 MiB stack of every thread you create and every `dlopen`ed library — which is why `mlockall` makes startup slow and `RLIMIT_MEMLOCK` overflow; `MCL_ONFAULT` locks pages *as they fault* instead, so you pre-fault the regions you choose (with `POPULATE_WRITE`) and the rest locks lazily. The combination for a trading process: `mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT)` at startup, then `MADV_POPULATE_WRITE` on every hot region, then the §34.4.2 verification that `VmLck` in `/proc/self/status` covers what you meant.
+
+**(d) `MADV_COLLAPSE` (6.1+): THP on your terms.** Ch. 17 §17.5 sends `khugepaged` and fault-time compaction off the box (`enabled=never` or `madvise` with `defrag` off). `madvise(range, MADV_COLLAPSE)` collapses a range into huge pages *synchronously, now, on the calling thread* — at setup, where you want the cost — and fails cleanly (`EAGAIN`/`ENOMEM`) if the memory cannot be assembled, instead of a background daemon doing it at 10:00. The recipe for a region that cannot be hugetlbfs-backed (a `malloc` arena, a library's static data): `MADV_HUGEPAGE` on it, `MADV_POPULATE_WRITE`, then `MADV_COLLAPSE`, then check `AnonHugePages` in `/proc/self/smaps` for the range. (On the guest, `MADV_HUGEPAGE` + touch took 672 ms for 256 MiB — *slower* than 4 KiB pages, because the host had no huge pages to give; `MADV_COLLAPSE` would have returned `ENOMEM` and told you so.)
+
+**(e) `userfaultfd`: never on the hot path, useful off it.** A registered range's page faults are delivered to a user-space thread, which supplies the page (`UFFDIO_COPY`/`ZEROPAGE`) — the mechanism behind live migration and lazy snapshot restore (Ch. 99 §99.4.7). Measured: a `userfaultfd`-served first touch is **2.8 µs min, 3.4 µs mean, 65.7 µs max** per page here (two context switches and the copy) — three orders of magnitude over a resident access. It is a cold-path tool for restoring a checkpoint page-on-demand while the warm-up proceeds, with `MADV_POPULATE_WRITE` over the whole range before the readiness gate so no fault survives into the session; `vm.unprivileged_userfaultfd=0` (the default since 5.11) means the trading unit needs `CAP_SYS_PTRACE` or the sysctl to use it at all.
+
+## 34.5 Pitfalls & anti-patterns: lazy faults on the hot path; the self-inflicted TLB shootdown
 
 - **Using a fresh `mmap` region on the hot path un-warmed.** The headline trap: map a buffer/ring/slab and start using it on the hot path — every first-touched page **faults** (§34.3), a stream of stalls on the first messages. **Pre-fault + `mlock` during setup** (§34.4.2). A "pre-allocated" but un-faulted region is not ready.
 - **Major faults from file-backed maps.** A file mapping faulting to **storage** mid-hot-path is tens-to-hundreds of µs from NVMe, *milliseconds* from disk or swap (Ch. 30) — session-ruining either way. Pre-fault/`MAP_POPULATE`/`mlock` the mapped file during setup, ensure it fits the page cache, and disable swap. Never demand-page a cold file on the hot path.
@@ -160,7 +222,18 @@ The warming discipline that makes any mapping — allocator slab, book, shared r
 - **`mlock` without raising `RLIMIT_MEMLOCK` / running out of locked memory.** `mlock` fails or partially locks if the limit is too low; verify the limit and that the lock succeeded. Locking *too much* (or `mlockall(MCL_FUTURE)` with a leaky process) can pressure the system — lock the hot regions deliberately.
 - **NUMA-blind pre-faulting of a mapped region (Ch. 18).** First-touch places the (possibly huge) page on the toucher's node; pre-faulting a shared/huge region from the wrong thread strands it remote. Fault from the using thread on the right node.
 - **Leaking shared segments / unclean lifecycle.** A crashed process can leave a `/dev/shm` segment behind; without `shm_unlink`/recovery logic, restarts accumulate or re-attach to stale state. Design crash-only re-attach/recreate (Ch. 99 §99.4.8).
-- **Assuming `munmap`/`MADV_DONTNEED` is free or instant on the hot path.** Unmapping and re-mapping per use reintroduces faults (and TLB shootdowns across cores). Map once at setup, keep it; tear down on the cold path.
+- **The self-inflicted TLB shootdown: a housekeeping thread's `munmap`/`mprotect`/`MADV_DONTNEED` interrupts the hot core.** Every thread of a process shares its page tables, so when *any* thread shrinks or re-protects a mapping the kernel must invalidate the stale TLB entries on **every CPU currently running the process** — by inter-processor interrupt. The hot thread, pinned and isolated, takes the IPI, runs the flush handler, and resumes with a cold TLB. Measured on the guest (`shootdown.cpp`: a hot thread spinning on vCPU 3 counting its own gaps and the `TLB:` row of `/proc/interrupts` for that CPU, a housekeeping thread on vCPU 0 mapping, touching and releasing 4 MiB ~1,000 times a second):
+
+```
+   housekeeping does …                      TLB IPIs on the hot cpu in 3 s     (the guest's own steal noise makes the gap
+   nothing                                        +0                             statistics useless here — the IPI count is
+   mmap + touch + munmap                      +1,472                             the signal; on bare metal each IPI is a
+   … + mprotect(PROT_READ) first              +2,910                             2–5 µs gap plus the TLB refill afterwards,
+   … + madvise(MADV_DONTNEED) first           +1,451                             Ch. 59 §59.3's CAL/TLB rows)
+   the same munmap loop in a SEPARATE process     +1                             <- different mm: no IPI to the hot core
+```
+
+  `mprotect` costs two flushes (the protection change and the unmap); `MADV_DONTNEED` one; a **separate process** none, because its page tables are not the hot thread's. The fixes, in order: **map once at setup and never unmap, re-protect or `DONTNEED` in the session** (buffers are pools, Ch. 31; the logger and the control plane recycle, they do not free — `malloc` *does* `munmap`/`madvise` large frees, so §30.5's no-`malloc` rule is also a no-shootdown rule); move memory-churning work into **another process** over shared memory (Ch. 65, 99); and make `mremap`/`MADV_COLLAPSE`/`userfaultfd` (§34.4.3) startup-only. The signature in production is the `TLB` and `CAL` rows for the hot CPU moving in Ch. 109's sampler while nothing the hot thread did explains it.
 
 ## 34.6 Exercises & checklist
 
@@ -182,6 +255,8 @@ The warming discipline that makes any mapping — allocator slab, book, shared r
 - [ ] Large regions are **huge-page-backed** (`MAP_HUGETLB` — Ch. 17) and **pre-faulted from the using thread on the right NUMA node** (Ch. 18).
 - [ ] `RLIMIT_MEMLOCK` is sufficient and `mlock` success is **verified**; mappings are created **once at setup** and torn down on the cold path (no per-use map/unmap).
 - [ ] Shared-segment **lifecycle/crash-recovery** is designed (`shm_unlink`, re-attach/recreate — Ch. 99 §99.4.8), and pre-faulting is part of **warm-up** (Ch. 60).
+- [ ] Variable-length byte rings are **double-mapped** (`memfd` × 2) so no message is ever split; regions that must grow use **`mremap`** on the cold path; pre-faulting uses **`MADV_POPULATE_WRITE`** + `mlockall(MCL_ONFAULT)`; THP, if any, is collapsed with **`MADV_COLLAPSE`** at setup (§34.4.3).
+- [ ] Nothing **unmaps, re-protects or `MADV_DONTNEED`s** in the session from any thread of the hot process — no TLB-shootdown IPIs reach the hot core (`TLB`/`CAL` rows flat — §34.5).
 
 ## 34.7 References
 
