@@ -195,4 +195,4 @@ A **named module** (`export module book;`) is parsed once into a binary module i
 
 ---
 
-*Next: Ch. 28 — Enforcing the Hot-Path Rules: Static Analysis, Performance Linters & Contracts in Code.*
+*Next: Ch. 28 — Enforcing the Hot-Path Rules: Static Analysis, Performance Linters & Contracts in Code, closing Part III. A hermetic build is the precondition for the last step: making the toolchain *refuse* to build a hot path that breaks the book's rules — clang-tidy's performance checks scoped and calibrated, the rules themselves as AST matchers, every measured invariant as a `static_assert` table, and a link step that traps a hot TU importing `malloc`.*

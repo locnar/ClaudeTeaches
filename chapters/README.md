@@ -415,12 +415,20 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 27.6 Exercises & checklist
 
 ### [28. Enforcing the Hot-Path Rules: Static Analysis, Performance Linters & Contracts in Code](28-static-analysis-performance-contracts.md)
-- 28.1 Why it matters: TODO
-- 28.2 Mental model: TODO
-- 28.3 Measure it: TODO
+- 28.1 Why it matters: rules enforced by vigilance are not enforced
+- 28.2 Mental model
+  - 28.2.1 Three enforcement points: compile, link, run
+  - 28.2.2 What a linter can and cannot see; the hot-path scope
+  - 28.2.3 Contracts as code: the invariant the measurement established
+- 28.3 Measure it: calibrating the linter (what a flagged copy costs), the rule set on a hot TU (clang-tidy, clang-query, `nm`), the `--wrap` trap, what the contract table caught, seccomp strict
 - 28.4 Techniques
-  - 28.4.1 TODO
-- 28.5 Pitfalls & anti-patterns: TODO
+  - 28.4.1 clang-tidy `performance-*` in CI, calibrated
+  - 28.4.2 Custom checks for the book's rules
+  - 28.4.3 Performance contracts: `static_assert` tables for layout, concurrency, exceptions and folding
+  - 28.4.4 Link-time assertions: `--wrap` traps, `nm` scans, `--defsym` and section checks
+  - 28.4.5 Runtime assertions in test builds
+  - 28.4.6 Reviewing for latency: the checklist
+- 28.5 Pitfalls & anti-patterns: tree-wide `-Werror` lint, unpinned clang-tidy, trusting source checks for allocation, `--wrap` on mixed TUs, suppressions without reasons
 - 28.6 Exercises & checklist
 
 ## Part IV — Memory Management
