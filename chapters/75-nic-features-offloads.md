@@ -69,6 +69,20 @@ Representative results (toolchain and machine: Appendix L.3) — reference machi
 
 Read it: the **batching offloads add latency** — GRO coalescing and interrupt coalescing *hold* packets to process them in groups (throughput/CPU efficiency), which is the *opposite* of what a latency path wants; turning them off drops the latency (and tightens the tail — less batching jitter) at the cost of more interrupts/CPU. **Busy-polling** (Ch. 54) removes the interrupt latency *and jitter* entirely (no waiting for an interrupt, no handler, no context switch) — lower and more *deterministic* — at the cost of a core pegged at 100%. And **kernel bypass** (Ch. 82) removes the stack, reaching ~1 µs. The other crucial point is the **hardware timestamp** row: a *software* receive timestamp (when your code read the packet) *includes* all the stack/config latency above — so it's not the true arrival time; the **NIC hardware timestamp** (Ch. 20, 78) is the *actual* wire-arrival moment, which is what you need for honest latency measurement (Ch. 120) and PTP (Ch. 78). The configuration lesson: **for a latency RX path, disable the batching offloads, busy-poll, size the RX ring for bursts (Ch. 70), steer the feed to the right core (RSS), capture hardware timestamps — and bypass the kernel for the ultra-hot feed (Ch. 82).** Keep the cheap offloads (checksum); kill the batching ones.
 
+
+**The per-NIC baseline you re-run after every change.** The table above is a one-off; the discipline is a stored, re-runnable baseline per NIC — a pinned **kernel + driver + firmware** triple and a wire-to-app histogram (hardware RX stamp to `recvmsg` return, or to the bypass poll's return, over a replayed market-open capture — Ch. 110) kept beside the triple, diffed by Ch. 118's statistical gate *every* time one of the three changes or a module parameter moves:
+
+```
+   # nic_baseline.sh <if>  — identity, then the histogram; store both under the triple's name (Ch. 118 §118.4.1's artefact layout)
+   ethtool -i <if> | egrep 'driver|^version|firmware'      # the triple: driver name/version, firmware (and the NVM/option-ROM version where the vendor reports it)
+   uname -r; modinfo $(ethtool -i <if> | awk '/^driver/{print $2}') | egrep '^(version|srcversion|parm)'   # in-tree vs out-of-tree, and the parameters that exist
+   ethtool -k <if> | egrep 'gro|lro|tso|rx-checksum|rx-vlan'; ethtool -c <if>; ethtool -g <if>; ethtool -l <if>; ethtool --show-fec <if>; ethtool -T <if>
+   cat /sys/module/<driver>/parameters/* 2>/dev/null       # every module parameter, as loaded
+   ./rx_replay --if <if> --pcap open-burst.pcap --hw-ts --hist out/$(ethtool -i <if> | md5sum | cut -c1-8).hdr   # wire-to-app histogram over the replayed open (Ch. 110 §110.4.3)
+```
+
+A baseline is **per NIC instance** (two cards of the same model with different firmware are two baselines), and the readiness gate (Appendix M.2) refuses to arm when the live triple differs from the baselined one — §75.4.5 is the change-control discipline around it.
+
 ## 75.4 Techniques
 
 ### 75.4.1 RSS and flow steering
@@ -94,6 +108,30 @@ The vendor kernel-bypass stacks — **Onload** (transparent `LD_PRELOAD` socket 
 
 - **The stack and the NIC are chosen together.** Each vendor API runs only on that vendor's silicon, so choosing Onload/ef_vi or libexanic *is* a NIC purchase — and the card must expose what a bypass path needs: user-mappable RX/TX rings with a protected doorbell (Ch. 87), per-packet **hardware timestamps** in the descriptor (Ch. 78), and filters programmable from userspace (§75.4.1, Ch. 77) so the bypass stack can claim its flows without the kernel's help.
 - **This chapter's features still apply under bypass.** Steering (Ch. 77), hardware timestamping and busy-polling (§75.4.2) are used *inside* the bypass path, not replaced by it; the batching offloads mostly are not (a raw ring delivers frames as the wire carried them, which is the point). Measure a vendor path with the same offload-on/off and hardware-timestamp methodology as §75.3 before trusting a datasheet floor — Ch. 82 §82.3 does exactly that.
+
+
+### 75.4.4 Choosing the NIC: measured latency classes and the feature matrix
+
+NICs sort into latency classes by *measured* wire-to-app latency under one harness (Appendix L; the §75.3 baseline), not by data-sheet speed — and the class decides the software stack more than the vendor does:
+
+| Class | Wire-to-app (p50 / p99.9, small UDP, bypass where available) | Representative parts | Software path | Fit |
+|---|---|---|---|---|
+| **Ultra-low (bypass-native)** | ~0.5–0.8 µs / ~1–1.5 µs | AMD/Solarflare X2/X3 (ef_vi, Onload), Cisco/Exablaze ExaNIC, Napatech | vendor bypass API (Ch. 82 §82.4.4), hardware RX/TX stamps on every frame, cut-through TX, FPGA variants for inline logic (Ch. 91) | the tick-to-trade path |
+| **Low (DPDK/XDP-class)** | ~1–1.5 µs / ~2–4 µs | Intel E810/X710 (`ice`/`i40e`), NVIDIA ConnectX-6/7 (`mlx5`), with DPDK PMDs or AF_XDP | DPDK (Ch. 82), AF_XDP (Ch. 81), kernel busy-poll (§75.4.2) | gateway sessions, capture, the second tier |
+| **Kernel-stack** | ~3–8 µs / ~10–30 µs | any of the above through the kernel; Broadcom/Intel server NICs | Ch. 63–64 with the §75.3 tuning | control plane, research, anything off the hot path |
+| **Virtual / cloud** | ~8–25 µs / ~50–200 µs | SR-IOV VFs, ENA, virtio | Appendix S.5, Ch. 86 §86.4.6 | the adjacent tier |
+
+Beyond the class, the feature matrix that decides between two cards in the same class: **hardware timestamping** on RX *and* TX with a PHC (`ethtool -T`; TX stamps are the rarer feature and the one Ch. 79 and the quote-pull ledger of Ch. 107 need), **flow steering** granularity (`ethtool -N` rules, `rte_flow` patterns — Ch. 77) and queue count, **FEC control** (`ethtool --set-fec`, Ch. 80 §80.2), **DDIO/cache-injection behaviour** (Ch. 76), **driver model** (in-tree vs vendor bundle — §75.4.5), and the **PTP path** (a PHC that `ptp4l` can discipline, and that survives a driver reload). Decide per NIC *role* — the feed NIC, the order NIC, the capture NIC and the management NIC are different purchases — and keep the measured class in the release manifest (Ch. 119 §119.4.1) so a hardware swap is a reviewed change.
+
+### 75.4.5 Firmware, driver and configuration management
+
+Unmanaged NIC drift is a silent latency regression: a distribution kernel update swaps the in-tree driver, a vendor bundle (`OFED`, Onload, Intel's DDP packages) reloads with new defaults, a firmware update changes a timing path, and nothing in the application changed. The controls:
+
+- **Pin the triple.** Kernel, driver (and whether it is in-tree or the vendor's out-of-tree module — `modinfo`'s `srcversion`, and the DKMS/`akmod` build that silently rebuilds it on every kernel update), and firmware (`ethtool -i`'s `firmware-version`; the NVM/option-ROM where the vendor exposes it) are three entries in the host fingerprint Appendix M.2 attests at T-60, and a change to any one of them is a release (Ch. 119) that re-runs the §75.3 baseline.
+- **The module parameters that move latency** are configuration, persisted in `modprobe.d` and versioned with the host (Appendix C.6): `mlx5` — CQE compression (`rx_cqe_compress` off for latency: compressed CQEs batch), striding RQ (`rx_striding_rq` off), `rx-usecs`/`tx-usecs` and `adaptive` moderation (off); `ice`/`i40e` — the ITR (interrupt throttle) settings and `adaptive-rx` (off), DDP package version; `sfc` — `rx_alloc_method`, `irq_adapt_enable` (off); Onload/ef_vi — the `EF_*` environment (`EF_POLL_USEC`, `EF_SPIN_USEC` spin settings, `EF_RX_TIMESTAMPING`, `EF_TX_TIMESTAMPING`) which is *per process* and therefore part of the unit file (Ch. 103 §103.4.9), not the host. Every one of them is in the baseline script's identity dump, so a changed value is a changed baseline.
+- **Kernel upgrades are NIC upgrades.** An in-tree driver changes with the kernel; test the kernel/driver pair on the shadow box (Ch. 119 §119.4.4) with the replayed open *before* the hot host sees it, and keep the previous kernel bootable (Ch. 103 §103.4.9's boot-to-ready) so the rollback is a reboot.
+- **Firmware with change control** (the same discipline as CPU microcode, Ch. 6 §6.4.5): vendor release notes read for timing-path changes, applied on the shadow box first, baselined, then rolled with the release calendar — never from a distribution's `fwupd` auto-update on a trading host.
+- **Record and attest.** The baselined triple, parameters and histogram are release artefacts; Appendix M's T-60 fingerprint check compares the live host against them and refuses to arm on a mismatch — the step that turns "we noticed the driver changed" into "it could not have changed without a review".
 
 ## 75.5 Pitfalls & anti-patterns: offloads that add latency
 
@@ -126,6 +164,7 @@ The vendor kernel-bypass stacks — **Onload** (transparent `LD_PRELOAD` socket 
 - [ ] **NIC hardware timestamping** is enabled (`SO_TIMESTAMPING` — §75.2) and used for honest wire-arrival timing (Ch. 20) and PTP (Ch. 78) — software timestamps are **not** mistaken for arrival time.
 - [ ] The ultra-hot feed/order path uses **kernel bypass** (Onload/ef_vi/libexanic — §75.4.3, Ch. 82) with the rest of the tuning (ring, core, poll, steer) in place.
 - [ ] The bypass-stack / NIC-vendor choice (Onload transparent vs ef_vi raw vs DPDK — Ch. 82) is deliberate (latency vs portability vs effort).
+- [ ] Each NIC has a **stored baseline** (kernel + driver + firmware triple, module parameters, wire-to-app histogram over the replayed open) **re-run after every change**, attested at the gate; the NIC's measured **latency class** and feature matrix are in the release manifest (§75.3, §75.4.4–§75.4.5).
 - [ ] The whole RX path is **tested under replayed market-open burst load** (Ch. 109) — drops, latency, and steering verified at the open, not just in calm markets.
 
 ## 75.7 References

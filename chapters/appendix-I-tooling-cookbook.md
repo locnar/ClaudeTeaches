@@ -260,6 +260,17 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
    ss -tio dst <venue> | grep -oE 'rto:[0-9.]+|backoff:[0-9]+|retrans:[0-9/]+|unacked:[0-9]+'   # is the venue silent? RTO doubling and backoff climbing = no ACKs
    sysctl net.ipv4.tcp_retries2 net.ipv4.tcp_keepalive_time net.ipv4.tcp_syn_retries           # 15 (≈ 924 s), 7200 s, 6 (≈ 127 s) — the defaults a gateway must not rely on
    iptables -I INPUT -i lo -p tcp --sport <peer-port> -j DROP           # dead-peer drill on loopback (Ch. 106 §106.3's tcpdetect); -D to remove
+
+   # --- fault injection for the resilience drills (Ch. 116 §116.4.7; the catalogue names the fault, these are the hands)
+   tc qdisc add dev <if> root netem delay 50ms 5ms loss 1% reorder 10% duplicate 1%   # slow/lossy/reordering venue path; `tc qdisc del dev <if> root` to clear
+   tc qdisc add dev <if> root netem loss 100%                                           # black-hole one line (gap on A only: use the line's own interface/VLAN)
+   iptables -I INPUT  -d <mcast-group> -j DROP                                          # dark feed: the group stays joined, nothing arrives (Ch. 74 §74.4.4)
+   iptables -I OUTPUT -p tcp --dport <venue-port> -j DROP                               # half-open venue session: the socket lives, nothing leaves (Ch. 69 §69.4.4)
+   ip link set <if> down; sleep 2; ip link set <if> up                                  # hard link flap: bond/standby failover timing (Ch. 80 §80.4.5), gratuitous ARP
+   phc_ctl /dev/ptp0 adj 0.002                                                          # step the PHC by +2 ms: servo/holdover response (Ch. 78 §78.4.1), the gate's clock check (Appendix M)
+   kill -STOP <pid>; sleep 0.008; kill -CONT <pid>                                      # an 8 ms hang of a role: the lease expires (Ch. 112), the watchdog's stalled-progress path (Ch. 103 §103.4.3)
+   fallocate -l $(df --output=avail -B1 /capture | tail -1) /capture/.fill              # disk full under the journal (Ch. 109 §109.5); rm to recover
+   echo 512M > /sys/fs/cgroup/<role>/memory.max                                         # OOM a role (Ch. 101 §101.4.2's allocation-after-warm-up alarm should have fired first)
    # --- the device boundary (Ch. 88 §88.4.1; Appendix S §S.5): IOMMU groups, binding, VFs
    find /sys/kernel/iommu_groups/ -type l | sort -V          # every IOMMU group and its member BDFs — the group is the unit VFIO hands out
    lspci -vv -s 3b:00.0 | grep -E 'LnkSta|NUMA|ACSCtl'       # negotiated width/speed, the device's node, ACS on the path

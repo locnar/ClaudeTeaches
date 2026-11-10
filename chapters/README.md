@@ -974,6 +974,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 68.4 Techniques
   - 68.4.1 `TCP_NODELAY` and buffer sizing
   - 68.4.2 Multicast for market data
+  - 68.4.3 Network-layer hygiene: ARP/ND, DNS, routing, MTU and VLAN/QoS marking
 - 68.5 Pitfalls & anti-patterns: Nagle/delayed-ACK interaction
 - 68.6 Exercises & checklist
 
@@ -1079,11 +1080,13 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 ### [75. NIC Features & Offloads](75-nic-features-offloads.md)
 - 75.1 Why it matters: push work into the card
 - 75.2 Mental model: RSS, offloads, hardware timestamping
-- 75.3 Measure it: offload on/off CPU cost
+- 75.3 Measure it: offload on/off CPU cost; the per-NIC baseline re-run after every change
 - 75.4 Techniques
   - 75.4.1 RSS and flow steering
   - 75.4.2 Busy-polling
   - 75.4.3 Solarflare/Onload
+  - 75.4.4 Choosing the NIC: measured latency classes and the feature matrix
+  - 75.4.5 Firmware, driver and configuration management
 - 75.5 Pitfalls & anti-patterns: offloads that add latency
 - 75.6 Exercises & checklist
 
@@ -1133,13 +1136,14 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ### [80. Network Fabric & Switching](80-network-fabric-switching.md)
 - 80.1 Why it matters: the switch is on the tick-to-trade path
-- 80.2 Mental model: store-and-forward, cut-through, and layer-1 switches
+- 80.2 Mental model: store-and-forward, cut-through, and layer-1 switches; link speed, FEC and PAM4 as the hidden per-hop cost
 - 80.3 Measure it: per-hop and one-way latency with hardware timestamps
 - 80.4 Techniques
   - 80.4.1 Choosing switching technology and minimizing hops
   - 80.4.2 Fabric layout, buffering, and microburst handling
   - 80.4.3 Switch-based replication, timestamping, and taps
   - 80.4.4 Passive measurement: taps vs SPAN, timestamped mirrors and latency appliances
+  - 80.4.5 Redundant paths: dual-NIC/dual-switch A/B design, bonding modes and failover timing
 - 80.5 Pitfalls & anti-patterns: store-and-forward, oversubscription, and hidden hops
 - 80.6 Exercises & checklist
 
@@ -1733,6 +1737,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 116.4.4 Golden-master tests cut from captures
   - 116.4.5 Test doubles as policies: production and simulation from one template
   - 116.4.6 Running the suite: sanitizers, ARM, and what belongs where
+  - 116.4.7 Resilience verification: the fault catalogue, faults as sequenced inputs, game days and measured drills
 - 116.5 Pitfalls & anti-patterns
 - 116.6 Exercises & checklist
 

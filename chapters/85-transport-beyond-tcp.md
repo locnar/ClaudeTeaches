@@ -83,7 +83,7 @@ The lessons: purpose-built transports over fast substrates hit microsecond RPCs 
 
 ### 85.4.4 Rolling your own reliable UDP
 
-Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRPC may not fit an exact need and the requirements are narrow enough to build:
+Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRPC may not fit an exact need and the requirements are narrow enough to build (the bandwidth-constrained case — a compacted top-of-book stream over a microwave link, Appendix K.3 — is the sharpest example: the payload encoding of Ch. 109 §109.4.8 and this transport are designed together):
 
 - **Why build.** You control the exact reliability/ordering/flow semantics, tune it for your fabric (Ch. 80) and message sizes (Ch. 70), run it over your chosen substrate (bypass — Ch. 82, or RDMA — Ch. 83), and avoid TCP's stream/HOL/ramp entirely. For a narrow, well-understood path, a purpose-built reliable UDP can beat a general library.
 - **The core design (generalizing Ch. 72).** Sequence numbers on every message; **NAK-based selective retransmission** (receiver requests only what it missed — Ch. 72) rather than TCP's cumulative-ACK stream; a bounded **retransmit ring** of recent messages the sender holds for possible resend; **no HOL blocking** (deliver messages as they arrive, recover the missing one out-of-band — Ch. 72); and flow/congestion control appropriate to your fabric (credit-based, or paced — Ch. 79). It's Ch. 72's reliable-multicast recovery, generalized to a unicast reliable transport.
