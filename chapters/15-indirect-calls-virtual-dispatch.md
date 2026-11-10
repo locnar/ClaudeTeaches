@@ -252,7 +252,7 @@ The decision: dispatching to genuinely different *code* over a closed set → pr
 
 ### 15.4.5 Lighter type erasure: `function_ref`, `move_only_function`/`copyable_function`, in-place functions
 
-When a template parameter is not available — a callback crossing a non-template boundary, a hook table filled at startup, a completion routine handed to an I/O layer (Ch. 56–57) — choose the eraser by *ownership*, because the call cost is the same (§15.3):
+When a template parameter is not available — a callback crossing a non-template boundary, a hook table filled at startup, a completion routine handed to an I/O layer (Ch. 57–58) — choose the eraser by *ownership*, because the call cost is the same (§15.3):
 
 - **Passing a callable *down* a call chain: `function_ref`.** Two words (object pointer + thunk), trivially copyable (two registers — Ch. 23 §23.4.5), no allocation ever, no empty state, one `call [thunk]`. C++26's `std::function_ref` (P0792) is not in libstdc++ 13 / libc++ 18; `tl::function_ref`, `llvm::function_ref` or this is what ships today:
 
@@ -274,7 +274,7 @@ When a template parameter is not available — a callback crossing a non-templat
 - **Storing with a hard no-allocation guarantee: a fixed-capacity in-place function.** `inplace_function<Sig, N>` (SG14's `stdext::inplace_function`, or forty lines of your own) owns the callable in an `alignas(16) unsigned char buf[N]` and `static_assert`s that anything larger does not compile — the only eraser that turns "this might allocate" into a build error. Same call cost (§15.3). The price is `N` bytes per slot whether used or not, and a copy of `N` bytes when the slot is copied.
 - **`std::function` for configuration and cold paths**, where copyability and convenience matter and the call is rare. **`std::any` for a value whose type is genuinely unknown**, never as a dispatch mechanism: the `any_cast` names the type, so the call is direct (§15.3's 0.4 ns is a `type_info` compare plus an inlined call) — if you know the type, you did not need `any`.
 
-The decision table: *fixed callee* → template parameter (§15.4.2); *passed through* → `function_ref`; *stored, owning* → `move_only_function` (or `inplace_function` when allocation must be impossible); *stored, copyable, cold* → `std::function`. Ch. 24 §24.4.1 restates this for lambdas and ranges callbacks; Ch. 56–57's completion callbacks and Ch. 90 §90.4.4's strategy hooks are the storing cases.
+The decision table: *fixed callee* → template parameter (§15.4.2); *passed through* → `function_ref`; *stored, owning* → `move_only_function` (or `inplace_function` when allocation must be impossible); *stored, copyable, cold* → `std::function`. Ch. 24 §24.4.1 restates this for lambdas and ranges callbacks; Ch. 57–58's completion callbacks and Ch. 91 §91.4.4's strategy hooks are the storing cases.
 
 ## 15.5 Verify the codegen: devirtualized call sites
 

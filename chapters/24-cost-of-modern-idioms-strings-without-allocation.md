@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 15 (indirect calls — the `std::function` measurement this chapter extends to lambdas, function pointers and the lighter erasers of §15.4.5), Ch. 21 (zero-cost abstraction as an asm claim; strong types), Ch. 23 (the cost of abstractions — and §23.4.5, which decides whether a `string_view`, an `optional` or an `expected` travels in registers), Ch. 4 (reading the loop in asm; `-Rpass-missed`), Ch. 10 (object layout — a closure is a struct).
 >
-> **Leads into:** Ch. 25 (aliasing — the one reason a `string_view` over a byte buffer stays scalar), Ch. 30 (containers keyed by the symbol types built in §24.4.4), Ch. 34 (what the vectorizer needs from a loop, which §24.4.2 shows a view can take away), Ch. 62 (the receive buffer every `string_view` field points into) and Ch. 86 (log arguments: symbols as integers, not strings).
+> **Leads into:** Ch. 25 (aliasing — the one reason a `string_view` over a byte buffer stays scalar), Ch. 30 (containers keyed by the symbol types built in §24.4.4), Ch. 34 (what the vectorizer needs from a loop, which §24.4.2 shows a view can take away), Ch. 63 (the receive buffer every `string_view` field points into) and Ch. 87 (log arguments: symbols as integers, not strings).
 
 ---
 
@@ -34,7 +34,7 @@ A `std::string_view` is a pointer and a length — 16 bytes, trivially copyable,
 
 ### 24.2.4 Where strings hide the allocation
 
-`std::string` is 32 bytes in libstdc++ with a 15-character small-string buffer (libc++: 24 bytes, 22 characters); a symbol of 7 characters constructed from the wire costs 1.8 ns and no heap, a 30-character instrument name costs 9–11 ns and a `malloc` (§24.3) — on the hot path, Ch. 28's forbidden syscall-in-waiting. Comparison of two `std::string`s is a length compare and a `memcmp` call (1.3–1.6 ns for 7 characters); hashing for an `unordered_map` is a byte loop over the key (the 11–14 ns lookup). A `string_view` removes the allocation and the ownership but not the `memcmp`, the hash loop or the 16-byte key (and adds a lifetime obligation). An eight-character symbol *is* a 64-bit integer: copying it from the wire is one load, comparing it is one `cmp`, hashing it is one multiply, and a table keyed by it is a `flat_map`/open-addressing lookup at 2–5 ns (Ch. 30). An *interned* symbol — a dense id assigned at startup — turns the lookup into an array index at zero cost. The hot path should see symbols as integers; strings are for the humans at the edges (logs — Ch. 86 — and configuration).
+`std::string` is 32 bytes in libstdc++ with a 15-character small-string buffer (libc++: 24 bytes, 22 characters); a symbol of 7 characters constructed from the wire costs 1.8 ns and no heap, a 30-character instrument name costs 9–11 ns and a `malloc` (§24.3) — on the hot path, Ch. 28's forbidden syscall-in-waiting. Comparison of two `std::string`s is a length compare and a `memcmp` call (1.3–1.6 ns for 7 characters); hashing for an `unordered_map` is a byte loop over the key (the 11–14 ns lookup). A `string_view` removes the allocation and the ownership but not the `memcmp`, the hash loop or the 16-byte key (and adds a lifetime obligation). An eight-character symbol *is* a 64-bit integer: copying it from the wire is one load, comparing it is one `cmp`, hashing it is one multiply, and a table keyed by it is a `flat_map`/open-addressing lookup at 2–5 ns (Ch. 30). An *interned* symbol — a dense id assigned at startup — turns the lookup into an array index at zero cost. The hot path should see symbols as integers; strings are for the humans at the edges (logs — Ch. 87 — and configuration).
 
 ---
 
@@ -124,10 +124,10 @@ The 14 ns `std::string` lookup against the 0.1 ns interned index is the whole ar
   struct Sym8Hash { std::size_t operator()(Sym8 s) const noexcept { return (s.v * 0x9E3779B97F4A7C15ull) >> 32; } };
   ```
 
-- **`std::string_view` for anything you only *read*** — parsing FIX tags, matching a venue name at startup, logging. It carries a lifetime obligation: a view over the receive buffer is valid until the ring slot is reused (Ch. 62), so a view that must survive the message is copied into a `Sym8` or a fixed-capacity string *before* the handler returns. Never store a `string_view` in a long-lived structure that outlives the buffer it points into.
+- **`std::string_view` for anything you only *read*** — parsing FIX tags, matching a venue name at startup, logging. It carries a lifetime obligation: a view over the receive buffer is valid until the ring slot is reused (Ch. 63), so a view that must survive the message is copied into a `Sym8` or a fixed-capacity string *before* the handler returns. Never store a `string_view` in a long-lived structure that outlives the buffer it points into.
 - **Fixed-capacity strings for the few variable-length strings the hot path must hold** (a client order id, a venue-assigned order token): `FixedString<N>` — `char buf[N]; uint8_t len;` — is trivially copyable, allocation-free, and constructs at 0.5–5 ns against `std::string`'s 9–11 ns plus a heap round-trip (§24.3). `std::inplace_vector<char, N>` (C++26, Appendix H) is the standard spelling of the same object; `etl::string<N>` and `boost::static_string` are the shipping ones.
 - **Intern symbols at startup.** Build the `symbol → dense id` table *once* (a `flat_map<Sym8, uint32_t>` or open-addressing map, Ch. 30), hand every per-symbol structure an array indexed by id, and never look a symbol up on the hot path again: the id arrives *with* the subscription, and the lookup is `book[id]` (0.1 ns in §24.3 — it is an indexed load). The one hot lookup that remains — mapping a wire symbol to an id for an *unexpected* instrument — hits the `Sym8` map at 2–5 ns, and only once per instrument per session.
-- **Keep strings where humans are.** Configuration, logs (Ch. 86 logs the `Sym8` or the id and renders the string off the hot path), exception messages, the session logon. The hot path sees integers.
+- **Keep strings where humans are.** Configuration, logs (Ch. 87 logs the `Sym8` or the id and renders the string off the hot path), exception messages, the session logon. The hot path sees integers.
 
 ---
 
@@ -239,7 +239,7 @@ Compare with `std::string::operator==`: a length compare, a `memcmp@PLT` call an
 - Eric Niebler, *"Range-v3 and the Future of C++ Algorithms"* and Tristan Brindle, *"An Overview of Standard Ranges"* (CppCon 2019) — the view model and where the sentinel comes from (§24.2.2).
 - Jason Turner, *"Lambdas: From C++11 to C++20"* (CppCon 2019) — closure types, generic lambdas and what they compile to (§24.2.1).
 - Nicolai Josuttis, *C++20 — The Complete Guide*, chapters on ranges and views — the caching and dangling rules of §24.4.2 in detail.
-- Ch. 15 (*Indirect Calls, Virtual Dispatch & Devirtualization*) — the callable measurements this chapter extends; Ch. 30 (*Cache-Friendly Containers*) — the `flat_map`/open-addressing tables keyed by `Sym8`; Ch. 34 (*SIMD & Vectorization*) — the select the raw loop became; Ch. 62 (*Zero-Copy Wire Handling*) — the buffer every `string_view` points into; **Appendix H** — `ranges`, `zip`, `expected`, `function_ref`, `inplace_vector` availability.
+- Ch. 15 (*Indirect Calls, Virtual Dispatch & Devirtualization*) — the callable measurements this chapter extends; Ch. 30 (*Cache-Friendly Containers*) — the `flat_map`/open-addressing tables keyed by `Sym8`; Ch. 34 (*SIMD & Vectorization*) — the select the raw loop became; Ch. 63 (*Zero-Copy Wire Handling*) — the buffer every `string_view` points into; **Appendix H** — `ranges`, `zip`, `expected`, `function_ref`, `inplace_vector` availability.
 
 ---
 

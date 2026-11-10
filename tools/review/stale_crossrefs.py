@@ -60,6 +60,7 @@ STEPS = [
     ("insert", 102),  # Ch. 103 release-engineering-measuring-changes-in-production
     ("insert", 6),  # Ch. 7 choosing-clocking-hot-path-cpu
     ("insert", 17),  # Ch. 18 chiplets-tiles-numa-within-socket
+    ("insert", 53),  # Ch. 54 power-management-frequency-determinism
     # INSERT_STEPS_END
 ]
 def old2new(n):
