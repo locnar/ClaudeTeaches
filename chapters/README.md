@@ -809,11 +809,15 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 ### [57. Real-Time Scheduling & Kernel Tuning](57-realtime-scheduling-kernel-tuning.md)
 - 57.1 Why it matters: eliminating scheduler-induced jitter
 - 57.2 Mental model: `isolcpus`, `nohz_full`, RT priorities, cgroups
+  - 57.2.1 Inside the fair class: EEVDF lag, virtual deadlines and slice requests
+  - 57.2.2 `SCHED_DEADLINE` in depth: admission, CBS and GRUB
 - 57.3 Measure it: `cyclictest` before/after
 - 57.4 Techniques
   - 57.4.1 CPU isolation and tickless cores
   - 57.4.2 RT scheduling classes and priorities
-- 57.5 Pitfalls & anti-patterns: RT throttling, priority inversion
+  - 57.4.3 `SCHED_DEADLINE` and the RT kernel: when a trading host wants them
+  - 57.4.4 Containers on the trading host: cpusets, `cpu.max` and the Kubernetes question
+- 57.5 Pitfalls & anti-patterns: RT throttling, priority inversion, forced IRQ threads, `cpu.max`
 - 57.6 Exercises & checklist
 
 ### [58. Power Management & Frequency Determinism](58-power-management-frequency-determinism.md)
