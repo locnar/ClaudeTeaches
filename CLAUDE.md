@@ -504,15 +504,15 @@ Code & content guidelines:
     residual noise (Ch. 52, added 2026-11-09 P3-1), warming. Power management & frequency determinism is Ch. 54 (added 2026-11-10 P3-6B).
   - **VIII — Kernel I/O, Sockets & Zero-Copy** (60–66): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP. The datapath anatomy chapter is Ch. 58 (added 2026-11-10 P3-6B).
-  - **IX — Market Data, NIC & Fabric** (67–75): decoding, reliable multicast, multicast membership &
+  - **IX — Market Data, NIC & Fabric** (67–76): decoding, reliable multicast, multicast membership &
     dark-feed detection (Ch. 59, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (76–80): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (77–81): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (81–85): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (82–86): PCIe, GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (83–87, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (91–111): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (92–112): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
     topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
     kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the

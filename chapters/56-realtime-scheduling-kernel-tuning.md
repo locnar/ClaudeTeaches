@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 51 (context switching — preemption/interrupts are the jitter this eliminates), Ch. 53 (pinning — isolation makes the pin effective), Ch. 54 (SMT — isolate the sibling too), Ch. 55 (cache partitioning — the shared-L3 half of isolation, which this chapter's kernel knobs complete), Ch. 6 (BIOS/firmware tuning — the layer below the kernel), Ch. 1 (jitter/tail — the metric).
 >
-> **Leads into:** Ch. 59 (warming — once the core is quiet, keep it warm), Ch. 70–72, 76, 77 (NIC / DDIO / flow steering / bypass — the I/O on the isolated cores), Appendix C (the consolidated checklist this chapter feeds). This is the kernel configuration that delivers the "quiet core" Ch. 53–55 assumed.
+> **Leads into:** Ch. 59 (warming — once the core is quiet, keep it warm), Ch. 71–73, 77, 78 (NIC / DDIO / flow steering / bypass — the I/O on the isolated cores), Appendix C (the consolidated checklist this chapter feeds). This is the kernel configuration that delivers the "quiet core" Ch. 53–55 assumed.
 
 ---
 
@@ -116,7 +116,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 - **Forgetting `mlockall` on RT threads (Ch. 29, 33).** RT priority guarantees scheduling, not memory residency — a page fault (Ch. 29) still spikes. `mlockall` + pre-fault (Ch. 33) is mandatory RT setup.
 - **Over-tuning / breaking the system.** Isolating *too many* cores (leaving too few for housekeeping), disabling RT throttling without understanding it, setting a 100%-busy RT thread above the per-CPU kthreads it can starve (`ksoftirqd/N`, `kworker/N:*`, `watchdog/N`, threaded `irq/*` on PREEMPT_RT → softlockups and stalled I/O), or applying a `tuned` profile blindly — all can make the box *unstable* or *slower*. Tune deliberately, measure each change (`cyclictest`), and keep enough housekeeping capacity.
 - **`isolcpus` deprecation / wrong interface.** `isolcpus` works but is semi-deprecated in favor of cgroup v2 `cpuset` isolated partitions on newer kernels; using the wrong/old interface (or both inconsistently) can give surprising behavior. Know your kernel's preferred isolation mechanism.
-- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail — and the isolation itself — continuously (Ch. 106, 111).
+- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail — and the isolation itself — continuously (Ch. 107, 112).
 - **RT priority on a shared/general core without isolation.** Giving a thread `SCHED_FIFO` on a *non*-isolated core can *starve* the rest of the system (it preempts everything, including things the box needs) — RT priority belongs with isolation. Don't RT-prioritize on a general-purpose core casually.
 
 ## 56.6 Exercises & checklist
@@ -138,7 +138,7 @@ Ensuring the hot thread is never preempted — and doing it *safely*:
 - [ ] The **BIOS/firmware layer** (Ch. 6) is tuned *under* the kernel: deep **C-states off**, **P-states/turbo** fixed, **SMIs** minimized, **HT** handled (Ch. 54).
 - [ ] I **measured jitter with `cyclictest`** before/after each change (max latency = the tail — Ch. 1), drove the max down to single-digit µs under realistic load, and chased remaining spikes to their source.
 - [ ] Everything-not-hot is **confined to housekeeping cores** (cgroups/`cpuset`), with **enough housekeeping capacity**; I didn't over-isolate or over-tune into instability.
-- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail — and the core's quietness — is **monitored continuously** (Ch. 106, 111); residual spikes are attributed with Ch. 58's catalog and tools, not tolerated.
+- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail — and the core's quietness — is **monitored continuously** (Ch. 107, 112); residual spikes are attributed with Ch. 58's catalog and tools, not tolerated.
 
 ## 56.7 References
 

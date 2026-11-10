@@ -1,6 +1,6 @@
 # Appendix Q — AMD Zen (EPYC & Ryzen) Companion
 
-> **Relates to:** Ch. 8 and Ch. 16 (caches, TLBs — the hierarchy that changes most), Ch. 12–14 (pipeline, op cache, branch prediction), Ch. 2 (the PMU — every `perf` event name in the book's Measure-it sections is Intel's), Ch. 18 (CCDs, the I/O die, NPS — the topology chapter, not repeated here), Ch. 6, 7 and 57 (firmware knobs, clocks, `amd_pstate`), Ch. 35 (`pdep`/`pext`), Ch. 36 (AVX-512 without a frequency licence), Ch. 38–40 (memory model and spin loops — what does *not* change, and the one thing that does), Ch. 55 (L3 QoS), Ch. 71 (no DDIO). The main chapters are calibrated to an Intel Ice Lake-SP reference machine (Appendix L.3); this appendix names exactly what changes on AMD Zen 3/4/5, in the same spirit as Appendix A does for ARM. Appendix R has the per-generation numbers.
+> **Relates to:** Ch. 8 and Ch. 16 (caches, TLBs — the hierarchy that changes most), Ch. 12–14 (pipeline, op cache, branch prediction), Ch. 2 (the PMU — every `perf` event name in the book's Measure-it sections is Intel's), Ch. 18 (CCDs, the I/O die, NPS — the topology chapter, not repeated here), Ch. 6, 7 and 57 (firmware knobs, clocks, `amd_pstate`), Ch. 35 (`pdep`/`pext`), Ch. 36 (AVX-512 without a frequency licence), Ch. 38–40 (memory model and spin loops — what does *not* change, and the one thing that does), Ch. 55 (L3 QoS), Ch. 72 (no DDIO). The main chapters are calibrated to an Intel Ice Lake-SP reference machine (Appendix L.3); this appendix names exactly what changes on AMD Zen 3/4/5, in the same spirit as Appendix A does for ARM. Appendix R has the per-generation numbers.
 
 The one-line summary: **Zen is x86-64 with the same memory model, the same instruction set (AVX-512 included from Zen 4) and a different uncore** — a chiplet topology with a private L3 per CCD (Ch. 18), no DDIO, no PEBS (IBS instead), no AVX frequency licence, a continuous boost controller rather than a turbo table, and an entirely different set of `perf` event names and firmware knobs. Everything in Parts III–VI transfers unchanged; Parts I–II's *measurements* and Part VII's *knobs* need this appendix.
 
@@ -62,7 +62,7 @@ This is the section a reader on AMD hardware needs most: **every `perf` event na
    (Ch. 8, 16 §16.3, 17 §17.3)         mem_load_l3_miss_retired.{local,remote}_dram        near_cache,far_cache,dram_io_near,dram_io_far}  (Zen 4+ names)
    L2 behaviour                        l2_rqsts.*                                      l2_cache_req_stat.*, l2_pf_hit_l2, l2_pf_miss_l2_hit_l3
    L3 (per CCX uncore PMU)             uncore_cha_*/LLC_LOOKUP                         amd_l3/l3_lookup_state.l3_miss/, amd_l3/l3_xi_sampled_latency/
-   DRAM / fabric traffic (Ch. 17, 71)  uncore_imc_*/cas_count_read                     amd_df/dram_channel_data_controller_N/ (bytes × 64), umc_* on Zen 4+
+   DRAM / fabric traffic (Ch. 17, 72)  uncore_imc_*/cas_count_read                     amd_df/dram_channel_data_controller_N/ (bytes × 64), umc_* on Zen 4+
    front-end stalls (Ch. 13)           idq_uops_not_delivered, frontend_retired.*      ic_fetch_stall.{ic_stall_any,ic_stall_back_pressure,ic_stall_dq_empty},
                                                                                           op_cache_hit_miss.*, de_dis_dispatch_token_stalls1.*
    top-down (Ch. 2 §2.2.2)             perf stat --topdown (TMA levels 1–2)            Zen 3: NOT available; Zen 4/5: perf stat -M PipelineL1 / PipelineL2
@@ -81,7 +81,7 @@ Method consequences. **Top-down as the book uses it (Ch. 2 §2.2.2) does not exi
 
 ## Q.6 Memory model, atomics and spin loops (Ch. 38–40): what does not change
 
-Nothing in Part VI changes: Zen is **x86-TSO**, `lock`-prefixed RMWs are full barriers, `mfence`/`lfence`/`sfence` have the same semantics, and every listing in Ch. 38–45 is correct as written. Two numbers move: the **contended-line transfer** is CCD-topology-dependent (Ch. 18 — 19 ns inside, 85+ across, vs the 45–65 ns band of the monolithic reference machine), so an SPSC pair that straddles CCDs is 4× slower and a false-sharing bug 4× more expensive; and **`pause`** is ~65 cycles (Zen 2+), which changes Ch. 40's backoff arithmetic and the Ch. 46 poll-loop duty cycle. `lock cmpxchg16b` is single-instruction and fast on all Zen (Ch. 40's DWCAS note); `clwb`/`clflushopt` are present; `movdir64b` (Ch. 81's doorbell write) is Zen 4+.
+Nothing in Part VI changes: Zen is **x86-TSO**, `lock`-prefixed RMWs are full barriers, `mfence`/`lfence`/`sfence` have the same semantics, and every listing in Ch. 38–45 is correct as written. Two numbers move: the **contended-line transfer** is CCD-topology-dependent (Ch. 18 — 19 ns inside, 85+ across, vs the 45–65 ns band of the monolithic reference machine), so an SPSC pair that straddles CCDs is 4× slower and a false-sharing bug 4× more expensive; and **`pause`** is ~65 cycles (Zen 2+), which changes Ch. 40's backoff arithmetic and the Ch. 46 poll-loop duty cycle. `lock cmpxchg16b` is single-instruction and fast on all Zen (Ch. 40's DWCAS note); `clwb`/`clflushopt` are present; `movdir64b` (Ch. 82's doorbell write) is Zen 4+.
 
 ## Q.7 Firmware knobs, clocks and power (Ch. 6, 7, 57; Appendix C.1)
 
@@ -103,7 +103,7 @@ The AMD names for Appendix C.1's rows, as EPYC/Ryzen firmware labels them (exact
    prefetchers (Ch. 8)               L1 Stream HW Prefetcher, L1 Stride, L1 Region, L2 Stream,       (no MSR interface for most; re-run Ch. 8's
                                      L2 Up/Down — each Enable/Disable                                 sweep after a change)
    I/O placement                     Preferred IO = the NIC's PCIe bus (prioritises its traffic in   /sys/bus/pci/devices/…/numa_node; IRQ counts
-                                     the IOD); IOMMU = Disabled or passthrough (Ch. 77); x2APIC on
+                                     the IOD); IOMMU = Disabled or passthrough (Ch. 78); x2APIC on
    SMIs / RAS                        Platform First Error Handling (PFEH) — firmware-first MCEs       no architectural SMI counter (MSR 0x34 and
                                      raise SMIs (Ch. 6 §6.4.4); disable for OS-first handling         turbostat's SMI column are Intel-only): detect
                                                                                                       firmware stalls with hwlat / rtla hwnoise (Ch. 58)
@@ -111,11 +111,11 @@ The AMD names for Appendix C.1's rows, as EPYC/Ryzen firmware labels them (exact
 
 The **boost controller** (Precision Boost 2) is continuous: with "Core Performance Boost" on and nothing pinned, the clock is a function of package power (PPT), current (TDC/EDC) and temperature, *not* of a core-count table — Ch. 7 §7.2.3. The deterministic posture is either boost off (Ch. 6 — the base clock, 2.5–3.5 GHz on EPYC) or, on Ryzen/Threadripper, a fixed all-core ratio that disables the controller; EPYC firmware's "Determinism = Performance" mode makes all parts of a SKU run the *same* (lower) clock curve rather than each chip's own silicon-quality-dependent one — it is a fleet-uniformity knob, not a jitter knob. `amd_pstate=active` (the EPP driver, kernel ≥ 6.3) is the Linux side; `performance` EPP pins the CPPC request to the highest perf level (Ch. 57 §57.4.3). C-states: AMD exposes C1 and one deep core state (ACPI C2 = CC6, with the firmware-reported exit latency that Ch. 57 §57.2.1 warns is optimistic), plus package C6; "Global C-state Control = Disabled" leaves C1 only.
 
-## Q.8 Cache QoS (Ch. 55) and the I/O path (Ch. 71, 77)
+## Q.8 Cache QoS (Ch. 55) and the I/O path (Ch. 72, 78)
 
 AMD **Platform QoS** appears in `resctrl` like Intel RDT: L3 CAT with a 16-bit capacity bitmask (16 ways per CCX), per-CCX domains (`info/L3/` lists one domain per L3 — eight to twelve on an EPYC, one per CCD, which is Ch. 18 §18.4.4's point), **MBA** as a coarse per-CCX bandwidth throttle (Zen 2+; the units are different from Intel's percentages — read `info/MB/`), no L2 CAT, no CDP; Zen 4 adds **SMBA** (slow-memory bandwidth allocation for CXL) and **BMEC** (bandwidth monitoring event configuration). The monitoring side (`llc_occupancy`, `mbm_total_bytes`) exists from Zen 2.
 
-There is **no DDIO** on AMD: a NIC's DMA writes go to DRAM (through the IOD's quadrant that owns the slot), and the first touch of the RX buffer by the consumer is a DRAM miss (~95–110 ns) rather than an L3 hit — Ch. 71's measurements do not transfer, and Ch. 18 §18.4.3's "consumer in the device's quadrant, NPS4" is the mitigation (the miss is at least local). Zen 4/5 EPYC supports **PCIe 5.0 × 128 lanes** per socket and CXL 1.1/2.0 memory expanders (which appear as CPU-less NUMA nodes); "Preferred IO" gives one device priority in the IOD arbitration — set it for the market-data NIC.
+There is **no DDIO** on AMD: a NIC's DMA writes go to DRAM (through the IOD's quadrant that owns the slot), and the first touch of the RX buffer by the consumer is a DRAM miss (~95–110 ns) rather than an L3 hit — Ch. 72's measurements do not transfer, and Ch. 18 §18.4.3's "consumer in the device's quadrant, NPS4" is the mitigation (the miss is at least local). Zen 4/5 EPYC supports **PCIe 5.0 × 128 lanes** per socket and CXL 1.1/2.0 memory expanders (which appear as CPU-less NUMA nodes); "Preferred IO" gives one device priority in the IOD arbitration — set it for the market-data NIC.
 
 ## Q.9 Re-running the book on a Zen box: what to expect
 

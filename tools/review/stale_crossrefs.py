@@ -65,6 +65,7 @@ STEPS = [
     ("insert", 27),  # Ch. 28 static-analysis-performance-contracts
     ("insert", 31),  # Ch. 32 limit-order-book-engineering
     ("insert", 36),  # Ch. 37 streaming-statistics-incremental-signals
+    ("insert", 67),  # Ch. 68 branch-free-parsing-formatting
     # INSERT_STEPS_END
 ]
 def old2new(n):
