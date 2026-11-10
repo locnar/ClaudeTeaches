@@ -52,6 +52,12 @@ STEPS = [
     ("insert", 19),  # Ch. 20 compile-time-protocol-decoders
     ("insert", 21),  # Ch. 22 cost-of-modern-idioms-strings-without-allocation
     ("insert", 24),  # Ch. 25 build-systems-build-time-hygiene-hermetic-toolchains
+    ("insert", 91),  # Ch. 92 order-entry-gateway-session-layer
+    ("insert", 94),  # Ch. 95 line-rate-capture-timing-faithful-replay
+    ("insert", 96),  # Ch. 97 failover-without-split-brain-leases-fencing
+    ("insert", 100),  # Ch. 101 testing-latency-critical-code
+    ("insert", 101),  # Ch. 102 performance-engineering-ci-profile-lifecycle
+    ("insert", 102),  # Ch. 103 release-engineering-measuring-changes-in-production
     # INSERT_STEPS_END
 ]
 def old2new(n):
@@ -63,10 +69,10 @@ def old2new(n):
 STOP = set("the and of for a an in on to vs with its it is from into at by your you how when what why not or as be this that are".split())
 def words(s): return set(w for w in re.findall(r"[a-z0-9_+]+", s.lower()) if w not in STOP and len(w) > 2)
 files = sorted(f for f in os.listdir(D) if f.endswith(".md") and f != "README.md")
-MAXCH = max(int(f[:2]) for f in files if re.match(r"^\d{2}-", f) and not f.startswith("00-"))
+MAXCH = max(int(f.split("-",1)[0]) for f in files if re.match(r"^\d{2,3}-", f) and not f.startswith("00-"))
 kw, titles = {}, {}
 for f in files:
-    m = re.match(r"^(\d{2})-", f)
+    m = re.match(r"^(\d{2,3})-", f)
     if not m: continue
     n = int(m.group(1)); k = set()
     for l in open(os.path.join(D, f), encoding="utf-8"):
@@ -77,7 +83,7 @@ for f in files:
     kw[n] = k
 out = collections.defaultdict(list)
 for f in files:
-    inf = False; own = int(f[:2]) if re.match(r"^\d{2}-", f) else None
+    inf = False; own = int(f.split("-",1)[0]) if re.match(r"^\d{2,3}-", f) else None
     for i, l in enumerate(open(os.path.join(D, f), encoding="utf-8"), 1):
         if FENCE.match(l): inf = not inf; continue
         for m in re.finditer(r"(?:\bCh(?:\.|apter)s?\s?|§\s?)(\d+)(?:\.\d+)?", l):

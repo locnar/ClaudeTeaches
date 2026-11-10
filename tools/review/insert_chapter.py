@@ -64,7 +64,10 @@ NUMWORDS = {70: "seventy", 71: "seventy-one", 72: "seventy-two", 73: "seventy-th
             86: "eighty-six", 87: "eighty-seven", 88: "eighty-eight", 89: "eighty-nine",
             90: "ninety", 91: "ninety-one", 92: "ninety-two", 93: "ninety-three",
             94: "ninety-four", 95: "ninety-five", 96: "ninety-six", 97: "ninety-seven",
-            98: "ninety-eight", 99: "ninety-nine"}
+            98: "ninety-eight", 99: "ninety-nine", 100: "one hundred", 101: "one hundred and one",
+            102: "one hundred and two", 103: "one hundred and three", 104: "one hundred and four",
+            105: "one hundred and five", 106: "one hundred and six", 107: "one hundred and seven",
+            108: "one hundred and eight", 109: "one hundred and nine", 110: "one hundred and ten"}
 
 PARTWORDS = {10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen",
              16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen", 20: "twenty"}
@@ -236,7 +239,7 @@ class Renumberer:
                 return name
             n = int(mo.group(1))
             return f"{self.m(n):02d}-{mo.group(2)}"
-        return re.sub(r"(?<![\w/])(\d{2})-([a-z0-9][a-z0-9-]*\.md)\b", rep, line)
+        return re.sub(r"(?<![\w/])(\d{2,3})-([a-z0-9][a-z0-9-]*\.md)\b", rep, line)
 
     def rewrite_headings(self, line):
         """Returns (line, done). done=True means no other rule may touch the line (the
@@ -335,7 +338,7 @@ def main():
             sys.exit("refusing to run on a dirty tree:\n" + dirty)
 
     names = sorted(os.listdir(chdir))
-    chap_files = {int(f[:2]): f for f in names if re.match(r"^\d{2}-.*\.md$", f) and not f.startswith("00-")}
+    chap_files = {int(f.split("-", 1)[0]): f for f in names if re.match(r"^\d{2,3}-.*\.md$", f) and not f.startswith("00-")}
     maxch = max(chap_files)
     N = args.after
     if not 1 <= N <= maxch:
@@ -387,7 +390,7 @@ def main():
         nparts_before = len(re.findall(r"^## Part [IVXL]+ ", open(rp0, encoding="utf-8").read(), re.M))
 
     # 1. renames, highest first
-    renames = [(chap_files[m], f"{m + 1:02d}-{chap_files[m][3:]}") for m in sorted(chap_files) if m > N]
+    renames = [(chap_files[m], f"{m + 1:02d}-{chap_files[m].split('-', 1)[1]}") for m in sorted(chap_files) if m > N]
     for old, new in reversed(renames):
         print(f"  git mv {old} -> {new}")
         if not args.dry_run:
@@ -417,7 +420,7 @@ def main():
 
     current = sorted(os.listdir(chdir)) if not args.dry_run else names
     for f in current:
-        if re.match(r"^\d{2}-.*\.md$", f) and not f.startswith("00-"):
+        if re.match(r"^\d{2,3}-.*\.md$", f) and not f.startswith("00-"):
             rewrite(os.path.join("chapters", f))
         elif f.startswith("appendix-") and f.endswith(".md"):
             rewrite(os.path.join("chapters", f), headings=False)

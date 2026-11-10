@@ -1,6 +1,6 @@
 # Appendix J — HFT Market-Structure & Protocol Primer
 
-> **Consolidates the trading framing** the main text assumes but never teaches from scratch — the book targets advanced C++ developers who may be new to electronic trading. It gives the domain vocabulary and mechanics behind the running examples: the order-book case study (Ch. 28 §28.4.5, with the order/level pools of Ch. 27), zero-copy market-data decoding (Ch. 60 — ITCH/OUCH/FIX/SBE/FAST), reliable multicast and A/B feed arbitration (Ch. 61), and the end-to-end tick-to-trade path (Ch. 98). It complements **Appendix F** (Glossary): F *defines* the terms one line at a time; this appendix explains how the pieces *work together*.
+> **Consolidates the trading framing** the main text assumes but never teaches from scratch — the book targets advanced C++ developers who may be new to electronic trading. It gives the domain vocabulary and mechanics behind the running examples: the order-book case study (Ch. 28 §28.4.5, with the order/level pools of Ch. 27), zero-copy market-data decoding (Ch. 60 — ITCH/OUCH/FIX/SBE/FAST), reliable multicast and A/B feed arbitration (Ch. 61), and the end-to-end tick-to-trade path (Ch. 104). It complements **Appendix F** (Glossary): F *defines* the terms one line at a time; this appendix explains how the pieces *work together*.
 
 **How to use this:** read top-down for the onramp, or jump to J.5 for the protocol quick reference. This is *background*, not a performance chapter — no benchmarks; it exists so the trading scenarios in the rest of the book are self-contained and a reader never has to guess what "BBO," "IOC," or "A/B feed" means. Nothing here is legal, regulatory, or trading advice, and market structure varies by asset class, venue, and jurisdiction — the model below is the US-equities / listed-derivatives archetype most HFT literature assumes; adapt to your market.
 
@@ -35,9 +35,9 @@ An order is a small state machine the **order gateway** / **OMS** (Order Managem
 - **Order types:** a **market** order executes immediately at the best available price(s); a **limit** order rests until it can trade at its price or better; a **stop** order activates when the market reaches a trigger. **Pegged** orders track the BBO; **iceberg**/reserve orders show only part of their size.
 - **Time-in-force (TIF):** **Day** (rests until the close), **IOC** (Immediate-Or-Cancel — take what's available now, cancel the rest), **FOK** (Fill-Or-Kill — all now or nothing), **GTC** (Good-Til-Cancelled). IOC is the workhorse of aggressive HFT strategies.
 - **The state machine:** you send **New** → the venue replies **Ack** (accepted, now working) or **Reject** → the order may receive **partial fills** and then a **full fill** (**Execution** reports), or you send **Cancel** / **Cancel-Replace** (amend price/size) → terminal states are **Filled**, **Cancelled**, **Rejected**, **Expired**. Every transition is a message on the order-entry protocol (J.5).
-- **Self-trade prevention (STP)** stops your own resting order from matching your own aggressing order. **Pre-trade risk** checks (position limits, max order size, price collars — mandated by rules like SEC 15c3-5, Appendix K.4) sit *on* the order path and add latency you must budget (Ch. 98).
+- **Self-trade prevention (STP)** stops your own resting order from matching your own aggressing order. **Pre-trade risk** checks (position limits, max order size, price collars — mandated by rules like SEC 15c3-5, Appendix K.4) sit *on* the order path and add latency you must budget (Ch. 104).
 
-- **The session layer beneath the orders.** Order-entry protocols run over a *session* with its own state machine, independent of any order: **Logon** (with sequence numbers both sides must agree on), **Heartbeat** at a negotiated interval (FIX `HeartBtInt`, tag 108), **TestRequest** when a heartbeat is late (the peer must answer with a Heartbeat echoing the request ID), **ResendRequest**/**SequenceReset** to recover messages lost across a disconnect, and **Logout**. Two missed heartbeats or an unanswered TestRequest means the session is dead at the application level even if TCP is up; venues then apply **cancel-on-disconnect** to your working orders (Appendix K.4). Binary protocols (SoupBinTCP under OUCH, native gateways) carry the same ideas under other names. Monitoring the session layer — heartbeats expected vs received, TestRequests sent and received, sequence mismatches at logon, the age of the oldest unacknowledged order — is Ch. 61 §61.4.4; the gateway failover it triggers is Ch. 89 §89.4.4.
+- **The session layer beneath the orders.** Order-entry protocols run over a *session* with its own state machine, independent of any order: **Logon** (with sequence numbers both sides must agree on), **Heartbeat** at a negotiated interval (FIX `HeartBtInt`, tag 108), **TestRequest** when a heartbeat is late (the peer must answer with a Heartbeat echoing the request ID), **ResendRequest**/**SequenceReset** to recover messages lost across a disconnect, and **Logout**. Two missed heartbeats or an unanswered TestRequest means the session is dead at the application level even if TCP is up; venues then apply **cancel-on-disconnect** to your working orders (Appendix K.4). Binary protocols (SoupBinTCP under OUCH, native gateways) carry the same ideas under other names. Ch. 92 builds this layer as a deterministic state machine with persisted sequence numbers and measures its encode, resync and failure-detection times; Ch. 97 decides which gateway may hold the session after a failure. Monitoring the session layer — heartbeats expected vs received, TestRequests sent and received, sequence mismatches at logon, the age of the oldest unacknowledged order — is Ch. 61 §61.4.4; the gateway failover it triggers is Ch. 89 §89.4.4.
 
 This state machine is exactly the kind of pure, replayable logic Ch. 89 isolates into a deterministic core, decoupled from I/O.
 
@@ -104,11 +104,11 @@ The functions the process-topology chapter (Ch. 89) maps onto separate processes
 - **Strategy / signal** — reads the book, computes a trading decision (the alpha logic — outside this book's scope, but the thing everything else serves).
 - **Order gateway / OMS** — encodes and sends orders (J.3), tracks their state machine, handles acks/fills/cancels.
 - **Pre-trade risk** — enforces limits on the order path (J.3) before anything reaches the wire.
-- **Sequencer** — a single process (or switch/FPGA) that stamps a total order on every input (ticks, acks, timers, commands, strategy decisions) and fans the sequenced stream out, so that deterministic consumers (Ch. 89) hold bit-identical state and can be replayed exactly from the journal (Ch. 93). Built, measured and failed-over in **Ch. 94**; Ch. 89 §89.4.1's point-to-point rings remain the minimal topology when only one consumer needs each stream.
+- **Sequencer** — a single process (or switch/FPGA) that stamps a total order on every input (ticks, acks, timers, commands, strategy decisions) and fans the sequenced stream out, so that deterministic consumers (Ch. 89) hold bit-identical state and can be replayed exactly from the journal (Ch. 94). Built, measured and failed-over in **Ch. 96**; Ch. 89 §89.4.1's point-to-point rings remain the minimal topology when only one consumer needs each stream.
 
 ## J.7 The tick-to-trade path, end to end
 
-One market event, from wire to wire — the narrative Ch. 98 measures:
+One market event, from wire to wire — the narrative Ch. 104 measures:
 
 1. A packet arrives at the NIC (Ch. 63) — a market-data multicast datagram on line A or B.
 2. The feed handler receives it (kernel stack, io_uring, or bypass — Ch. 54–59, 69–70), performs A/B arbitration and gap check (J.4), and **decodes** the message (J.5, Ch. 60).
@@ -117,7 +117,7 @@ One market event, from wire to wire — the narrative Ch. 98 measures:
 5. Pre-trade **risk** validates the intended order (J.3).
 6. The order gateway **encodes** the order (OUCH/SBE — J.5) and writes it to the wire (Ch. 70 from userspace, Ch. 58 over the kernel TCP stack; the NIC itself, Ch. 63).
 
-Each hop has a latency budget; the sum, measured wire-to-wire with hardware timestamps (Ch. 66, Appendix K.5), is the **tick-to-trade** number the whole book exists to minimize (Ch. 1, 98). The physical floor beneath it — colocation, cabling, the exchange link — is Appendix K.
+Each hop has a latency budget; the sum, measured wire-to-wire with hardware timestamps (Ch. 66, Appendix K.5), is the **tick-to-trade** number the whole book exists to minimize (Ch. 1, 104). The physical floor beneath it — colocation, cabling, the exchange link — is Appendix K.
 
 ## J.8 References
 
@@ -128,7 +128,7 @@ Each hop has a latency budget; the sum, measured wire-to-wire with hardware time
 ## J.9 Additional Reading
 
 - **Appendix F** (Glossary) — one-line definitions of every term used here (tick-to-trade, NBBO, IOC, maker/taker, A/B arbitration, …).
-- Ch. 28 §28.4.5 (the order-book case study; its pools in Ch. 27), Ch. 60 (decoding), Ch. 61 (reliable multicast), Ch. 89 (process topology / deterministic state machine), Ch. 98 (tick-to-trade) — where these mechanics become C++.
+- Ch. 28 §28.4.5 (the order-book case study; its pools in Ch. 27), Ch. 60 (decoding), Ch. 61 (reliable multicast), Ch. 89 (process topology / deterministic state machine), Ch. 104 (tick-to-trade) — where these mechanics become C++.
 - **Appendix K** (Exchange Connectivity) — the physical and commercial layer beneath the protocols (colocation, cross-connects, access, entitlements).
 - The exchange operators' own developer portals (Nasdaq, CME, Cboe, NYSE) — the current, authoritative message specs, which supersede any summary here.
 

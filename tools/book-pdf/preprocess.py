@@ -59,8 +59,8 @@ def chapter_files(chapters_dir):
     """Ordered list of (path, kind) for the whole book."""
     names = os.listdir(chapters_dir)
     numbered = sorted(
-        (n for n in names if re.match(r"^\d{2}-.*\.md$", n) and not n.startswith("00-")),
-        key=lambda n: int(n[:2]),
+        (n for n in names if re.match(r"^\d{2,3}-.*\.md$", n) and not n.startswith("00-")),
+        key=lambda n: int(n.split("-", 1)[0]),
     )
     appendices = sorted(n for n in names if n.startswith("appendix-") and n.endswith(".md"))
     order = []

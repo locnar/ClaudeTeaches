@@ -454,14 +454,14 @@ Code & content guidelines:
   chapters and appendices A–P — see Phases 2–3 and the five 2026-11-09 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 98 chapters + 16 appendices (A–P);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 104 chapters + 16 appendices (A–P);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
   with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters, O with
   the 2026-11-09 design-pattern chapters and P with the 2026-11-09 modern-C++ depth chapters.**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 98 chapters + 16 appendices (A–P). Appendix H's version numbers and
+  now: front matter + 104 chapters + 16 appendices (A–P). Appendix H's version numbers and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
 - Phase 3 (done): **the book was reorganized into twelve topical Parts** (thirteen since the
@@ -495,13 +495,17 @@ Code & content guidelines:
   - **XII — Beyond C++: Languages at the Latency Floor** (76–80, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (84–98): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (84–104): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
-    topology, the pre-trade risk gate & kill-switch path (Ch. 90, P3-4), idempotent order entry &
-    order-state recovery (Ch. 91, P3-4), crash handling & post-mortem (Ch. 92, P3-2), capture/replay, the
-    sequencer & replicated deterministic consumers (Ch. 94, P3-4), latency-spike forensics (Ch. 95, P3-2),
-    host health telemetry and network health & drop forensics (Ch. 96–97, P3-1), end-to-end case study
-    (the capstone, still last).
+    topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
+    kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
+    order-entry gateway & session layer (Ch. 92, P3-6), crash handling & post-mortem (Ch. 93, P3-2),
+    capture/replay, line-rate capture & timing-faithful replay (Ch. 95, P3-6), the sequencer & replicated
+    deterministic consumers (Ch. 96, P3-4), failover without split-brain (Ch. 97, P3-6), latency-spike
+    forensics (Ch. 98, P3-2), host health telemetry and network health & drop forensics (Ch. 99–100, P3-1),
+    testing latency-critical code (Ch. 101, P3-6), performance engineering in CI & the profile lifecycle
+    (Ch. 102, P3-6), release engineering & measuring changes in production (Ch. 103, P3-6), end-to-end case
+    study (Ch. 104, the capstone, still last).
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved
   chapter's framing/teasers and regenerating `chapters/README.md` from the chapter files.
@@ -595,6 +599,28 @@ Code & content guidelines:
   `atomic_ref`, DWCAS, `function_ref`, `move_only_function`, `start_lifetime_as`, `std::simd`,
   `inplace_vector`, `add_sat`), I.12 (build/toolchain/attribute/statics/TLS one-liners; I.12–I.13 →
   I.13–I.14), the README legend (98 chapters, A–P) and Part III intro, and the preface counts.
+- **2026-11-09 trading/lifecycle insertion (work-queue item P3-6 batch A):** six chapters were added with
+  `insert_chapter.py` (six ascending insertions, one commit each — no new Part; the tooling was first
+  made three-digit-safe): **92** The Order-Entry Gateway & Session Layer (after order entry), **95**
+  Line-Rate Capture, Timing-Faithful Replay & Passive Wire Measurement (after capture), **97** Failover
+  Without Split-Brain: Leases, Fencing & Session Takeover on the Order Path (after the sequencer), and the
+  engineering-lifecycle run before the capstone: **101** Testing Latency-Critical Code, **102** Performance
+  Engineering in CI & the Profile Lifecycle, **103** Release Engineering & Measuring Changes in Production.
+  Renumber map from the post-P3-5 numbering: 1–91 unchanged; old 92–93 → 93–94; old 94 → 96; old 95–97 →
+  98–100; old 98 → 104. Composite from the Phase-3 numbering: 1–19 unchanged; 20 → 21; 21 → 23; 22 → 24;
+  23–37 → 26–40; 38–41 → 43–46; 42–45 → 48–51; 46–54 → 53–61; 55–70 → 63–78; 71 → 84; 72 → 87; 73 → 88;
+  74 → 89; 75 → 94; 76 → 104. Also added: Ch. 59 §59.4.4 (TCP failure detection: default ≈ 924 s vs
+  `TCP_USER_TIMEOUT` 2.25 s vs keepalive 4.1 s, measured), Ch. 68 §68.4.4 (taps vs SPAN, timestamped
+  mirrors, appliances), Ch. 89 §89.4.7 (checkpointing: fork/COW vs double buffer + dirty bitmap, the RTO
+  curve) and §89.4.8 (segment reattach, epochs, torn-write recovery, robust mutexes), Ch. 24 §24.4.5 (the
+  PGO/BOLT profile lifecycle), Ch. 104 §104.4.1 reduced to principles and new §104.4.5 (post-trade latency
+  analytics), Appendix L §L.6 (benchmarks-as-tests CI skeleton; L.6–L.7 → L.7–L.8), Appendix D.6/I.8/I.9
+  lines, Appendix F/G/J/K entries. Ch. 94 §94.4.1 reduced to a pointer paragraph. Part XIII order is now:
+  logging → tracing → telemetry → security → hot reload → topology → risk gate → order entry → gateway →
+  crash → capture → wire capture/replay → sequencer → failover → spike forensics → host health → network
+  health → testing → CI → release → capstone. Left for later batches: the remaining item-19 gaps (G52–G58,
+  G62, G64–G65, G68 and the rest), Appendix E rows (nothing derivable for the reference machine from the
+  VM runs), Appendix O rows for the six chapters.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to

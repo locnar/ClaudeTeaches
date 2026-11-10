@@ -4,13 +4,13 @@
 
 > **Prerequisites:** Ch. 41 (the hot loop and its sources — this chapter decides what each source does when its consumer is behind), Ch. 37 (the bounded ring whose `push` fails when full — the primitive every policy below is built on), Ch. 38 (seqlock publication — the conflation slot is one), Ch. 40 §40.4.1 (the Disruptor's wrap gate — "block the producer" as the default policy), Ch. 31 §31.4.1 (bitmaps and `tzcnt` — the dirty-bitmap drain), Ch. 1 §1.2.1 (queueing: why a 70 %-utilized consumer has an unbounded tail), Ch. 36 (false sharing — the dirty words and slots are written by two cores).
 >
-> **Leads into:** Ch. 47 (timers — staleness budgets are deadlines), Ch. 61 §61.4.3 (trading through a gap: the market-data side's degraded mode), Ch. 84 §84.6 and Ch. 93 §93.5 (the logger's and the capture's full-ring policies, now instances of this chapter's taxonomy), Ch. 86 (telemetry — sequence lag and message age as the staleness metrics), Ch. 89 §89.4.4 and Appendix M (who owns the degraded-mode state machine), Ch. 90 (the risk gate's feed-staleness trigger), Ch. 94 (the sequencer's slow-replica policy). Ch. 41 built the loop and priced the hop; the one question it deferred is this chapter's whole subject — the consumer is slower than the market, now what?
+> **Leads into:** Ch. 47 (timers — staleness budgets are deadlines), Ch. 61 §61.4.3 (trading through a gap: the market-data side's degraded mode), Ch. 84 §84.6 and Ch. 94 §94.5 (the logger's and the capture's full-ring policies, now instances of this chapter's taxonomy), Ch. 86 (telemetry — sequence lag and message age as the staleness metrics), Ch. 89 §89.4.4 and Appendix M (who owns the degraded-mode state machine), Ch. 90 (the risk gate's feed-staleness trigger), Ch. 96 (the sequencer's slow-replica policy). Ch. 41 built the loop and priced the hop; the one question it deferred is this chapter's whole subject — the consumer is slower than the market, now what?
 
 ---
 
 ## 42.1 Why it matters: every trading system has a consumer slower than the open
 
-At 09:30:00.000 the feed delivers more updates in one second than in the following ten minutes, and *something* downstream is slower than that burst — a strategy with 300 ns of decision logic against updates arriving every 50 ns, a risk process on the far side of a shm ring, a journal writer, a GUI. The book has met this moment five times and answered it five different ways: the ring's `push` "fails when full and the caller handles it" (Ch. 37 §37.4.1), the Disruptor's producer "waits on the slowest consumer — natural backpressure" (Ch. 40 §40.4.1), the logger "drops and counts, or overwrites oldest, never blocks" (Ch. 84 §84.6), the capture layer "drops and flags, never stalls the trade" (Ch. 93 §93.5), the feed handler "must never let downstream slowness back-pressure the receive path" (Ch. 61 §61.5). Each is right for its consumer and wrong for the others, and none of them names the thing a trading system actually cares about: **not how many messages were kept, but how stale the data was when a decision was made on it.** A strategy that acts on a 20 ms-old book during the open is trading against a market that has moved; a risk check on a 20 ms-old position is not a risk check. That is a direct P&L hazard, and no counter of "messages dropped" measures it.
+At 09:30:00.000 the feed delivers more updates in one second than in the following ten minutes, and *something* downstream is slower than that burst — a strategy with 300 ns of decision logic against updates arriving every 50 ns, a risk process on the far side of a shm ring, a journal writer, a GUI. The book has met this moment five times and answered it five different ways: the ring's `push` "fails when full and the caller handles it" (Ch. 37 §37.4.1), the Disruptor's producer "waits on the slowest consumer — natural backpressure" (Ch. 40 §40.4.1), the logger "drops and counts, or overwrites oldest, never blocks" (Ch. 84 §84.6), the capture layer "drops and flags, never stalls the trade" (Ch. 94 §94.5), the feed handler "must never let downstream slowness back-pressure the receive path" (Ch. 61 §61.5). Each is right for its consumer and wrong for the others, and none of them names the thing a trading system actually cares about: **not how many messages were kept, but how stale the data was when a decision was made on it.** A strategy that acts on a 20 ms-old book during the open is trading against a market that has moved; a risk check on a 20 ms-old position is not a risk check. That is a direct P&L hazard, and no counter of "messages dropped" measures it.
 
 Three ideas organize the chapter. **Policy is a property of the consumer class, not of the channel** (§42.2.1): the strategy wants the latest state and nothing else; the journal wants every record and may be arbitrarily late; the gateway's ack stream can lose nothing and must not be late; the GUI wants a sample. **Conflation is the policy for state** (§42.2.2, §42.4.2): when updates to one key supersede each other, the right structure is not a queue of updates but a per-key latest-value slot plus a dirty set — it bounds the staleness of every key to "one drain pass" regardless of the burst's size, and §42.3 shows it holding the acted-on data's median age at under a microsecond through a burst that a queue turned into 20 ms. **Staleness is a metric with a budget** (§42.2.3, §42.4.3): sequence lag and message age per channel, measured against the wire timestamp, published like any other telemetry (Ch. 86), with a per-consumer budget whose breach is an input to the degraded-mode state machine (§42.4.4) and to the kill-switch (Ch. 90). After this chapter the five earlier policies become one-line pointers.
 
@@ -28,7 +28,7 @@ When a producer finds the channel full (or a consumer finds itself behind) there
    DROP-NEWEST         push fails; the new message is lost     the backlog (old)      the LATEST state is what is lost          nothing on a trading path (the
                        (+ counter)                                                                                              newest is the valuable one)
    DROP-OLDEST         overwrite the oldest unread slot        the newest N           consumer may read a torn/overwritten      logs, flight recorders, telemetry
-   (OVERWRITE)         (+ lapped counter)                                             slot unless versioned (Ch. 38)            samples — Ch. 84, 93, 95
+   (OVERWRITE)         (+ lapped counter)                                             slot unless versioned (Ch. 38)            samples — Ch. 84, 94, 98
    CONFLATE            per-key latest-value slot replaces the  latest state per key,  intermediate updates; trade prints and    strategy, risk, GUI — anything
                        queue; dirty set says which changed     bounded staleness      increments must NOT be conflated          that consumes STATE
    SAMPLE / DEGRADE    deliver every k-th, or a coarser form   a bounded rate         resolution                                GUIs, monitoring, non-critical
@@ -39,8 +39,8 @@ Mapped onto the consumers of Ch. 89's topology:
 
 - **Order gateway (acks, fills, rejects, the venue's session stream):** *nothing may be dropped and nothing may be late.* Policy: size the channel for the worst burst the venue can emit (sequence-numbered, so a gap is detectable — Ch. 91) and BLOCK the *venue* via TCP flow control before the ring, never the strategy. If this channel is ever full, that is a Ch. 90 safe-state trigger, not a policy choice.
 - **Strategy and risk (market data, positions, limits):** *latest state wins.* Policy: CONFLATE per instrument; the only queued items are the ones that are not state (trade prints feeding a volume accumulator are *increments* — they go through a lossless queue or are summed in the slot, never last-write-wins).
-- **Journal / capture (Ch. 93):** *every record, order preserved, arbitrarily late is fine.* Policy: a large ring and an off-path writer; if it fills, DROP-and-flag at the capture layer (Ch. 93 §93.5) and raise the flag as an incident — but never BLOCK the producer.
-- **Logger, flight recorder, telemetry samples (Ch. 84, 86, 95):** *recent is more valuable than complete.* Policy: DROP-OLDEST with a version word so the reader detects a torn slot; the overwritten count is itself a metric.
+- **Journal / capture (Ch. 94):** *every record, order preserved, arbitrarily late is fine.* Policy: a large ring and an off-path writer; if it fills, DROP-and-flag at the capture layer (Ch. 94 §94.5) and raise the flag as an incident — but never BLOCK the producer.
+- **Logger, flight recorder, telemetry samples (Ch. 84, 86, 98):** *recent is more valuable than complete.* Policy: DROP-OLDEST with a version word so the reader detects a torn slot; the overwritten count is itself a metric.
 - **GUI / monitoring:** *a view, at human rate.* Policy: SAMPLE or CONFLATE at a coarse interval, off the hot box entirely.
 
 The rule the table encodes: **a producer on the tick-to-trade path never blocks and never allocates for a slow consumer; the consumer's class decides whether the channel keeps everything (and is sized for it), keeps the newest, or keeps the latest-per-key.**
@@ -77,7 +77,7 @@ The relation that makes conflation the right default: under a queue, message age
 
 ### 42.2.4 Degraded modes and load shedding at the open
 
-Policies are per channel; a *mode* is system-wide and owned by one component. The readiness state machine of Appendix M.1 and Ch. 89 §89.4.4 has `trading`; this chapter adds that `trading` has sub-modes, entered when a staleness budget or a sequence-lag threshold is breached, each with a declared shedding plan: **normal** (everything on) → **conflating** (depth beyond the top *k* levels is no longer applied; the GUI and analytics feeds are sampled at 1/10; the journal keeps everything) → **pulled** (quotes withdrawn on instruments whose book age exceeds the budget — Ch. 61 §61.4.3's stale-data kill, now driven by *consumer* lag rather than feed gaps) → **safe-state** (Ch. 90's kill-switch, when the *ack* channel or the position view is stale). The owner is the risk/supervisor role (Ch. 89 §89.2.1), the inputs are the staleness metrics of §42.2.3, the transitions are logged and replayable (Ch. 93, 94), and §42.4.4 builds it. Load shedding is the *plan*; the mode machine is what makes it a decision instead of an accident.
+Policies are per channel; a *mode* is system-wide and owned by one component. The readiness state machine of Appendix M.1 and Ch. 89 §89.4.4 has `trading`; this chapter adds that `trading` has sub-modes, entered when a staleness budget or a sequence-lag threshold is breached, each with a declared shedding plan: **normal** (everything on) → **conflating** (depth beyond the top *k* levels is no longer applied; the GUI and analytics feeds are sampled at 1/10; the journal keeps everything) → **pulled** (quotes withdrawn on instruments whose book age exceeds the budget — Ch. 61 §61.4.3's stale-data kill, now driven by *consumer* lag rather than feed gaps) → **safe-state** (Ch. 90's kill-switch, when the *ack* channel or the position view is stale). The owner is the risk/supervisor role (Ch. 89 §89.2.1), the inputs are the staleness metrics of §42.2.3, the transitions are logged and replayable (Ch. 94, 96), and §42.4.4 builds it. Load shedding is the *plan*; the mode machine is what makes it a decision instead of an accident.
 
 ## 42.3 Measure it: a replayed microburst against a slow consumer
 
@@ -145,7 +145,7 @@ enum class OnFull { Fail, Overwrite };                       // Block is deliber
 template <class T, std::size_t N, OnFull P> struct Channel;  // Fail: SPSC of Ch. 37 with a dropped counter; Overwrite: versioned overwrite ring (Ch. 84's logger)
 
 using AckChannel      = Channel<VenueMsg, 1 << 16, OnFull::Fail>;        // full == incident: the gateway asserts and trips safe-state (Ch. 90)
-using JournalChannel  = Channel<Record,   1 << 20, OnFull::Fail>;        // full == drop-and-flag (Ch. 93 §93.5), never block
+using JournalChannel  = Channel<Record,   1 << 20, OnFull::Fail>;        // full == drop-and-flag (Ch. 94 §94.5), never block
 using LogChannel      = Channel<LogRec,   1 << 14, OnFull::Overwrite>;   // recent beats complete (Ch. 84)
 using BookChannel     = Conflator<BookTop, NINST>;                       // state: latest per instrument (§42.4.2)
 using FillChannel     = Channel<Fill,     1 << 14, OnFull::Fail>;        // facts, never conflated; full == incident
@@ -168,7 +168,7 @@ Every `Fail` channel exposes `dropped()` and `high_water()`; every `Overwrite` c
 - **Instrument the act, not the receipt.** Age is stamped where the consumer *uses* the value (the strategy's decision point, the risk gate's position read), from the wire/ingress timestamp carried in the slot or the Ch. 85 trace header — the same histogram machinery as Ch. 85 §85.4.4, one record per act, aggregated off-core (Ch. 86).
 - **Three series per channel**: `lag` (sequence or dirty count — sampled), `age_p99` and `age_max` per interval (from the histogram), `dropped/lapped/superseded` (counters). A channel with rising `lag` and flat `age` is a conflator doing its job; rising `age` with any policy is a slow consumer and an alert.
 - **Budgets as data, per consumer** (hot-reloaded — Ch. 88): `{channel, p99_budget, max_budget, action}`; the compare is one predicted branch per act (Ch. 86 §86.4.4's budget compare); a breach emits a *control event* into the hot loop (Ch. 41 §41.4.2) — never a log line waited on.
-- **Validate on a replayed open** (Ch. 93): the only honest test of a staleness budget is the real burst at the real service time, which is what §42.3 approximates. A budget that only holds at the average rate is not a budget.
+- **Validate on a replayed open** (Ch. 94): the only honest test of a staleness budget is the real burst at the real service time, which is what §42.3 approximates. A budget that only holds at the average rate is not a budget.
 
 ### 42.4.4 Degraded modes: the shedding plan as a state machine
 
@@ -183,7 +183,7 @@ struct ModeMachine {
         if (s.book_age_p99 > budget.book_conflate || s.depth_lag > budget.depth_lag) return set(Mode::Conflating);  // depth beyond top-k off; GUI/analytics sampled 1/10
         return set(Mode::Normal);
     }
-    Mode set(Mode m) { if (m != mode.load(std::memory_order_relaxed)) { mode.store(m, std::memory_order_release); journal(m); } return m; }  // every transition is a replayable event (Ch. 93, 94)
+    Mode set(Mode m) { if (m != mode.load(std::memory_order_relaxed)) { mode.store(m, std::memory_order_release); journal(m); } return m; }  // every transition is a replayable event (Ch. 94, 96)
 };
 ```
 
@@ -193,7 +193,7 @@ struct ModeMachine {
 
 ### 42.4.5 Retiring the scattered policies
 
-With the taxonomy in place, the earlier chapters' statements become references: Ch. 37 §37.4.1's "the caller handles fullness" is §42.4.1's `OnFull`; Ch. 40 §40.4.1's wrap-gate backpressure is the BLOCK row, legitimate only off the tick-to-trade path; Ch. 84 §84.6's and Ch. 95's overwrite rings are DROP-OLDEST with a version word; Ch. 93 §93.5's drop-and-flag is DROP-NEWEST-as-incident on a `Fail` channel; Ch. 61 §61.4.3's stale-instrument pause is the `Pulled` mode driven from the feed side; Ch. 89 §89.4.4's safe-state is the terminal mode. Each of those sections now carries a one-line pointer here rather than its own restatement.
+With the taxonomy in place, the earlier chapters' statements become references: Ch. 37 §37.4.1's "the caller handles fullness" is §42.4.1's `OnFull`; Ch. 40 §40.4.1's wrap-gate backpressure is the BLOCK row, legitimate only off the tick-to-trade path; Ch. 84 §84.6's and Ch. 98's overwrite rings are DROP-OLDEST with a version word; Ch. 94 §94.5's drop-and-flag is DROP-NEWEST-as-incident on a `Fail` channel; Ch. 61 §61.4.3's stale-instrument pause is the `Pulled` mode driven from the feed side; Ch. 89 §89.4.4's safe-state is the terminal mode. Each of those sections now carries a one-line pointer here rather than its own restatement.
 
 ## 42.5 Pitfalls & anti-patterns
 
@@ -213,7 +213,7 @@ With the taxonomy in place, the earlier chapters' statements become references: 
 1. Reproduce §42.3 on isolated cores with the service time at 100, 300 and 1 000 ns; plot the median and p99 age for each policy against overload factor. Identify where the queue's median crosses 1 ms.
 2. Implement the deduplicating dirty queue of §42.4.2 and measure the producer's push cost against the bitmap conflator under the same burst (the shared-word RMW vs the per-key flag).
 3. Add a priority bitmap of 32 "active" instruments drained first; measure their age distribution against the rest under 3× overload.
-4. Replace the strategy's book input in a Ch. 28/Ch. 89 toy system with a conflator, keep fills on a lossless channel, and verify with a replay (Ch. 93) that positions match the lossless run exactly while the book's acted-on age falls.
+4. Replace the strategy's book input in a Ch. 28/Ch. 89 toy system with a conflator, keep fills on a lossless channel, and verify with a replay (Ch. 94) that positions match the lossless run exactly while the book's acted-on age falls.
 5. Build the staleness series of §42.4.3 into the telemetry segment (Ch. 86) and drive the mode machine of §42.4.4 from them; replay an open with the consumer slowed 5× and show the journaled transitions.
 6. Audit one existing system: list every channel, its consumer class, its current on-full behaviour and the behaviour the table in §42.2.1 prescribes. Count the mismatches.
 

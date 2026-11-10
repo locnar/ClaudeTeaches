@@ -3,9 +3,10 @@
 import os, re, sys, collections
 D = "chapters"
 files = sorted(os.listdir(D))
-chap = [f for f in files if re.match(r"^\d{2}-.*\.md$", f) and not f.startswith("00-")]
+chap = sorted([f for f in files if re.match(r"^\d{2,3}-.*\.md$", f) and not f.startswith("00-")], key=lambda f: int(f.split("-",1)[0]))
+chnum = lambda f: int(f.split("-",1)[0])
 apps = [f for f in files if f.startswith("appendix-")]
-MAXCH = max(int(f[:2]) for f in chap)            # highest chapter number on disk
+MAXCH = max(chnum(f) for f in chap)            # highest chapter number on disk
 LASTAPP = max(f.split("-")[1] for f in apps)     # highest appendix letter on disk
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
@@ -21,7 +22,7 @@ issues=collections.defaultdict(list)
 titles={}
 sections={}
 for f in chap:
-    n=int(f[:2]); p=os.path.join(D,f)
+    n=chnum(f); p=os.path.join(D,f)
     ls=lines_outside_fences(p)
     text="\n".join(l for _,l in ls)
     # part header on line 1?
@@ -124,7 +125,7 @@ for n,secs in sections.items():
         else:
             if k<=7: issues["README-outline"].append(f"ch {n} §{n}.{k} {t!r} not in README outline")
     # subsections 2.x and 4.x
-    text="\n".join(l for _,l in lines_outside_fences(os.path.join(D,[f for f in chap if int(f[:2])==n][0])))
+    text="\n".join(l for _,l in lines_outside_fences(os.path.join(D,[f for f in chap if chnum(f)==n][0])))
     subs=re.findall(r"^###\s+%d\.(\d+)\.(\d+)\s+(.+)$" % n, text, re.M)
     rsubs=re.findall(r"^  - %d\.(\d+)\.(\d+) (.+)$" % n, R, re.M)
     rs={(int(a),int(b)):t for a,b,t in rsubs}
