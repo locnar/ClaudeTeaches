@@ -96,7 +96,7 @@ Flags that *find problems* rather than change codegen — build-time and test-ti
   - **`-fsanitize=cfi`** (**Clang only**; §101.4.4, needs `-flto -fvisibility=hidden`) — control-flow-integrity *hardening* (production-capable, measure its cost — §101.3); GCC has no CFI sanitizer — its hardware-assisted analogue is `-fcf-protection=branch|return|full` (CET, §101.4.4); distinct from the test-only sanitizers above.
   - Pair sanitizer builds with `-fno-omit-frame-pointer -g` (D.4) for usable reports, and with **fuzzing** (`-fsanitize=fuzzer`, **Clang only**/libFuzzer; with GCC use AFL++'s `afl-g++-fast` — §101.4.8) on the wire parsers.
 
-## D.8 Hardening and speculative-execution mitigation flags (Ch. 6, 101.4.4)
+## D.8 Hardening and speculative-execution mitigation flags (Ch. 6, §101.4.4)
 
 The compiler side of the Ch. 6 / Ch. 101 trade: each flag closes an attack class and costs something on the hot path. Distro toolchains turn several of them on **by default** (Ubuntu's GCC 13.3 is built with `--enable-default-pie --enable-cet`, emits `endbr64` at `-O2` with no flag given, and sets `-fstack-protector-strong` and `_FORTIFY_SOURCE=2`), so the question on an isolated box is often which to *turn off*, after measuring (§101.3). All of these are accepted by both GCC and Clang unless noted.
 
@@ -141,7 +141,7 @@ The discipline (Ch. 27): start from `-O2 -march=<target> -flto`, add the safe co
 - The **GCC** and **Clang/LLVM** command-line option references — the authoritative per-flag documentation (all sections).
 - Ch. 27 (*Build Toolchain for Speed*) — the chapter this consolidates: `-march`, LTO, PGO, BOLT, inlining (D.2, D.5, D.6).
 - The **BOLT** paper/documentation (Facebook/Meta) and the GCC/LLVM PGO guides — D.6.
-- Ch. 35 (FP/`-ffast-math`/FTZ-DAZ — D.3), Ch. 24 (exceptions/RTTI — D.4), Ch. 14 (front-end/layout — D.5), Ch. 39 (vectorization reports — D.7), Ch. 53 & 101 (sanitizers/fuzzing — D.7), Ch. 6 & 101.4.4 (hardening/mitigations — D.8), Ch. 26 (aliasing — D.4), Ch. 20 (`rdtsc` serialization — D.4), Ch. 2 (frame pointer/profiling — D.4).
+- Ch. 35 (FP/`-ffast-math`/FTZ-DAZ — D.3), Ch. 24 (exceptions/RTTI — D.4), Ch. 14 (front-end/layout — D.5), Ch. 39 (vectorization reports — D.7), Ch. 53 & 101 (sanitizers/fuzzing — D.7), Ch. 6 & §101.4.4 (hardening/mitigations — D.8), Ch. 26 (aliasing — D.4), Ch. 20 (`rdtsc` serialization — D.4), Ch. 2 (frame pointer/profiling — D.4).
 - Agner Fog's optimization manuals (Appendix G) — the microarchitectural *why* behind `-march`/alignment/inlining choices.
 
 ## D.11 Additional Reading

@@ -440,7 +440,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 29.2.1 Three enforcement points: compile, link, run
   - 29.2.2 What a linter can and cannot see; the hot-path scope
   - 29.2.3 Contracts as code: the invariant the measurement established
-- 29.3 Measure it: calibrating the linter (what a flagged copy costs), the rule set on a hot TU (clang-tidy, clang-query, `nm`), the `--wrap` trap, what the contract table caught, seccomp strict
+- 29.3 Measure it: calibrating the linter, running the rule set, and what the contract table caught (calibrating the linter (what a flagged copy costs), the rule set on a hot TU (clang-tidy, clang-query, `nm`), the `--wrap` trap, what the contract table caught, seccomp strict)
 - 29.4 Techniques
   - 29.4.1 clang-tidy `performance-*` in CI, calibrated
   - 29.4.2 Custom checks for the book's rules
@@ -612,7 +612,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 40.2.2 Per-instrument state: what is hot, what is cold, and which layout
   - 40.2.3 Streaming statistics: O(1) updates, and the numerics of each
   - 40.2.4 Determinism: the same bits on the replay box
-- 40.3 Measure it: incremental vs recompute (W = 64/256/1024), SoA vs AoS, 1e9-update drift (double/float/int64), naive vs Welford variance, the EWMA denormal cliff, the bit-exact state hash across layouts/compilers/flags
+- 40.3 Measure it: incremental vs recompute, two layouts, drift, cancellation, the denormal cliff, and the FMA hash (incremental vs recompute (W = 64/256/1024), SoA vs AoS, 1e9-update drift (double/float/int64), naive vs Welford variance, the EWMA denormal cliff, the bit-exact state hash across layouts/compilers/flags)
 - 40.4 Techniques
   - 40.4.1 The core and its state
   - 40.4.2 Welford: mean, variance and covariance without the cancellation
@@ -1004,7 +1004,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 70.2.5 The SBE message header: `schemaId`, `version`, `templateId`, `blockLength` — evolution built into the wire
 - 70.3 Measure it: decode latency per protocol
 - 70.4 Techniques
-  - 70.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing (now Ch. 71; pointer)
+  - 70.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing (now Ch. 71)
   - 70.4.2 Scatter/gather and zero-copy receive paths
   - 70.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 72)
   - 70.4.4 Tuning RX ring sizes, managing UDP reordering in software ring buffers, detecting hardware packet drops
@@ -1067,7 +1067,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 74.2.2 Snooping switches and the querier problem (the ~260 s dark feed; unknown-multicast flooding)
   - 74.2.3 From the exchange to your port: PIM, RPF and layer-1 replication
   - 74.2.4 The four ways a feed goes dark without a gap
-- 74.3 Measure it: join latency (and the market-open join storm), time-to-dark after querier loss, the cost of the watchdog
+- 74.3 Measure it: join latency, time-to-dark, and the cost of the watchdog (the market-open join storm; time-to-dark after querier loss)
 - 74.4 Techniques
   - 74.4.1 Joining correctly: SSM, interface-bound, group-bound, A/B on disjoint NICs
   - 74.4.2 The Linux traps: `igmp_max_memberships`, `IP_MULTICAST_ALL`, `rp_filter`, versions
@@ -1449,7 +1449,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 100.2.2 Percentiles are not additive: merge histograms, never average percentiles
   - 100.2.3 Interval vs cumulative, windows and minimum samples
   - 100.2.4 Coordinated omission in production
-- 100.3 Measure it: per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence
+- 100.3 Measure it: what the instrument costs the hot thread (per-op cost of counter/histogram/seqlock publish; shared vs owned counters; scraper-induced RFO interference by cadence)
 - 100.4 Techniques
   - 100.4.1 The shared-memory telemetry segment
   - 100.4.2 What a trading process must expose
@@ -1697,7 +1697,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 114.2.2 The signal classes and the chapter that owns each (isolation, scheduler, memory system, frequency/thermal/power, firmware, clock, hardware RAS, provenance)
   - 114.2.3 Drift: how a tuned box untunes itself
   - 114.2.4 The sampler's own footprint (MSRs, perf events and cpufreq reads that IPI or tick the hot core)
-- 114.3 Measure it: the sampler's footprint (right way vs wrong way) and the drift fingerprint table
+- 114.3 Measure it: the sampler's footprint and the drift fingerprints (right way vs wrong way; the drift fingerprint table)
 - 114.4 Techniques
   - 114.4.1 Isolation integrity: the per-second diff (`hostwatch.cpp`)
   - 114.4.2 Frequency, thermal, power and SMIs — read from the right core
@@ -1712,7 +1712,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 115.2.1 The receive path and its counters (PHY/MAC, NIC port buffer vs host ring, NAPI, IP, UDP, TCP, bypass stacks, application)
   - 115.2.2 Driver dialects: the same drop, five names (`ixgbe`, `i40e`/`ice`, `mlx5`, `sfc`, the generic fields)
   - 115.2.3 Delay is not loss, and loss is not always a counter (`time_squeeze`, pause frames, the bypass blind spot, the drop with no counter)
-- 115.3 Measure it: a market-open replay saturating each layer in turn; the cost and footprint of every poller
+- 115.3 Measure it: the open, layer by layer; and the cost of looking (a market-open replay saturating each layer in turn; the cost and footprint of every poller)
 - 115.4 Techniques
   - 115.4.1 The sampler: every counter, by layer, from a housekeeping core (`netwatch.cpp`, `TCP_INFO`)
   - 115.4.2 Drop forensics: naming the function that freed the packet (`dropwatch`, `skb:kfree_skb` drop reasons, `perf`, `bpftrace`)

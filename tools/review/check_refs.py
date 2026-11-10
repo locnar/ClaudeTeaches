@@ -369,6 +369,12 @@ def scan_line(line):
             if not m2:
                 break
             after = line[m2.end():]
+            d2 = re.match(r"\.(\d{1,2})(?:\.(\d{1,2}))?(?![\d])(?!\s?(?:ns|µs|us|ms|%|×|GHz|GB|MB|KB))", after)
+            if d2 and int(m2.group(1)) >= 10:      # "Ch. 6, 101.4.4" — the retired spelling inside a list
+                refs.append(Ref("chdot", int(m2.group(1)), int(d2.group(1)), int(d2.group(2)) if d2.group(2) else None,
+                                m2.start(), m2.end() + d2.end(), line[m2.start():m2.end() + d2.end()], frozenset({"cont"})))
+                taken.append((m2.start(), m2.end() + d2.end()))
+                break
             if re.match(r"\.\d", after) or re.match(r"\s?(?:ns|µs|us|ms|%|×|GHz|GB|MB|KB|bytes?|bits?|cycles?|cores?)\b", after):
                 break
             strong = bool(STRONG_AFTER.match(after))
@@ -658,6 +664,7 @@ SELF_TEST = [
     ("See Ch. 1 §3.2.", ["ch-sec-mismatch"]),
     ("See Ch. 3 §3.2, 1 §3.4.1 ◆, 2 §2.1.", ["ch-sec-mismatch"]),
     ("See Ch. 3.2.", ["ch-dot-sec"]),
+    ("See Ch. 1, 12.4.1 and Ch. 2, 3.5 ns.", ["ch-dot-sec"]),
     ("See Ch. 3–1.", ["range-order"]),
     ("See Appendix C and Appendix A.7.", ["app-missing", "sec-missing"]),
     ("See Appendix A.1–A.2, B.1 and §B.9.", ["sec-missing"]),
