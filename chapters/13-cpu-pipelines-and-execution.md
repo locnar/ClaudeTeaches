@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 2 (top-down analysis — this chapter is the **Back-End → Core Bound** branch, the complement to the Memory-Bound branch of Ch. 8–12), Ch. 4 (reading asm — used heavily in §13.5), Ch. 3 (benchmarking). Ch. 12's prefetch works by overlapping misses with execution — this chapter is what that execution *is*.
 >
-> **Leads into:** Ch. 14 (the front-end that feeds this back-end), Ch. 15–16 (control hazards — branches and indirect calls — in depth), Ch. 37–38 (the instruction-level and SIMD throughput these ideas unlock). FP reassociation here ties to Ch. 35 (`-ffast-math` hazards).
+> **Leads into:** Ch. 14 (the front-end that feeds this back-end), Ch. 15–16 (control hazards — branches and indirect calls — in depth), Ch. 37–39 (the instruction-level and SIMD throughput these ideas unlock). FP reassociation here ties to Ch. 35 (`-ffast-math` hazards).
 
 ---
 
@@ -185,7 +185,7 @@ double s = (s0+s1) + (s2+s3);        // combine at the end (tree-reduce the part
 
 How many accumulators? Roughly **latency × throughput** of the chained op (throughput in ops/cycle — equivalently latency ÷ *reciprocal* throughput in cycles/op) — for FP add on modern Intel, ~4-cycle latency × ~2 adds/cycle ⇒ **~8 accumulators** to fully saturate (4 is a good start and captures most of the win). More than that hits diminishing returns and register pressure (spills — Ch. 4, 11). For **integer** add (1-cycle latency) the chain is rarely the bottleneck, so splitting matters most for *higher-latency* ops: FP add/mul, and anything with multi-cycle latency in the loop-carried path.
 
-This is also exactly what auto-vectorization does *for* you when allowed (§13.5): packing 4 doubles into a `ymm` accumulator *is* four independent lanes. So accumulator splitting and SIMD (Ch. 38) are two faces of the same idea — and SoA layout (Ch. 10) is what makes both possible.
+This is also exactly what auto-vectorization does *for* you when allowed (§13.5): packing 4 doubles into a `ymm` accumulator *is* four independent lanes. So accumulator splitting and SIMD (Ch. 39) are two faces of the same idea — and SoA layout (Ch. 10) is what makes both possible.
 
 ---
 
@@ -282,7 +282,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical chapters on ILP, dependency chains, and using `llvm-mca`/`uiCA` to read a loop's critical path.
 - A. Fog, *Optimizing Software in C++*, the loop-carried-dependency-chain and multiple-accumulator sections — the canonical write-up of §13.4.2.
-- Ch. 14 (*Instruction Cache & Front-End*) — the front-end that must feed this back-end; Ch. 38 (*SIMD*) — accumulator splitting taken to its vector conclusion; Ch. 35 (*Fixed/Floating-Point*) — the `-ffast-math`/reassociation correctness trade-offs invoked in §13.5.
+- Ch. 14 (*Instruction Cache & Front-End*) — the front-end that must feed this back-end; Ch. 39 (*SIMD*) — accumulator splitting taken to its vector conclusion; Ch. 35 (*Fixed/Floating-Point*) — the `-ffast-math`/reassociation correctness trade-offs invoked in §13.5.
 - **Appendix E** — the cycle costs of FP/integer ops and the branch-mispredict penalty that frame "latency-bound."
 
 ---

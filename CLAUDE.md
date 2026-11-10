@@ -506,26 +506,26 @@ Code & content guidelines:
   - **IV — Memory Management** (30–34): fundamentals, custom allocators, hot-path-hostile STL & cache-friendly
     containers (with §31.4.6 small-array search, P3-6C), limit order book engineering (Ch. 32, added 2026-11-10
     P3-6C), memory mapping.
-  - **V — Numerics & Data Parallelism** (35–39): fixed/floating point, bit tricks, SIMD, and streaming statistics &
+  - **V — Numerics & Data Parallelism** (35–40): fixed/floating point, bit tricks, SIMD, and streaming statistics &
     incremental signal computation (Ch. 37, added 2026-11-10 P3-6C).
-  - **VI — Concurrency** (40–52): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
+  - **VI — Concurrency** (41–53): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
     2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 42, P3-4), coroutines, `std::execution`,
     correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (53–61): context switching, timers & deadlines without jitter
+  - **VII — OS, Scheduling & Isolation** (54–62): context switching, timers & deadlines without jitter
     (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
     residual noise (Ch. 52, added 2026-11-09 P3-1), warming. Power management & frequency determinism is Ch. 54 (added 2026-11-10 P3-6B).
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (62–68): native I/O, io_uring, zero-copy fast path,
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (63–69): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP. The datapath anatomy chapter is Ch. 58 (added 2026-11-10 P3-6B).
-  - **IX — Market Data, NIC & Fabric** (69–78): decoding, text protocols on the hot path — branch-free parsing &
+  - **IX — Market Data, NIC & Fabric** (70–79): decoding, text protocols on the hot path — branch-free parsing &
     formatting (Ch. 68, added 2026-11-10 P3-6C), reliable multicast, multicast membership & dark-feed detection
     (Ch. 70), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (79–83): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (80–84): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (84–89): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (85–90): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (89–93, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (95–115): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (96–116): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
     topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
     kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
