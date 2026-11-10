@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8–9 (caches & data-oriented design — the locality the whole chapter is about), Ch. 29–30 (allocation cost & custom allocators — node containers allocate per element; the order book runs on a pool), Ch. 15 (`std::function`/type erasure), Ch. 16 (TLB — pointer-chasing thrashes it), Ch. 3 (measuring the distribution).
 >
-> **Leads into:** Ch. 42/45 (lock-free queues / Disruptor — ring buffers as containers), Ch. 67 (feed handlers feeding the book), Ch. 35 (bitmaps for level occupancy), Ch. 96 (hot-reload of reference data). The order-book case study (§31.4.4) is referenced throughout Parts VIII-X.
+> **Leads into:** Ch. 42/45 (lock-free queues / Disruptor — ring buffers as containers), Ch. 67 (feed handlers feeding the book), Ch. 35 (bitmaps for level occupancy), Ch. 96 (hot-reload of reference data), **Ch. 32 (Limit Order Book Engineering — the chapter the §31.4.5 case study grew into; its ladders, pools and ID maps are this chapter's containers put to work)**, and §31.4.6's small-array search, which the LOB's cold depth store and every tick-band/symbol table use.
 
 ---
 
@@ -127,6 +127,21 @@ slot map insert + erase (erase-by-swap)          5.0 ns per pair                
 
 The slot map is within 2× of a raw pointer cold and within 0.6 ns hot, 3.5× faster than the flat hash that would otherwise front the order table, and the generation check — the thing that makes a reused slot *safe* — is a fraction of a nanosecond. The cold column is memory latency: the handle costs one extra line (`sparse[]`) over the pointer, which is the price of relocatability and validation.
 
+**Row 4 — searching a small sorted array: Ch. 3's promise, kept (§31.4.6).** Ch. 3 §3.3 measured `std::binary_search` on a 4096-key sorted vector losing to `unordered_map` (31 vs 19 ns), blamed ~12 unpredictable branches, and promised that this chapter would revisit the comparison "under realistic access patterns". Here it is, with the access pattern made a variable: N = 8 / 64 / 4096 keys (a tick ladder, 25-cent levels), probes either **uniform-random** or **clustered** (a random walk near the touch, ±2 levels per step — the order-book pattern), and each configuration run both as a **dependent chain** (the next key depends on the previous result: the latency a tick-to-trade path sees) and as **independent** lookups (throughput, what Ch. 3 measured). `smallsearch.cpp`, GCC 13.3 `-O2 -std=c++20 -march=native`, pinned, on the 4-vCPU VM of Appendix L.2 (VM-measured; the *orderings* transfer, the absolute figures are ±10 % run to run):
+
+```
+   ns / lookup                      N = 8          N = 64          N = 4096 random     N = 4096 clustered
+                                   dep    indep   dep    indep    dep      indep      dep      indep
+   std::lower_bound (branchy)      14.8   13.5    31.0   29.1     69.7     58.4       33.9     21.3   <- predictable keys: the branches are FREE
+   branchless (cmov), Khuong-Morin 11.3   11.2    18.7   18.1     40.3     32.2       34.2     33.3   <- flat: pays the cmov chain whatever the keys do
+   branchless + prefetch           11.3   11.2    18.6   18.2     40.4     33.2       34.9     32.2   <- no help: 16 KiB is already in L1
+   Eytzinger (BFS layout)          13.9   13.8    20.4   19.8     45.9     35.6       36.9     35.2   <- wins only once the array leaves L1/L2 (exercise 6)
+   SIMD linear scan (AVX2)          7.3    7.3     9.8    9.6       -        -          -        -    <- fastest for <= 64 keys, and answers the lower_bound question
+   flat open-addressing hash        7.2    7.0     7.6    7.3     19.6     11.9        8.3      7.9   <- fastest for EXACT match; cannot answer "first level >= p"
+```
+
+Three results, none of which Ch. 3 could see. (1) **The branchy search is a branch-prediction story, and prediction depends on the key stream.** On random keys at N = 4096 `std::lower_bound` costs 70 ns and the cmov version 40 — the ~12 mispredicts Ch. 3 counted, removed. On the *clustered* stream the predictor learns the walk and the branchy search drops to 34 ns dependent / **21 ns independent**, where the branchless form stays at 33: a `cmov` turns a control dependency into a *data* dependency, so the twelve loads serialise instead of being speculated ahead (Ch. 14 §14.6's trap, now with a number). Order-book probes are clustered; symbol lookups are not — choose per key stream, and measure the one you have. (2) **Below ~64 keys the right search is no search**: eight AVX2 compares, a `movemask` and a `popcount` answer "how many keys are below p" in 7–10 ns regardless of where p falls, with no chain and no mispredict — this is what the LOB's cold-depth store and a tick-size-band table should use (Ch. 32 §32.4.1). (3) **The hash map "wins" because it answers an easier question.** Exact-match is all a hash can do; `lower_bound` answers *predecessor* queries (the first level at or above p, the band containing this price), which is why a sorted array is in the comparison at all. Ch. 3's result stands for symbol→id; for anything ordered, the fair comparison is branchless-vs-branchy-vs-SIMD on *your* key distribution. One more result that belongs in §31.5: **the compiler decides which of these you actually get** — Clang 18 compiled the ternary form of the "branchless" search to a *branch* (62 ns on random keys, worse than its own `std::lower_bound`, which it compiled to `cmov`), so the arithmetic form in §31.4.6 is the one that is branchless under both compilers.
+
 ## 31.4 Techniques
 
 ### 31.4.1 Flat / open-addressing & robin-hood hashing
@@ -144,7 +159,7 @@ For *ordered* associative needs, `std::flat_map`/`std::flat_set` (C++23 — ship
 
 - **Why faster for lookups/iteration.** Lookup is a **binary search over a contiguous array** — O(log n) but with *cache-friendly* access (Ch. 8) and no pointer chasing, and ordered iteration is a *linear scan* of contiguous memory (maximally prefetchable) instead of a tree walk over scattered nodes. Far better locality than `std::map` for read/scan-heavy use.
 - **The trade-off: insert/erase cost.** Inserting into the middle shifts elements (O(n) move), so `flat_map` shines when the container is **lookup/iteration-heavy and mutation-light**, or built once and queried many times (reference data, a static symbol table, a config map). For insert-heavy ordered data, the shift cost can outweigh the locality win — measure.
-- **HFT fits.** Reference/static data (symbol metadata, tick-size bands — Ch. 34, venue config), and — carefully — order-book price levels where the active range is small and contiguous (§31.4.4). C++17/20 fallback: a hand-maintained sorted `std::vector` with `std::lower_bound` (exactly what `flat_map` standardizes), or Boost.Container's `flat_map`.
+- **HFT fits.** Reference/static data (symbol metadata, tick-size bands — Ch. 34, venue config), and — carefully — order-book price levels where the active range is small and contiguous (§31.4.4). C++17/20 fallback: a hand-maintained sorted `std::vector` with `std::lower_bound` (exactly what `flat_map` standardizes), or Boost.Container's `flat_map` — and §31.4.6 for how to search that vector without the branch mispredicts `lower_bound` pays.
 - **Customizable underlying storage.** `flat_map` can use a `std::vector` (or `std::pmr::vector` — Ch. 30, or a small-vector), so you can back it with a custom allocator / stack buffer for zero hot-path allocation.
 
 ### 31.4.3 Intrusive, fixed-capacity and small-buffer containers
@@ -197,33 +212,77 @@ template <class T, std::uint32_t CAP> struct SlotMap {                      // C
 
 ### 31.4.5 Case Study — Building the Limit Order Book
 
-The **limit order book (LOB)** is the central HFT data structure, and it's a perfect crucible for this chapter: a feed handler updates it on *every* market-data message (Ch. 67), and the budget is tens of nanoseconds. The naive STL implementation — `std::map<Price, std::list<Order>>` — is a worst-case of everything above: a tree of nodes (log-n cache misses to find a price level) whose values are heap-linked lists of nodes (a `malloc` per order, a cache miss per order in the queue). It "works" and it's an order of magnitude too slow. The fast design exploits the LOB's structure:
+The **limit order book (LOB)** is the central HFT data structure and the crucible for everything above: a feed handler updates it on *every* market-data message (Ch. 67), the budget is tens of nanoseconds, and the naive STL design — `std::map<Price, std::list<Order>>` with an `unordered_map` from order id to iterator — is a worst case of everything this chapter measured: a node tree to find a level, a `malloc` per order, a cache miss per order in the queue. This case study used to live here as a prose outline; it is now **Ch. 32 — Limit Order Book Engineering**, which builds and *measures* the design this chapter's containers were chosen for: price levels in a **dense tick-indexed ladder** with an occupancy bitmap and a re-centring window (§32.4.1–§32.4.2), orders in a **stable-slot pool** linked into intrusive per-level FIFOs (§31.4.3–§31.4.4 applied, §32.4.3), the order-id map as **direct addressing** for near-monotone venue ids with the slot map and the flat hash (§31.4.1) as the alternatives (§32.4.3), the **BBO/depth hot-cold split** (§32.4.4), snapshot rebuild (§32.4.5) and the **market-by-price vs market-by-order** choice that decides the whole shape (§32.2.1). Its headline measurement (§32.3): 5 M synthetic captured-style events, the ladder book at ~16 ns per event p50 against ~60 ns for the `std::map`/`std::list` baseline, with zero hot-path allocations against 4.8 million. The cold depth store it keeps beyond the window is a sorted small array, searched the way §31.4.6 shows.
 
-- **Price levels: a flat array indexed by ticks, not a tree.** Prices are discrete (tick-sized — Ch. 34) and the *active* range near the touch is small and contiguous. Represent each side as a **flat array of price levels indexed by (price − base)/tick** — O(1) access to any level, contiguous, prefetchable, no tree, no per-level allocation. The book is a window over the active ticks (a ring/sliding array, or a dense array bounded by the instrument's plausible range), with the **best bid/offer (BBO)** tracked as the current top index. Deep, rarely-touched levels can live in a secondary (sparse/`flat_map`) structure — the hot/cold split of Ch. 1 applied to depth.
+### 31.4.6 Searching small sorted arrays: branchless binary search, Eytzinger layout and SIMD scan
 
-  ```
-   bids[]  indexed by tick:  [ ... | L | L | L | BBO ] <- top-of-book at the active end
-   asks[]                    [ BBO | L | L | L | ... ]   each L is a price-level FIFO (below)
-   O(1) to any level by price; BBO is just an index; deep book = cold secondary store
-  ```
+The sorted contiguous array is the cache-friendly answer to *ordered* lookup (§31.4.2), and §31.3's row 4 showed that *how* it is searched matters as much as the layout: `std::lower_bound` is a chain of ~log₂N data-dependent branches, each a mispredict on an unpredictable key. The alternatives, with the code:
 
-- **Orders at a level: an intrusive FIFO from a pool, not `std::list`.** Each price level is a **FIFO queue of resting orders** (price-time priority). Implement it as an **intrusive doubly-linked list** of `Order` objects drawn from an **object pool** (Ch. 30): adding an order is pop-from-pool + link-at-tail (a few instructions, no allocation); cancelling is unlink-given-the-order (O(1), no search); a fill walks from the head. **The order table is a stable-slot slot map (§31.4.4)**: the venue's orderID maps — through one flat hash (§31.4.1) for venues whose ids are opaque, or directly when the id is dense — to a `Handle` whose index addresses the pooled `Order` and whose generation rejects a cancel or execute for an order already removed (a late message after a replay, a reused slot): §31.3's row 3 puts the handle dereference at ~1.4 ns against ~5 ns for the flat hash alone, and the stale check is what makes the pool's reuse safe. Orders carry their intrusive level links *in* the slot, so the stable-slot variant (no erase-by-swap) is the one used here. Zero allocation on the hot path, O(1) add/cancel/match, and each order's neighbors are pool-contiguous (locality).
-- **BBO vs deep-book asymmetry (the hot/cold split).** The overwhelming majority of activity is at or near the touch — BBO updates, adds/cancels in the top few levels — which the flat-array-near-the-top design makes O(1) and cache-hot. Deep-book modifications are rarer and can afford a slower path (the sparse secondary store). Optimize the structure for the *common* operation (top-of-book), not the worst case (arbitrary-depth insert) — and measure against captured data (Ch. 102) where the real distribution of touched levels lives.
-- **Consolidating disparate feeds.** A consolidated book merges multiple venues'/feeds' updates (Ch. 67's A/B arbitration and multi-feed handling). Keep each feed's contribution attributable (so a feed drop/gap — Ch. 67 — can be backed out) while presenting one merged view; per-venue level arrays summed into a consolidated array, or per-order venue tags, with the same flat/intrusive/pool discipline so the merge stays allocation-free and cache-friendly.
-- **What this buys.** The flat-array + intrusive-pool LOB turns per-message book updates from a parade of cache misses and `malloc`s (the `map<Price,list>` version) into a handful of contiguous, allocation-free operations — the difference between ~hundreds of ns and ~tens of ns per update, and a *flat* tail (Ch. 1) because there's no allocation or tree-rebalance to spike. It's the synthesis of the whole book so far: data-oriented layout (Ch. 9), no hot-path allocation (Ch. 29–30), flat containers (this chapter), cache/TLB locality (Ch. 8, 16).
+```cpp
+// smallsearch.hpp — four ways to answer lower_bound(key) over a sorted u32 array; all return the index of the first element >= key.
+#include <bit>
+#include <cstdint>
+#include <immintrin.h>
+using u32 = std::uint32_t;
+
+// 1. Branchless half-interval search (Khuong & Morin 2017). The select is written as ARITHMETIC, not a ternary:
+//    GCC 13 compiles the ternary to cmovb, Clang 18 compiles the same ternary to a branch (jae) — §31.5.
+inline u32 lb_branchless(const u32* a, u32 n, u32 key) {
+    const u32* base = a;
+    while (n > 1) { u32 half = n / 2; base += (base[half] < key) * half; n -= half; }   // cmp + setb + imul/lea: no jump
+    return u32((*base < key) + (base - a));
+}
+// 1b. Fixed trip count for a compile-time size: the loop unrolls completely (no loop branch either).
+template <u32 N> inline u32 lb_fixed(const u32* a, u32 key) {
+    static_assert(std::has_single_bit(N)); const u32* base = a;
+    #pragma GCC unroll 16
+    for (u32 half = N / 2; half >= 1; half /= 2) base += (base[half] < key) * half;
+    return u32((*base < key) + (base - a));
+}
+// 2. Eytzinger (BFS) layout: t[1] is the root, children of k are 2k and 2k+1. The top levels share cache lines,
+//    the descent is branchless and the next level's line can be prefetched 16 nodes ahead. Static: rebuilt on insert.
+struct Eytzinger {
+    std::vector<u32> t;                                                 // t[0] unused; t[1..n]
+    void build(const u32* sorted, u32 n) { t.assign(n + 1, 0); u32 i = 0; rec(sorted, n, i, 1); }
+    void rec(const u32* s, u32 n, u32& i, u32 k) { if (k <= n) { rec(s, n, i, 2 * k); t[k] = s[i++]; rec(s, n, i, 2 * k + 1); } }
+    u32 lower_bound_pos(u32 key) const {                               // position in Eytzinger order (0 = past the end)
+        u32 k = 1, n = u32(t.size() - 1);
+        while (k <= n) { __builtin_prefetch(&t[k * 16]); k = 2 * k + (t[k] < key); }
+        return k >> (std::countr_one(k) + 1);                          // undo the trailing right turns
+    }
+};
+// 3. SIMD scan for N <= 64: how many keys are < key? That count IS the lower_bound index. No chain, no branch.
+inline u32 lb_simd(const u32* a /* padded to a multiple of 8 with 0xFFFFFFFF */, u32 n_padded, u32 key) {
+    const __m256i k = _mm256_set1_epi32(int(key ^ 0x80000000u));        // flip the sign bit: signed compare == unsigned compare
+    u32 below = 0;
+    for (u32 i = 0; i < n_padded; i += 8) {
+        __m256i v = _mm256_xor_si256(_mm256_loadu_si256((const __m256i*)(a + i)), _mm256_set1_epi32(int(0x80000000u)));
+        below += u32(std::popcount(unsigned(_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpgt_epi32(k, v))))));
+    }
+    return below;
+}
+```
+
+- **Why `std::lower_bound` is slow, precisely.** Each iteration's branch direction is a bit of the answer; on keys the predictor cannot learn, half of ~log₂N iterations mispredict at ~15–20 cycles each (Ch. 14 §14.3), and each iteration's load address depends on the previous compare, so nothing overlaps. On keys it *can* learn (a price walk) the same code is the fastest thing in §31.3's table at N = 4096 — the branches are predicted and the loads are speculated ahead. The decision is per key stream, not per algorithm.
+- **The branchless form** replaces the jump with a `cmov` (or the `setb`/`imul` pair the arithmetic form produces) so there is nothing to mispredict — at the price of a *data* dependency chain of ~log₂N loads that can no longer be speculated past. Flat ~40 ns at N = 4096 whatever the keys do; a sure win on random keys, a small loss on predictable ones (§31.3). For a size known at compile time use `lb_fixed<N>`: the loop unrolls and the only branch left is the caller's. Prefetching both candidates one level ahead (`a[half/2]`, `a[half + half/2]`) is free in L1 and only helps once the array has left L2 — where Eytzinger helps more.
+- **Eytzinger layout** (van Emde Boas's cache-oblivious cousin, measured by Khuong & Morin): store the array in BFS order so the first four levels of the search touch *one* cache line and each further level's candidates are 16 nodes apart in a predictable direction — a prefetch of `t[16k]` covers the whole next-but-one level. On an in-L1 array it is slightly slower than the plain branchless search (one extra multiply per level and the `countr_one` fix-up); past L2 it is ~2× faster than it (exercise 6). The price is that the layout is **static** — rebuild on insert — which is fine for tick-size bands, symbol tables and venue lists and wrong for a mutating book.
+- **SIMD linear scan** is the answer below ~64 keys: the whole array is compared in one to eight vector instructions, `movemask` + `popcount` turns the compare results into the index, and the cost is flat in the position of the key (7–10 ns in §31.3, including the sign-flip trick that makes the signed compare behave as unsigned). The cold-depth store of Ch. 32's book and the `inplace_vector` of levels in a per-message batch (§31.4.3) are this size. AVX-512 (`vpcmpud` + `kmov` + `popcnt`) does 16 keys per compare with native unsigned compares; the Ch. 36 downclocking caveat applies to the 512-bit form.
+- **Sorting a small array** belongs here in one paragraph: for ≤ 16 elements (ranking venue quotes for a consolidated BBO, Ch. 32 §32.4.6; the top-N levels of a snapshot) a **sorting network** — a fixed sequence of compare-exchange pairs, each a `min`/`max` (`cmov` or `vpminud`/`vpmaxud`) — sorts in a flat, branch-free time (Batcher's odd-even merge for 8 elements is 19 compare-exchanges, ~10 ns); `std::sort` dispatches to insertion sort at this size and mispredicts per inversion. Larger sorts are off the hot path; where they are not, `std::sort` on contiguous data beats anything node-based for the usual reason.
+- **Where each wins** (§31.3, row 4): exact-match on an unordered key → the flat hash, always; ordered lookup with ≤ 64 keys → SIMD scan; ordered lookup on unpredictable keys → branchless, Eytzinger once the array is larger than L2; ordered lookup on a predictable walk → plain `lower_bound` is fine and the branchless form costs ~10 ns more. Ch. 3's "the hash map won" was the first of these, measured on the wrong question for a book.
 
 ## 31.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn
 
 - **`std::map`/`std::unordered_map` on the hot path.** The default reach — and a parade of cache misses + per-element `malloc` (§31.2–31.3). Use a flat/open-addressing map (§31.4.1) or `flat_map` (§31.4.2); reserve the rare justified `std::map` use (need stable addresses *and* ordered *and* insert-heavy) and know you're paying for it.
 - **`shared_ptr` copies on the hot path.** Every copy is an **atomic** refcount bump; shared across cores, the refcount line ping-pongs (Ch. 41) — a serializing cost dwarfing the "pointer copy" it looks like. Pass by `const&`/raw/`unique_ptr`; only copy `shared_ptr` when transferring genuine shared ownership, off the hot path. `make_shared` to fuse the control-block allocation when you do use it.
 - **Slot-map misuse (§31.4.4).** *Skipping the generation check on a "trusted" path*: the one caller that dereferences by index alone is the one that books a fill against a reused slot. *Holding a `T*` across an erase* in the erase-by-swap variant: the value moved; hold the handle. *Generation wrap*: a 16-bit generation on a hot slot wraps in minutes at 10⁵ reuses/s — use 32 bits (4 billion reuses per slot). *Crossing processes without the generation* (an index alone into a shared segment — Ch. 64) loses exactly the protection the reader needed. *Starting generations at zero* makes `Handle{0}` valid; start at 1.
+- **Branchless search on a predictable key stream; a ternary that is not a cmov.** The cmov form (§31.4.6) is slower than `std::lower_bound` when the predictor can learn the keys (a price walk: 33 vs 21 ns at N = 4096, §31.3 row 4), because it turns speculable control flow into a serial load chain (Ch. 14 §14.6). And the *source* does not decide which you get: Clang 18 compiled the ternary form to a branch (62 ns) and GCC 13 to `cmovb`; write the select as arithmetic (`base += (cond) * half`) or check the asm (§14.5) before calling anything branchless. **Eytzinger for a mutating set.** Its layout is static; an insert is a rebuild (O(N)) — use it for reference data, never for the live book.
 - **Holding pointers into a flat/rehashing container.** Open-addressing and `vector`-backed containers **move elements** on rehash/grow/insert; a stored pointer/iterator dangles. Use **indices/handles** (§31.4.3) or reserve enough to never rehash on the hot path. (This is the trade for the locality win — design for it.)
 - **Not `reserve`-ing → hot-path rehash/realloc.** A flat map or vector that rehashes/reallocates mid-stream is a latency spike (a big alloc + reinsert/move — Ch. 29). Size to the working set up front; keep growth on the cold path.
 - **`vector<std::function>` / containers of type-erased callables.** Multiplies `std::function`'s double-indirection and possible allocation (Ch. 15) across every element. Use a concrete callable type, a `variant`, or function pointers (Ch. 15).
 - **Intrusive without lifetime discipline.** Intrusive containers + pools mean *you* own lifetimes; an order freed to the pool while still linked, or linked into two lists with conflicting lifetimes, is UAF/corruption (Ch. 30, 95). Keep the ownership rules simple and explicit.
 - **Choosing `flat_map` for insert-heavy data.** `flat_map`'s middle-insert is O(n) shifts (§31.4.2); for insert/erase-heavy *ordered* data it can lose to a tree. Match it to lookup/scan-heavy, mutation-light use — and measure.
 - **Benchmarking with everything in L1.** A container comparison on a tiny dataset hides the cache-miss difference that *is* the point (§31.3). Test at the real working-set size (and with realistic, cache-cold access — Ch. 3), or you'll conclude node containers are "fine."
-- **Ignoring the order book's access distribution.** Optimizing the LOB for worst-case arbitrary-depth ops instead of the real, top-of-book-dominated distribution (§31.4.4) wastes effort and may pessimize the common path. Profile against captured market data (Ch. 102).
+- **Ignoring the order book's access distribution.** Optimizing the LOB for worst-case arbitrary-depth ops instead of the real, top-of-book-dominated distribution (Ch. 32 §32.2.4) wastes effort and may pessimize the common path. Profile against captured market data (Ch. 102).
 
 ## 31.6 Exercises & checklist
 
@@ -232,8 +291,9 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 1. **Flat vs chained.** Build `flatmap.cpp`; run `chained` vs `flat` pinned with `perf stat -e L1-dcache-load-misses,dTLB-load-misses` (or `dtlb_load_misses.walk_completed`, as Ch. 16 uses). Confirm the flat map's lower misses and ~3-4× speed. Sweep N from L1-sized to >L3 — how does the gap grow with working-set size?
 2. **Library shootout.** Replace the toy flat map with `absl::flat_hash_map`, `ankerl::unordered_dense`, and `boost::unordered_flat_map`; compare against `std::unordered_map` on the same workload. Quantify the production gap.
 3. **`shared_ptr` churn.** Hammer a `shared_ptr` copied/destroyed across two threads on different cores; measure throughput and the HITM counters — `mem_load_l3_hit_retired.xsnp_fwd` (older alias `xsnp_hitm`) for two cores on one socket, `mem_load_l3_miss_retired.remote_hitm` only across sockets (Ch. 17), or simply `perf c2c` (Ch. 41, *False Sharing*) vs passing `const&`. How expensive is the "free pointer copy"?
-4. **Build the LOB core.** Implement the §31.4.4 book: flat tick-indexed level arrays + intrusive pool-backed FIFOs + a flat `orderID→Order` map. Feed it captured (or synthetic) ITCH-like adds/cancels/executes; measure ns/update distribution and confirm zero hot-path allocation (`operator new` override — Ch. 29). Compare to a `std::map<Price,std::list<Order>>` baseline.
+4. **Build the LOB core.** Ch. 32 builds and measures it (`lob.cpp`, §32.3); here, reproduce its §32.3 table on your machine with `perf stat -e L1-dcache-load-misses,branch-misses` per variant, and confirm zero hot-path allocation with the `operator new` counter (Ch. 29).
 5. **`flat_map` crossover.** For an ordered map, find the insert-rate at which `std::flat_map` loses to `std::map` (shift cost vs locality). Where does each win (§31.4.2)?
+6. **Search past L2.** Rerun `smallsearch.cpp` (§31.3 row 4) at N = 2²⁰ (4 MiB of keys) with `perf stat -e branch-misses,L1-dcache-load-misses,LLC-load-misses`: now the dependent loads miss, and the Eytzinger layout with its 16-ahead prefetch should pull ahead of the plain branchless search by ~2×; confirm it, then add the S-tree variant (16 keys per node, one AVX-512 compare per level — Algorithmica) and see whether it beats both. Then put the clustered key stream back and watch `std::lower_bound` recover.
 
 **Checklist — cache-friendly containers**
 
@@ -241,7 +301,8 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 - [ ] Containers are **`reserve`d to the working set**; the hot path never **rehashes/reallocates** (Ch. 29); I hold **indices/handles**, not pointers, into relocating containers.
 - [ ] **No `shared_ptr` copies** on the hot path (pass `const&`/raw/`unique_ptr`); `shared_ptr` is reserved for genuine off-hot-path shared ownership (`make_shared`).
 - [ ] Per-element node allocation is eliminated via **intrusive containers + pools** (Ch. 30) and/or **small-buffer** types where payloads are usually small (§31.4.3).
-- [ ] The **order book** uses flat tick-indexed level arrays + intrusive pool-backed FIFOs + a flat ID map, optimized for the **top-of-book-dominated** access distribution, with deep book as a cold secondary store (§31.4.4).
+- [ ] The **order book** is Ch. 32's: a dense tick ladder + pool-backed intrusive FIFOs + an order-id map chosen for the venue's id scheme, optimized for the **top-of-book-dominated** access distribution, with deep book as a cold secondary store (§31.4.5 → Ch. 32).
+- [ ] **Small sorted arrays** are searched for their key stream: SIMD scan at ≤ 64 keys, branchless (arithmetic select, asm-verified) on unpredictable keys, plain `lower_bound` on a predictable walk, Eytzinger only for static data past L2 (§31.4.6) — and the hash map is used only where exact match is the question.
 - [ ] **No `vector<std::function>`** / containers of type-erased callables on the hot path (Ch. 15).
 - [ ] Intrusive/pool designs have **explicit, simple lifetime rules** (no linked-while-freed — Ch. 30, 95).
 - [ ] Container choices are validated by **cache/TLB counters and the latency distribution** at the **real working-set size** against **captured data** (Ch. 3, 8, 102) — not a tiny in-L1 microbench.
@@ -252,7 +313,9 @@ The **limit order book (LOB)** is the central HFT data structure, and it's a per
 - M. Kulukundis, *"Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step"* (CppCon, the Abseil SwissTable talk) — open addressing, SIMD probing, and why `std::unordered_map` is slow (§31.3–31.4.1).
 - The Abseil (`flat_hash_map`), `ankerl::unordered_dense` (robin-hood), and Boost.Unordered (`unordered_flat_map`) documentation — production flat hash maps and their design trade-offs.
 - The Boost.Intrusive and Boost.Container (`flat_map`, `small_vector`) documentation — intrusive containers and flat/small-buffer types (§31.4.3).
-- The LMAX Disruptor paper and Martin Thompson's "Mechanical Sympathy" writings — cache-friendly data structures and the order-book/queue patterns motivating §31.4.4 (ties Ch. 45).
+- The LMAX Disruptor paper and Martin Thompson's "Mechanical Sympathy" writings — cache-friendly data structures and the order-book/queue patterns motivating §31.4.5 (ties Ch. 45).
+- P.-V. Khuong & P. Morin, *"Array Layouts for Comparison-Based Searching"* (ACM JEA 2017) — the branchless binary search, the Eytzinger/B-tree/van Emde Boas layouts and the measurements behind §31.4.6; the source of the "branchless loses on predictable keys" caveat.
+- S. Slotin, *Algorithmica: Algorithms for Modern Hardware* — the "Binary Search" and "Static B-Trees" (S-tree/S+-tree) chapters: SIMD node compares and prefetching for sorted search (exercise 6).
 
 ## 31.8 Additional Reading
 

@@ -451,14 +451,15 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 ### [31. Hot-Path-Hostile STL & Cache-Friendly Containers](31-hotpath-hostile-stl-cache-friendly-containers.md)
 - 31.1 Why it matters: node-based containers chase pointers
 - 31.2 Mental model: costs of `unordered_map`/`map`/`function`/`shared_ptr`
-- 31.3 Measure it: `std::unordered_map` vs flat hashing
+- 31.3 Measure it: `std::unordered_map` vs flat hashing; slot map vs flat hash vs raw pointer; small sorted-array search (`lower_bound` vs branchless vs Eytzinger vs SIMD scan vs flat hash — Ch. 3's promise, kept)
 - 31.4 Techniques
   - 31.4.1 Flat / open-addressing & robin-hood hashing
   - 31.4.2 `std::flat_map`/`std::flat_set` (C++23)
   - 31.4.3 Intrusive, fixed-capacity and small-buffer containers
   - 31.4.4 Slot maps and generational handles
-  - 31.4.5 Case Study — Building the Limit Order Book
-- 31.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn
+  - 31.4.5 Case Study — Building the Limit Order Book (now Ch. 32; pointer)
+  - 31.4.6 Searching small sorted arrays: branchless binary search, Eytzinger layout and SIMD scan
+- 31.5 Pitfalls & anti-patterns: `shared_ptr` refcount churn; branchless search on predictable keys
 - 31.6 Exercises & checklist
 
 ### [32. Limit Order Book Engineering](32-limit-order-book-engineering.md)
