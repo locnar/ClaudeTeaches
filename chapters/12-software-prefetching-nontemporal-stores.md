@@ -83,7 +83,7 @@ The mental model: normal store = "write and keep a hot copy"; streaming store = 
 
 ---
 
-## 12.3 Measure it: prefetch-distance sweep on a dependent random gather
+## 12.3 Measure it: prefetch-distance sweep on a dependent random gather; the hardware prefetchers off on the hot core
 
 Software prefetch lives or dies by the distance, so the essential experiment is a **distance sweep** over a loop the hardware prefetcher can't help — here, summing values gathered through a random index array (a scatter/gather, like resolving order ids to records). One design point matters: the gather must be **dependent** — each load's address must wait for the previous load — or there is nothing for a prefetch to win. An *independent* gather (`sum += data[index[i]]`) is already overlapped by the out-of-order core up to the fill-buffer limit (~12 misses in flight on Ice Lake) and lands at ~15-20 ns/element with or without prefetching; the listing threads the result into every address (an opaque `+ (sum & zero)`) so that only the *prefetch* can run ahead:
 
@@ -147,6 +147,18 @@ Read it the Ch. 1 way:
 - **`PD` is empirical and machine-specific.** Nothing on paper would have told you "16." You *found* it by sweeping, and the knee moves with per-iteration work, miss latency and the fill-buffer count (§12.2.2). This is why §12.6 warns that a hardcoded `PD` is a portability liability.
 - **Confirm the mechanism with the PMU** (Ch. 2): at the knee, `cycle_activity.stalls_mem_any` drops sharply while `L1-dcache-load-misses` stay similar (you didn't avoid the misses — you *overlapped* them). That distinction is the whole idea. And re-run with the `+ (sum & zero)` removed: the baseline itself falls to ~18 ns and every PD lands within a few ns of it — the out-of-order window was already doing the prefetcher's job.
 
+**A second experiment: the hardware prefetchers off, on the hot core.** Everything above assumed the hardware prefetchers were *on* and doing nothing useful for a random gather. The complementary question — what they do to a hot core's **tail** when its working set *fits* — needs the toggle of §12.4.3 (an MSR write, which the test guest cannot do; the run below is representative for the reference machine): an L2-resident order book (Ch. 33's dense ladder, ~1 MiB) updated by a replayed feed at 200k msg/s on isolated core 2, while a replay process streams through 4 GiB on core 10 of the same socket, with `0x1A4` = `0x0` (all four core prefetchers on) and `0xF` (all off) on core 2 only:
+
+```
+   # prefetch_toggle.sh — hot core 2, L2-resident book, streaming neighbour on core 10; representative, Xeon Gold 6326 (Appendix L.3)
+   $ wrmsr -p 2 0x1a4 0x0;  ./book_replay --core 2 --feed replay.bin & perf stat -C 2 -e l2_lines_out.useless_hwpf,l2_rqsts.all_pf,L1-dcache-load-misses sleep 30
+   book update latency (ns): p50 212  p99 1,480  p99.9 6,900     l2_lines_out.useless_hwpf 41.2M   l2_rqsts.all_pf 58.9M   L1 misses 12.1M
+   $ wrmsr -p 2 0x1a4 0xf;  (same)
+   book update latency (ns): p50 219  p99   790  p99.9 2,100     l2_lines_out.useless_hwpf    0     l2_rqsts.all_pf    0   L1 misses 12.4M
+```
+
+The p50 moved 3 % the wrong way (the few sequential walks the book does lose their prefetch); the p99 halved and the p99.9 fell 3×. The mechanism is the `useless_hwpf` column: 41 M lines the L2 streamer fetched and evicted *without their ever being used*, each one pushing a line of the book out of L2 (and, with the neighbour's traffic, out of the L3 ways the hot core had left), so the book's real accesses missed to L3 and DRAM in the tail. With the prefetchers off, the book stays resident and the L1 miss count is unchanged — the demand misses were always the same; the prefetch traffic was the eviction pressure. The same effect, from the other direction, is Ch. 73 §73.4.2: hardware prefetch streams running through the DDIO region evict packets the NIC just delivered. This is the experiment to run before deciding the per-core policy §12.4.3 describes; the outcome depends on how much of the hot path is sequential (a SoA sweep — Ch. 10 — wants the streamer on; a pointer-chasing book wants it off), which is why it is a per-core, measured setting and not a BIOS default.
+
 ---
 
 ## 12.4 Techniques
@@ -171,6 +183,30 @@ Where streaming stores earn their keep — bulk, write-only, cache-line-granular
 - **Producer→consumer hand-off where the producer won't re-read** — though here weigh whether the consumer wants it *in* L3 (then a normal store is better). Streaming wins only when the writer truly won't reuse the cache line and protecting the hot set matters.
 
 The rules from §12.2.3, operationally: write **full cache lines, sequentially**; use SIMD streaming stores (`_mm256_stream_si256` etc.) to fill write-combining buffers; and **emit an `_mm_sfence()` before** any reader/DMA/other-thread observes the data (Ch. 39) — the most common streaming-store bug is a missing fence. Measure that your hot working set's miss rate actually improved (Ch. 2) — that's the *point* of streaming, not the copy's own speed.
+
+### 12.4.3 Controlling the hardware prefetchers: MSR 0x1A4, the uncore prefetchers and the per-core policy
+
+The prefetchers are a per-core, runtime-switchable setting, and the common HFT practice is **off on the hot cores, on everywhere else** — decided by the §12.3 toggle experiment, never by default. What there is to switch:
+
+- **Intel core prefetchers — `IA32_MISC_FEATURE_CONTROL`, MSR `0x1A4`** (Nehalem through Ice Lake/Sapphire/Emerald/Granite Rapids; documented in the SDM vol. 4 and the per-generation Intel tuning guides). Four bits, each **1 = disabled**: bit 0 the **L2 hardware (streamer) prefetcher** (the one that runs ahead of a stream and the usual culprit in the §12.3 result); bit 1 the **L2 adjacent-cache-line prefetcher** (fetches the other half of the 128-byte pair — the reason Ch. 42 §42.2 pads to 128 bytes; with this bit set, 64-byte padding is sufficient on that core); bit 2 the **DCU (L1) streamer** (next-line on ascending access); bit 3 the **DCU IP prefetcher** (per-instruction stride). Ice Lake-SP and later add the **L2 AMP** (adaptive multipath) prefetcher — bit 5 on Sapphire Rapids+; on Ice Lake it is folded into the streamer control — and Granite Rapids exposes the **LLC page prefetcher** separately (bit 6 on recent parts; check the generation's tuning guide). `0xF` is "all four core prefetchers off"; `0x0` the default.
+- **Intel uncore prefetchers — BIOS only.** **LLC prefetch** (the CHA prefetching into L3 on a demand miss), **XPT prefetch** (extended prediction table: a speculative DRAM read issued in parallel with the L3 lookup — lowers idle DRAM latency, adds memory traffic that the §9.2.3 loaded curve pays for), **UPI prefetch** (the remote-socket version), and **DCU/L2 prefetcher** master switches with the same four bits as the MSR. These are per-socket firmware settings ("Processor Configuration → Prefetchers" on Dell/HPE/Supermicro, Appendix C.1); XPT and UPI prefetch default *on* and are worth measuring off on a box whose hot set is L2/L3-resident and whose memory channels carry a capture writer (Ch. 9 §9.4.1).
+- **AMD Zen — BIOS switches, no public per-core MSR.** EPYC/Ryzen firmware exposes **L1 Stream HW Prefetcher**, **L1 Stride Prefetcher**, **L1 Region Prefetcher**, **L2 Stream HW Prefetcher** and **L2 Up/Down Prefetcher** ("CPU Common Options → Prefetcher settings"), socket-wide; the per-core MSR (`MSR_AMD64_DC_CFG`/`DE_CFG` bits) is model-specific and undocumented for this purpose — use the BIOS and accept that batch cores on the same socket lose the prefetchers too, or split by socket (Appendix Q.7).
+
+The mechanics on Linux:
+
+```
+   # read / write the core prefetcher control on one CPU (msr-tools; the msr module; root — and NOT under kernel lockdown)
+   $ modprobe msr && rdmsr -p 2 0x1a4                     # -> 0  (all on)
+   $ wrmsr -p 2 0x1a4 0xf                                  # core 2: L2 streamer, adjacent-line, DCU streamer, DCU IP all OFF
+   $ wrmsr -p 2 0x1a4 0x3                                  # core 2: only the two L2 prefetchers off (keep the L1 ones)
+   $ for c in 0 1 8 9 10 11; do wrmsr -p $c 0x1a4 0x0; done   # housekeeping/batch cores: everything on
+   # kernel >= 5.9 refuses MSR writes unless booted with msr.allow_writes=on (and logs each write); kernel lockdown (Secure Boot,
+   # Ch. 97 §97.4.9) refuses them regardless — so the write belongs in a signed early-boot unit, before the trading unit (Ch. 99 §99.4.9)
+   # verify at the gate (Appendix M.2): the MSR is per core and is reset by a reboot, a suspend, and some microcode loads
+   $ for c in 2 3 4 5; do echo -n "cpu$c "; rdmsr -p $c 0x1a4; done
+```
+
+Three rules: **(1) per core, by role** — hot cores off (or the two L2 bits off — measure both), DDIO/RX-polling cores usually off (Ch. 73 §73.4.2), batch/replay/risk cores on, because a SoA sweep without a streamer is 2–3× slower; **(2) re-applied at every boot**, from the unit that runs before the trading process, and *verified* by `rdmsr` in the readiness gate (the setting does not survive a reboot, and a BIOS "prefetcher = enabled" setting re-enables it below the MSR on some firmware); **(3) measured with `useless_hwpf`** — if the §12.3 column is small on your hot core, the prefetchers are not hurting and the SoA parts of the path want them on. Record the per-core map in the host fingerprint (Appendix M.2) beside the C-state and governor settings.
 
 ---
 
@@ -224,6 +260,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 - **Portability/maintenance cost.** A tuned `PD` and locality hint are microarchitecture-specific; they can pessimize the next CPU and rot silently (no compile error when they stop helping). Gate them behind measurement and re-validate per platform (Appendix A for ARM, where the prefetch instruction and tuning differ).
 - **Streaming-store without a fence.** Non-temporal stores are weakly ordered; a reader/DMA that observes them before `_mm_sfence()` sees torn/stale data — a real correctness bug, not just slow (§12.2.3). A `std::atomic` release store or `atomic_thread_fence(memory_order_release)` is *not* a substitute: on x86 they emit no fence and do not order non-temporal stores.
 - **Streaming stores for the wrong data.** Using `movnt` for data you (or the consumer) *will* read back soon forces it out of cache and then misses on the re-read — slower than a normal store. Streaming is for genuinely write-and-forget bulk output only.
+- **Prefetcher control that evaporated.** MSR 0x1A4 is per core and non-persistent: a reboot, a BIOS update, a microcode reload, or a `tuned` profile that writes the register itself puts the hot core's prefetchers back on — and the p99.9 back up — with no log line. Apply from a boot unit, verify with `rdmsr` at the gate, keep the per-core map in the fingerprint (§12.4.3). And the inverse: turning prefetchers off on the *batch* cores because "the hot core liked it" costs the replay job 2–3×.
 - **Optimizing the mean, not the tail.** Prefetch's job is to cut the *miss* tail (Ch. 1); a mean can hide whether you helped the p99.9 or just shuffled cycles. Measure the distribution and the `stalls_mem_any` counter, not just average throughput.
 
 ---

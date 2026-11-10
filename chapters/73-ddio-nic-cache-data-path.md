@@ -78,6 +78,8 @@ Get the win first: make sure received packets actually land hot and stay hot unt
 
 ### 73.4.2 Separating the DDIO region from the hot working set with CAT
 
+One more evictor that is easy to forget: the **hardware prefetchers of the RX-polling core itself**. An L2 streamer that runs ahead through the descriptor ring and the packet buffers fetches lines the NIC is about to overwrite and evicts the ones it just delivered; Ch. 12 §12.4.3's per-core control (MSR 0x1A4, the two L2 bits off on the polling cores) is measured against `l2_lines_out.useless_hwpf` exactly as the hot-core case is in Ch. 12 §12.3.
+
 The key combined technique (with Ch. 56): stop the NIC's DMA and the strategy's data from evicting each other.
 
 - **Give the DDIO region and the hot data disjoint L3 ways.** By default the DDIO ways and your hot working set share the same L3 pool and can evict each other (§73.3). Using CAT (Ch. 56), reserve a CLOS for the hot core's data with ways that **do not overlap** the ways DDIO writes into. On parts that expose DDIO way control (`IIO LLC WAYS` MSR / BIOS knob), you can set the DDIO region explicitly; combined with a complementary CAT mask for the hot path, RX streams through *its* ways and the strategy lives in *its* ways — neither evicts the other.

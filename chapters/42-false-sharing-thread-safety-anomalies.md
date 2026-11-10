@@ -45,7 +45,7 @@ PerThread data[NUM_THREADS];     // each element on a separate line — no false
 
 (Its companion `hardware_constructive_interference_size` is the *opposite*: the max size to *keep* things together on one line when you *want* them co-located — for data a single thread accesses together.)
 
-**Adjacent-line prefetching.** Intel CPUs prefetch the *adjacent* cache line (the 128-byte "buddy" pair), so two lines 64 bytes apart can *still* false-share via the prefetcher. This is why some codebases pad to 128 bytes on Intel even though `hardware_destructive_interference_size` says 64 — the constant doesn't know about the prefetcher. Measure (§42.3) rather than assume 64 is always enough.
+**Adjacent-line prefetching.** Intel CPUs prefetch the *adjacent* cache line (the 128-byte "buddy" pair), so two lines 64 bytes apart can *still* false-share via the prefetcher. This is why some codebases pad to 128 bytes on Intel even though `hardware_destructive_interference_size` says 64 — the constant doesn't know about the prefetcher. Measure (§42.3) rather than assume 64 is always enough. (On a hot core where the adjacent-line prefetcher is switched off — MSR 0x1A4 bit 1, Ch. 12 §12.4.3 — 64-byte padding suffices; but the binary runs on other cores too, so pad to 128 unless the layout is per-core.)
 
 The model: **coherence operates per-64-byte-line, so independently-written variables on the same line invalidate each other's caches on every write — false sharing: real contention, no shared data, invisible in source, detectable only via HITM/`perf c2c`. The cure is to pad/align hot independently-written data to `hardware_destructive_interference_size` so each owns its line.**
 

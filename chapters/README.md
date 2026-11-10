@@ -187,10 +187,11 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 12.2.1 `__builtin_prefetch` / `_mm_prefetch` and locality hints
   - 12.2.2 Prefetch distance and timeliness
   - 12.2.3 Streaming (non-temporal) stores and the write path
-- 12.3 Measure it: prefetch-distance sweep on a dependent random gather
+- 12.3 Measure it: prefetch-distance sweep on a dependent random gather; the hardware prefetchers off on the hot core
 - 12.4 Techniques
   - 12.4.1 Manual prefetch for irregular access
   - 12.4.2 Non-temporal stores to avoid cache pollution
+  - 12.4.3 Controlling the hardware prefetchers: MSR 0x1A4, the uncore prefetchers and the per-core policy
 - 12.5 Verify the codegen: prefetch and `movnt` emission
 - 12.6 Pitfalls & anti-patterns: when manual prefetch hurts; prefetch the wrong line
 - 12.7 Exercises & checklist
