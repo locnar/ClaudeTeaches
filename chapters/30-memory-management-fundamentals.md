@@ -1,0 +1,183 @@
+# Part IV — Memory Management
+
+# Chapter 30 — Memory Management Fundamentals
+
+> **Prerequisites:** Ch. 17 (virtual memory & page faults — the page-fault mechanics this chapter measures as allocation cost), Ch. 8 (caches — a fresh allocation is cold memory), Ch. 1 (tail latency — `malloc` is a tail event), Ch. 3 (benchmarking distributions — allocation cost is a *distribution*, not a mean), Ch. 24 (`noexcept` moves — why container growth copies or moves); Ch. 28 (the build that produced the binary — reproducible, with a build ID — so that the allocation profiles of this Part are attributable to one build).
+>
+> **Leads into:** Ch. 31 (custom allocators — arenas/pools that make the steady state zero-allocation), Ch. 32 (cache-friendly containers — which STL containers allocate and when), Ch. 34 (`mmap`/`mlock`/pre-faulting — the syscall-level controls), Ch. 60 (warming — pre-faulting and pre-touching as part of warm-up). Opens **Part IV**.
+
+---
+
+## 30.1 Why it matters: `malloc` can stall on the hot path
+
+`malloc` is the most dangerous function on the tick-to-trade path, and the danger is not its *average* cost — a warm `malloc` is often ~20-100 ns, annoying but survivable. The danger is its **tail**: a single allocation can, with no warning visible in your source, take a lock another thread holds, walk free-lists looking for a fit, call into the kernel (`mmap`/`brk`) to grow the heap, and — worst of all — trigger a **page fault** that traps into the kernel to wire up physical memory, costing *microseconds*. On a path budgeted in hundreds of nanoseconds, a single page-faulting allocation is a 10-100× blowout, and it lands on exactly the messages you can't predict. The whole north-star of this book — p99/p99.9 (Ch. 1) — is precisely where unmanaged allocation does its damage: the mean looks fine, the tail is a cliff.
+
+What makes this insidious is how *invisible* allocations are in idiomatic C++. A `std::string` that outgrows its small-buffer, a `std::vector::push_back` that reallocates, a `std::function` capturing too much (Ch. 16), a `std::map`/`unordered_map` insert allocating a node (Ch. 32), a `shared_ptr` control block, a lambda returned by value, a `std::stringstream` formatting a log line (Ch. 93) — every one of these can call `operator new` on the hot path without a single literal `new` in sight. The hot path that *looks* allocation-free routinely isn't, and the only way to know is to instrument it (§30.3). The HFT discipline that follows is stark: **the steady-state hot path must allocate zero times.** All allocation happens at startup/setup (the cold path, Ch. 1's hot/cold split); the trading loop runs on memory already obtained, already faulted in, already warm.
+
+This chapter is the foundation for that discipline. It separates the two costs that `malloc` conflates — the **allocator's bookkeeping** (finding/marking a block, possibly under a lock) and the **kernel's page fault** (first touch of a virtual page, Ch. 17) — because they have different magnitudes, different cures, and different measurement (§30.3). It covers the cheap, deterministic alternatives that belong on the hot path (stack buffers, pre-allocated and reused storage — §30.4.1) and the technique that removes the page-fault surprise (pre-faulting — §30.4.2, the bridge to Ch. 34/60). Custom allocators (arenas, pools) — the production answer to "I need dynamic-shaped data without `malloc`" — are Ch. 31; this chapter is *why* you need them and *what* you're avoiding.
+
+## 30.2 Mental model: stack vs heap; page faults; allocator internals
+
+**Stack vs heap — two very different costs.**
+
+- **The stack** is nearly free: allocating a local is *decrementing the stack pointer* (one instruction, no bookkeeping, no syscall), the memory is already mapped and almost certainly hot in cache (Ch. 8), and deallocation is automatic (incrementing `rsp` on return). Stack allocation has *no tail* — it can't fault (the stack pages are resident after first use), can't lock, can't call the kernel. This is why "put it on the stack" is the first answer to hot-path allocation.
+- **The heap** (`malloc`/`operator new`) is a *managed pool* with real bookkeeping: find a free block of the right size (size-class free-lists, best-fit search), split/coalesce, mark it used — often *under a lock or per-thread arena lock* — and, when the pool is exhausted, ask the **kernel** to grow it. The cost is variable and has a long tail.
+
+**The two costs `malloc` conflates.** This is the key distinction of the chapter:
+
+```
+   malloc(n):
+     ┌─ allocator bookkeeping  (userspace): find block in free-list / arena, maybe lock,
+     │                                       split/coalesce, return pointer    ~tens of ns
+     │
+     └─ IF the heap must grow OR the page is untouched:
+          kernel involvement:  mmap/brk syscall (grow the mapping)       ~hundreds of ns
+          PAGE FAULT on first touch of each new page (Ch. 17):
+             minor fault:  map a zero page / existing page        ~0.3-1 µs (4 KiB, zeroing included)
+             major fault:  bring page from disk/swap              ~ms  (catastrophic; avoid entirely)
+```
+
+- **Lazy allocation / first-touch (Ch. 17).** `malloc`/`mmap` return *virtual* address space; the kernel doesn't back it with physical memory until you **first touch** (write) each page — at which point a **page fault** traps into the kernel to wire up a physical frame. So the cost of "allocating" a big buffer is split: a little at `malloc`, then a fault *per page* spread across your first writes. A buffer you allocated but never warmed will fault *on the hot path* the first time you use it (§30.4.2).
+- **Minor vs major faults.** A **minor fault** (map a fresh zero page or an already-resident page) is ~0.3–1 µs for a 4 KiB page, zeroing included (several µs for a zeroed 2 MiB THP page). A **major fault** (page must be read from storage/swap) is tens to hundreds of µs from NVMe and *milliseconds* — catastrophic; on a latency box you `mlockall` and disable swap (Ch. 34 *Memory Mapping* — pre-faulting and locking; Appendix C) so majors never happen.
+- **Allocator internals (glibc `malloc`/tcmalloc/jemalloc).** Modern allocators use **per-thread caches/arenas** (so the common path is lock-free or low-contention), **size classes** (rounding requests to bucket sizes — internal fragmentation), and free-list management. They're good at the common case but still have tails (cache miss in the allocator's own metadata, arena lock contention under multi-threaded load, slow-path refill from the OS). `free` has cost too (coalescing, returning to the right list). The allocator is fast *on average* and unpredictable *at the tail* — exactly wrong for the hot path.
+
+**Why `delete`/`free` also matters.** Deallocation isn't free either (coalescing, lock, cache effects), and a hot path that allocates *and frees* per message pays both. The steady-state-zero-allocation rule covers both directions.
+
+The unifying model: **stack allocation is one instruction with no tail; heap allocation is userspace bookkeeping (tens of ns, possibly locked) plus — on growth or first touch — a kernel page fault (hundreds of ns to ms). The hot path must touch neither: allocate and fault everything in at startup, then reuse.**
+
+## 30.3 Measure it: allocation-cost and page-fault distribution
+
+Allocation cost is a **distribution** (Ch. 1, 3), so measuring the mean is exactly the wrong thing — the story is in the tail and in the page faults. Three modes separate the two costs that "allocation" hides: `reuse` (a pre-faulted buffer: the zero-allocation baseline), `heap` (`new` + touch + `delete` of the same 4 KiB every iteration: the *allocator's* bookkeeping — glibc hands the just-freed, still-resident chunk straight back, so this does **not** page-fault), and `fresh` (`new` + touch, never freed: every iteration first-touches a page the kernel has never mapped — the *page-fault* cost). Use `perf stat`'s fault counters and an HdrHistogram-style tail capture (Ch. 3).
+
+```cpp
+// alloccost.cpp — distribution of new/delete vs reused buffer vs never-touched memory; watch page faults.
+// Build: g++ -O2 -std=c++20 -march=native alloccost.cpp -o alloccost
+// Run pinned:  taskset -c 2 ./alloccost reuse  |  ./alloccost heap  |  ./alloccost fresh
+//   page faults:  perf stat -e minor-faults,major-faults ./alloccost fresh
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+#include <algorithm>
+#include <chrono>
+#include <new>
+
+static inline std::uint64_t ns_now() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+int main(int argc, char** argv) {
+    const char* mode = argc > 1 ? argv[1] : "heap";
+    const bool heap  = !std::strcmp(mode, "heap");    // new + touch + delete, same size every time
+    const bool fresh = !std::strcmp(mode, "fresh");   // new + touch, NEVER freed: every page is new
+    constexpr int N = 250'000;                        // fresh mode retains N * 4 KiB = ~1 GiB
+    constexpr std::size_t SZ = 4096;                  // one page worth
+    std::vector<std::uint32_t> samples(N);            // sized (and so faulted in) BEFORE the loop
+
+    alignas(64) static unsigned char reuse_buf[SZ];   // pre-allocated, reused every iter
+    std::vector<unsigned char*> keep; if (fresh) keep.reserve(N);
+    std::uint64_t sink = 0;
+
+    for (int i = 0; i < N; ++i) {
+        std::uint64_t t0 = ns_now();
+        if (heap || fresh) {
+            auto* p = new unsigned char[SZ];          // ALLOCATE on the "hot path"
+            std::memset(p, i & 0xFF, SZ);             // touch it: in `fresh` this is a FIRST touch → page fault
+            sink += p[i % SZ];
+            asm volatile("" :: "r"(p) : "memory");    // the block escapes: no allocation elision (Appendix L)
+            if (heap) delete[] p; else keep.push_back(p);   // heap: free (glibc keeps the chunk resident)
+        } else {
+            std::memset(reuse_buf, i & 0xFF, SZ);     // reuse: no alloc, already faulted
+            sink += reuse_buf[i % SZ];
+            asm volatile("" :: "r"(reuse_buf) : "memory");
+        }
+        samples[i] = std::uint32_t(ns_now() - t0);
+    }
+    for (auto* p : keep) delete[] p;
+    std::sort(samples.begin(), samples.end());
+    auto pct = [&](double p){ return samples[std::size_t(p * (N - 1))]; };
+    std::printf("%-6s sink=%llu  p50=%u  p99=%u  p99.9=%u  max=%u ns\n",
+                mode, (unsigned long long)sink, pct(0.50), pct(0.99), pct(0.999), samples.back());
+    return 0;
+}
+```
+
+Representative results — reference machine **Xeon Gold 6326** (Ice Lake-SP), GCC 13.3 / glibc 2.39, `-O2 -std=c++20 -march=native`, Linux 6.18 (THP = `madvise`, so `fresh` runs on 4 KiB pages), pinned, turbo off (illustrative; the *shape of the distribution* is the point; every sample includes two ~20 ns `clock_gettime` reads):
+
+```
+                           p50        p99        p99.9       max          minor-faults (perf)
+reuse  (buffer)            ~80 ns     ~95 ns     ~110 ns     ~3,000 ns    ~0 (faulted once)      <- flat: the baseline
+heap   (new+touch+delete)  ~110 ns    ~130 ns    ~250 ns     ~5,000 ns    ~0 (chunk recycled)    <- bookkeeping, NO faults
+fresh  (new+touch, kept)   ~500 ns    ~900 ns    ~4,000 ns   ~60,000 ns   ~1 per iteration       <- the kernel on the hot path
+```
+
+Read it the Ch. 1 way: **the medians are a factor apart, but the tails are a different universe.** The reuse path is *flat* — same work every iteration, no allocation, the buffer faulted in once and stays resident — so p99.9 ≈ p50 (the rare max is an interrupt, not the code). The `heap` row shows what `new`/`delete` themselves cost when the allocator is warm: ~30 ns of bookkeeping and a modest tail from its slow paths — *no page faults*, because glibc coalesces the freed 4 KiB into the top chunk and re-carves the same resident memory next time (trimming only triggers above `M_TRIM_THRESHOLD`, 128 KiB). The `fresh` row is the other cost, isolated: when the touched memory is *new to the kernel*, every iteration takes a minor fault — trap, page allocation, 4 KiB zeroing, PTE install — ~0.4 µs at best, tens of µs when reclaim or compaction gets involved (the `~1 minor-fault per iteration` in `perf` is the smoking gun). A growing container, a fresh arena, a first-time-touched pool: all `fresh`. This is the entire argument for steady-state-zero-allocation in one chart: allocation bookkeeping is a tax on the median, but *un-faulted memory* destroys the tail and drags the kernel onto the hot path. The fingerprint to recognize: **a hot path with non-zero `minor-faults` in `perf stat`, and a p99.9 far above p50** — that's hidden allocation or un-warmed memory, and §30.4 (pre-fault, then reuse) is the cure.
+
+## 30.4 Techniques
+
+### 30.4.1 Stack and pre-allocated buffers
+
+The two hot-path-safe ways to get memory, in order of preference:
+
+- **Put it on the stack.** Fixed-size, bounded-lifetime data belongs in locals / fixed-size arrays / `std::array` — one-instruction allocation, no tail, cache-hot, auto-freed (§30.2). A decode scratch buffer, a fixed working set, a small bounded collection: stack-allocate it. For *bounded-but-variable* sizes, a stack buffer sized to the maximum (plus a fallback for the rare overflow) keeps the common case allocation-free. Beware *unbounded* stack growth and very large frames (stack overflow, and the guard-page fault) — the stack is for bounded data.
+- **Pre-allocate at startup and reuse.** For data that must outlive a function or is too large/variable for the stack, allocate it **once during setup** (the cold path) and **reuse** it every iteration — the `reuse_buf` of §30.3, a pre-sized `std::vector` you `clear()` (not free) and refill, a fixed ring buffer (Ch. 43, 46), an object pool (Ch. 31). The steady state never calls `new`; it writes into memory it already owns.
+- **`reserve()` / size containers up front.** A `std::vector` you `reserve(max)` once never reallocates on `push_back` (no per-append `new`, no move/copy of elements — Ch. 24); a hash map (Ch. 32) sized to its working set up front avoids rehash-time allocation. `clear()` keeps the capacity; `shrink_to_fit`/reassignment throws it away — on the hot path you want to *keep* capacity and reuse it.
+- **Prefer move and `noexcept` (Ch. 24).** Where objects must transfer, `std::move` avoids a copy *and* often an allocation; a `noexcept` move ctor is what lets `std::vector` growth *move* instead of copy (Ch. 24). Returning by value (NRVO/move) is cheap; copying a heap-owning object is an allocation.
+- **Small-buffer optimization (SBO), used deliberately.** `std::string` and many small-vector types store small payloads inline (no allocation) and only heap-allocate when they outgrow the buffer. Know your types' SBO thresholds (§32.4.3 has the numbers: 15 chars for a libstdc++ `std::string`, 16 bytes for a libstdc++ `std::function` callable) and keep hot-path payloads under them; a `string` that just exceeds SBO allocates silently.
+
+### 30.4.2 Pre-faulting pages
+
+Allocating memory isn't enough — until each page is *touched*, the first hot-path access **page-faults** (§30.2, Ch. 17). Pre-faulting moves that fault to startup: after allocating (or `mmap`ing) a region, write one byte per page (stride by page size, 4 KB or the huge-page size — Ch. 17) *before* the hot path runs, so the kernel wires up every physical frame during setup — and do it **from the thread that will use the memory, pinned to its NUMA node**, because first-touch decides placement (Ch. 18) and a coarse mistake strands a whole region remote. This is the difference between the §30.3 heap tail and the flat reuse line: the reuse buffer was faulted once and never again. The knobs that make the faulted state *stick* — `MAP_POPULATE`, `mlock`/`mlockall(MCL_CURRENT|MCL_FUTURE)` and `RLIMIT_MEMLOCK`, `madvise`, huge-page backing, swap off — live where the mappings do, in **Ch. 34 §34.4.2**; the warm-up schedule this belongs to is Ch. 60.
+
+## 30.5 Pitfalls & anti-patterns: hidden allocations; minor/major faults
+
+- **Hidden allocations on the "allocation-free" hot path.** The headline trap: `std::string` growth, `vector::push_back` reallocation, `std::function`/lambda capture (Ch. 16), `map`/`unordered_map` node inserts (Ch. 32), `shared_ptr` control blocks, `stringstream` formatting (Ch. 93), `to_string`, returning containers by value. None show a literal `new`. **Instrument `operator new`** on the hot path (override it to count/abort) to prove zero allocation — don't eyeball it (§30.3).
+- **Un-warmed memory faulting on the hot path.** Allocating at startup but never *touching* the pages means the first hot-path access page-faults (§30.4.2). Pre-fault during warm-up; a buffer that's "pre-allocated" but cold is not actually ready.
+- **Major faults / swapping.** A major fault is tens-to-hundreds of µs from NVMe and *milliseconds* from spinning disk or a loaded swap device — either way 100–1,000× the budget, total latency destruction. `mlockall`, disable swap (`swapoff`), and ensure the working set fits RAM on the latency box (Ch. 34, Appendix C). A single major fault ruins a session's tail.
+- **Allocator lock contention under threads.** Multi-threaded `malloc`/`free` can contend on arena locks; even per-thread-cache allocators have slow-path refills. The cure isn't a "faster malloc" on the hot path — it's *not allocating* there (Ch. 31). (For off-hot-path allocation, tcmalloc/jemalloc reduce contention vs glibc.)
+- **Freeing and reallocating per message.** Allocating *and* freeing each iteration pays both costs and churns the allocator/cache. Reuse the buffer (`clear()` keeps capacity) instead of `free`+`new` (§30.4.1).
+- **`shrink_to_fit`/reassignment dropping capacity.** Throwing away a container's capacity (then regrowing it next message) reintroduces allocation. On the hot path, *keep* capacity and reuse; only release it on the cold path if memory pressure demands.
+- **Giant stack frames / unbounded stack use.** The stack is great but finite; a huge `std::array` local or deep recursion overflows it (guard-page fault → crash). Use the stack for *bounded* data; large/variable data is pre-allocated heap reused (§30.4.1).
+- **Benchmarking allocation by the mean.** Reporting average `malloc` cost hides the tail that actually matters (§30.3, Ch. 1). Always measure the *distribution* (p99/p99.9) and the page-fault count, not the average.
+- **Assuming `reserve` once is enough across reuse.** It is — *if* you `clear()` (which keeps capacity) and don't reassign/`shrink`. Accidentally replacing the container (`v = {}`, `v = other`) can drop capacity; verify the hot loop reuses the same storage.
+
+## 30.6 Exercises & checklist
+
+**Exercises**
+
+1. **Measure the tail and the faults.** Build `alloccost.cpp`; run `reuse`, `heap` and `fresh` pinned, and `perf stat -e minor-faults,major-faults` on each. Confirm: `heap` costs ~30 ns over `reuse` at the median with a modest tail and **no** extra faults (glibc recycles the chunk), while `fresh` shows ~1 minor-fault per iteration and a p99.9 in the microseconds. Where does the heap tail come from — `new`'s bookkeeping or the page fault?
+2. **Catch hidden allocations.** Override global `operator new`/`delete` to count calls (or `abort()`); run a "hot loop" using `std::string`, `vector::push_back` without `reserve`, and a capturing `std::function`. How many allocations does the "allocation-free" loop actually do? Now fix each (SBO/`reserve`/concrete callable) to reach zero.
+3. **Pre-faulting.** Allocate a large buffer, then time the first write to each page *without* pre-faulting vs *with* a warm-up pass that touches every page first. Show the un-warmed first-touch faults (the §30.4.2 effect); confirm with `perf` minor-faults.
+4. **`mlockall` and majors.** Under artificial memory pressure (allocate most of RAM), measure hot-path tails with and without `mlockall`/swap. Reproduce a major fault and its millisecond cost; show `mlockall` prevents it.
+5. **Stack vs heap scratch.** Replace a per-call heap scratch buffer with a stack `std::array` (or pre-allocated reused buffer). Compare ns/op distributions. Quantify the tail you removed.
+
+**Checklist — memory-management fundamentals**
+
+- [ ] The steady-state hot path allocates **zero times** — verified by **instrumenting `operator new`** (counting/aborting), not by inspection (§30.5).
+- [ ] Fixed/bounded data is **stack-allocated** (`std::array`/locals); larger or variable data is **pre-allocated at startup and reused** (`reserve` + `clear`, pools — Ch. 31).
+- [ ] Containers are **`reserve()`d to their working set** up front; the hot loop **keeps capacity** (`clear()`), never `shrink`/reassigns it away.
+- [ ] All hot-path memory is **pre-faulted during warm-up** (touch every page) and **`mlock`ed** so no minor/major fault hits the hot path (§30.4.2, Ch. 34, 60).
+- [ ] **Swap is off / working set fits RAM**; major faults are impossible on the latency box (Appendix C).
+- [ ] Pre-faulting happens on the **right thread/NUMA node** (Ch. 18) so warming and locality coincide.
+- [ ] Move/`noexcept` are used so transfers don't copy-allocate (Ch. 24); SBO thresholds are respected for hot-path `string`/small types (Ch. 32).
+- [ ] Allocation cost is judged by the **distribution (p99/p99.9) and page-fault count** (Ch. 1, 3), never the mean.
+
+## 30.7 References
+
+- U. Drepper, *What Every Programmer Should Know About Memory* — virtual memory, page faults, and allocation cost; the foundation for §30.2 and the page-fault half of §30.3.
+- The glibc `malloc` internals documentation, and the tcmalloc/jemalloc papers and docs — per-thread arenas/caches, size classes, and the slow-path/lock behavior behind the allocator tail (§30.2).
+- The Linux man pages — `mmap(2)` (`MAP_POPULATE`/`MAP_ANONYMOUS`), `mlock(2)`/`mlockall(2)`, `brk(2)`, and `Documentation` on page faults and overcommit — the kernel mechanisms of §30.2/§30.4.2.
+- ISO C++ / cppreference — `operator new`/`delete` replacement, `std::array`, container `reserve`/`capacity`/`clear` semantics, and the small-buffer optimization notes (§30.4.1).
+- Carl Cook, *"When a Microsecond Is an Eternity"* (CppCon) — the HFT case for zero-allocation hot paths and measuring the tail, motivating this chapter.
+
+## 30.8 Additional Reading
+
+- D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — page-fault and allocation analysis with `perf`, and the cost of cold memory.
+- The jemalloc and mimalloc design writeups — modern allocator architecture, for when off-hot-path allocation contention matters.
+- Ch. 31 (*Custom Allocators*) — arenas/pools/`std::pmr` that provide dynamic-shaped data with no hot-path `malloc`; Ch. 32 (*Cache-Friendly Containers*) — which STL containers allocate and the flat alternatives; Ch. 34 (*Memory Mapping*) — `mmap`/`mlock`/pre-faulting in depth; Ch. 60 (*Keeping the Hot Path Warm*) — pre-faulting as part of warm-up; Ch. 18 (*NUMA*) — first-touch placement.
+- **Appendix C** (System Tuning Checklist) — `mlockall`, swap, and overcommit settings; **Appendix E** — the page-fault and allocation latency numbers that frame this chapter.
+
+---
+
+*Next: Ch. 31 — Custom Allocators, the production answer to this chapter's problem: arena, pool, and slab allocators and `std::pmr` that give you dynamic-shaped, variable-lifetime data with the steady-state-zero-allocation guarantee the hot path demands.*
