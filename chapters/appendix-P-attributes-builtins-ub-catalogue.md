@@ -114,3 +114,7 @@ baseline (-O2)                0.51    0.31   0.52   1.37  (ns)        0.39    0.
 - Agner Fog, *Optimizing software in C++*, the chapters on compiler hints and on what the compiler can and cannot infer — the practical reading of P.2.
 - Matt Godbolt, *"What Has My Compiler Done for Me Lately?"* (CppCon 2017) — the Godbolt workflow P.4 relies on.
 - Ch. 13 (*Code Layout*) and Ch. 14 (*Branch Prediction*) — where the layout hints are measured; Ch. 23 (*The Cost of Abstractions*) — `assume`/`unreachable`/contracts and the ABI; Ch. 25 (*Aliasing & Type Punning*) — the aliasing and lifetime rules; Ch. 47 and Ch. 91 — the sanitizers as tooling and as security; **Appendix D** — the per-build flags this appendix's per-function hints sit inside; **Appendix H** — availability of the standard attributes and library functions named here; **Appendix I.12** — the verification one-liners.
+
+---
+
+*Next: Appendix Q — AMD Zen (EPYC & Ryzen) Companion, what changes from the Intel reference machine for a reader on AMD silicon: the per-CCD victim L3 and TLB geometry, the op cache and predictor, no PEBS but IBS (and `rdpru`), the `perf` event families that replace every Intel name in the Measure-it sections, no AVX licence and no DDIO, `amd_pstate`/Precision Boost and the EPYC firmware knob names — in the spirit of Appendix A's ARM port.*

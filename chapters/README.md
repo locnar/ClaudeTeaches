@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 108 chapters are grouped into thirteen Parts; sixteen appendices (A–P) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 108 chapters are grouped into thirteen Parts; eighteen appendices (A–R) follow.
 
 ---
 
@@ -13,7 +13,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part I — Foundations & Methodology
 
-*Latency thinking and the measurement discipline the rest of the book stands on.*
+*Latency thinking and the measurement discipline the rest of the book stands on — and the silicon the hot path runs on, chosen and clocked deliberately.*
 
 ### [1. The Latency Mindset](01-the-latency-mindset.md)
 - 1.1 Why it matters: when a microsecond is the trade
@@ -119,7 +119,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part II — CPU Microarchitecture
 
-*The hardware reality under all the code — caches, pipelines, branches, the TLB, NUMA, and time.*
+*The hardware reality under all the code — caches, pipelines, branches, the TLB, NUMA across and within the socket (chiplets, tiles and the core-to-core map), and time.*
 
 ### [8. The Memory Hierarchy & Caches](08-memory-hierarchy-and-caches.md)
 - 8.1 Why it matters: DRAM is ~55× an L1 hit, ~250 cycles away
@@ -668,7 +668,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part VII — OS, Scheduling & Isolation
 
-*Building and keeping a quiet, isolated, warm core — timers and deadlines without jitter, cache and bandwidth partitioning included — and attributing the noise that remains.*
+*Building and keeping a quiet, isolated, warm core at a flat clock — timers and deadlines without jitter, cache and bandwidth partitioning, power management and frequency determinism included — and attributing the noise that remains.*
 
 ### [48. Context Switching & Its Mitigation](48-context-switching-mitigation.md)
 - 48.1 Why it matters: a switch trashes the caches and TLB
@@ -783,7 +783,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part VIII — Kernel I/O, Sockets & Zero-Copy
 
-*Getting data in and out through the kernel as fast as the kernel allows — up to the modern zero-copy fast path.*
+*Getting data in and out through the kernel as fast as the kernel allows — the datapath stage by stage, then up to the modern zero-copy fast path.*
 
 ### [57. Linux Native I/O](57-linux-native-io.md)
 - 57.1 Why it matters: the baseline before bypass
@@ -1605,6 +1605,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 ### [Appendix E — Latency Numbers Every Trading Developer Should Know](appendix-E-latency-numbers.md)
 - E.1 The table
 - E.2 How each was measured, with pointers to the deriving chapter
+- E.3 Per-generation deltas: see Appendix R
 
 ### [Appendix F — Glossary (HFT & Microarchitecture Terms)](appendix-F-glossary.md)
 - F.1 Trading & market-structure terms
@@ -1713,3 +1714,21 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - P.2 Attribute and builtin reference: what each tells the optimizer, and how to verify it
 - P.3 The UB catalogue for performance programmers
 - P.4 Verifying a hint, and finding a UB-licensed transformation you did not want
+
+### [Appendix Q — AMD Zen (EPYC & Ryzen) Companion](appendix-Q-amd-zen-companion.md)
+- Q.1 Topology: a socket is CCDs around an I/O die (Ch. 17–18)
+- Q.2 Cache hierarchy and TLBs (Ch. 8, 16) — victim L3 per CCD, no adjacent-line pairing, 1 MiB L2, 1 GiB pages in the L2 TLB
+- Q.3 The front end: op cache, decode, branch prediction (Ch. 13–14)
+- Q.4 The pipeline, the vector units and the integer tricks (Ch. 12, 33, 34) — no AVX licence, `pdep`/`pext` fast since Zen 3, `pause` ~65 cycles
+- Q.5 The PMU, `perf` and IBS (Ch. 2, 17, 36, 38) — the Intel→Zen event map, `PipelineL1`/`L2` instead of `--topdown`, IBS for `perf mem`/`c2c`, `rdpru`, uProf
+- Q.6 Memory model, atomics and spin loops (Ch. 35–37): what does not change
+- Q.7 Firmware knobs, clocks and power (Ch. 6, 7, 54; Appendix C.1) — the AMD names for every C.1 row, Precision Boost, `amd_pstate`, APBDIS/fixed SOC P-state
+- Q.8 Cache QoS (Ch. 52) and the I/O path (Ch. 68, 74) — per-CCX `resctrl` domains, MBA/SMBA, no DDIO, Preferred IO
+- Q.9 Re-running the book on a Zen box: what to expect
+
+### [Appendix R — x86 Generation Cheat Sheet](appendix-R-x86-generation-cheat-sheet.md)
+- R.1 How to read this appendix
+- R.2 Intel: Ice Lake-SP → Sapphire → Emerald → Granite Rapids (and the client parts) — cores, clocks, caches, L3 latency, ROB/DSB/TLB, channels, lanes, SNC, licences, DDIO, C6 exit
+- R.3 AMD: Zen 3 → Zen 4 → Zen 5 (EPYC and Ryzen) — the same columns per CCD generation, V-Cache parts, F-series clocks
+- R.4 Appendix E restated per generation — ns and cycles at each part's pinned clock, with the cross-domain core-to-core row Appendix E cannot have
+- R.5 On-die accelerators: beside the hot path, not on it — AMX, DSA, IAA, QAT, DLB, AVX10, APX

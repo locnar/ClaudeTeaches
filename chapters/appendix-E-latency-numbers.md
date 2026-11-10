@@ -70,7 +70,11 @@ The numbers are only trustworthy if you know *how they're obtained* — and repr
 
 The meta-point (Ch. 3, 108): **reproduce the rows that matter for your decisions on your own hardware**, with your production build (Appendix D) and tuning (Appendix C) and `mitigations=` setting (Ch. 6) — a table from a book is for intuition; a number from your box is for engineering. Then fold the measured rows into the tick-to-trade decomposition (§108.3) so the budget is built from *your* costs, not these representative ones.
 
-## E.3 References
+## E.3 Per-generation deltas: see Appendix R
+
+The table above is one machine. Appendix R.4 restates every core-dependent row — L1/L2/L3, DRAM local and remote, branch mispredict, core-to-core within and across an L3 domain and across sockets, C1/C6 exit, `pause` — for Ice Lake-SP, Sapphire Rapids, Granite Rapids, Zen 3/4/5 EPYC and a 5.7 GHz client ring part, in ns *and* cycles at each part's pinned clock; R.2–R.3 carry the geometry (cache sizes, ROB, TLB reach, channels, lanes) the rows derive from. Two rows exist only there: **core-to-core across an L3 domain** (a CCD or tile boundary — Ch. 18), which a monolithic reference machine cannot have, and the **client-ring L3 hit** at ~9–10 ns that Ch. 7 builds its hot-box argument on. Appendix Q.9 says what to expect when the deriving chapters are re-run on AMD.
+
+## E.4 References
 
 - Jeff Dean's "Numbers Everyone Should Know" / Peter Norvig's "Teach Yourself Programming in Ten Years" latency table — the original this refreshes; and Colin Scott's interactive "Latency Numbers Over Time" visualization (E.1).
 - **Intel Memory Latency Checker (MLC)**, **`lmbench`** (`lat_mem_rd`) and a pointer-chase microbenchmark (e.g. **tinymembench**) — tools for measuring the cache/DRAM/NUMA rows (E.2; Ch. 8, 17); **`stress-ng`** only as a background-load generator when measuring the same rows *under contention*.
@@ -78,7 +82,7 @@ The meta-point (Ch. 3, 108): **reproduce the rows that matter for your decisions
 - Ch. 3 (microbenchmarking — *how* to measure), Ch. 8/14/16/17/19/35/37/38/48/57/67/74/78/81 (the chapters that derive each row), Ch. 108 (composing them into tick-to-trade).
 - Carl Cook, "When a Microsecond Is an Eternity" (CppCon) — the trading framing of why these numbers matter (E.1).
 
-## E.4 Additional Reading
+## E.5 Additional Reading
 
 - Brendan Gregg's *Systems Performance* (the latency-analysis methodology and the orders-of-magnitude tables) — and his blog's latency-heatmap material.
 - The "Latency Numbers Every Programmer Should Know" GitHub gists and their periodic refreshes — community-maintained updates to the original table (E.1).

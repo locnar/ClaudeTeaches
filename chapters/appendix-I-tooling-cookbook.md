@@ -135,6 +135,25 @@ Discovering the machine and placing threads on it (Ch. 17, 50, 51; Appendix C).
    cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 50)
    sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 103 §103.2.4)
    turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
+   # --- clocks, idle states and power (Ch. 54; Ch. 7): read from a HOUSEKEEPING cpu, pin the window to a point
+   ./cstates 2 7                                                       # per-state exit/residency/usage/disable + the PM QoS bound (Ch. 54 §54.3)
+   cpupower -c 2-7 idle-set -d 3 && cpupower -c 2-7 idle-info            # disable state 3 (C6) on the hot cpus only; list what is left
+   echo 0 | sudo tee /sys/devices/system/cpu/cpu[2-7]/power/pm_qos_resume_latency_us   # per-CPU bound, no holder process needed
+   python3 -c 'import struct,sys;print(struct.unpack("i",open("/dev/cpu_dma_latency","rb").read(4))[0])'   # 0 = a holder is open; 2000000000 = none
+   grep . /sys/devices/system/cpu/cpu2/cpufreq/{scaling_governor,energy_performance_preference,scaling_min_freq,scaling_max_freq}   # performance / performance / min == max
+   sudo rdmsr -p 2 0x774                                               # IA32_HWP_REQUEST: min = max = desired ratio, EPP byte 0 (Ch. 54 §54.4.3)
+   turbostat --quiet --show CPU,Busy%,Bzy_MHz,TSC_MHz,CPU%c1,CPU%c6,Pkg%pc6,CoreTmp,PkgWatt,SMI --interval 1 --cpu 0-1   # Bzy_MHz = effective clock
+   sudo taskset -c 0 ./flatclock 2-7 60 2.9                             # effective GHz per hot cpu at 1 Hz: msr → perf → imul ladder (Ch. 54 §54.3)
+   perf stat -e cycles,ref-cycles -C 2 -- sleep 1                      # cycles/ref-cycles = actual/nominal clock ratio, no IPI (Ch. 2, 54)
+   taskset -c 3 ./clockprobe 10                                        # imul-chain effective GHz, no MSR/PMU (a VM too) — qualification only (Ch. 7 §7.3)
+   grep . /sys/devices/system/cpu/cpu[2-7]/thermal_throttle/*_count     # must be static all day; the first delta is a tail event (Ch. 54 §54.4.5)
+   grep . /sys/class/powercap/intel-rapl:0/constraint_{0,1}_power_limit_uw /sys/class/powercap/intel-rapl:0/energy_uj   # PL1, PL2, package energy
+   U=/sys/devices/system/cpu/intel_uncore_frequency/package_00_die_00; cat $U/initial_max_freq_khz | sudo tee $U/min_freq_khz   # pin the uncore (Ch. 54 §54.4.4)
+   sudo chrt -f 50 ./c2c 200000 0-7                                    # core-to-core latency map + ASCII heat-map (Ch. 18 §18.3, Appendix L.7)
+   for c in /sys/devices/system/cpu/cpu[0-9]*; do cat $c/cache/index3/shared_cpu_list; done | sort -u   # the L3 domains (CCD / tile / SNC node)
+   cat /sys/class/net/eth0/device/{numa_node,local_cpulist}            # the NIC's home domain for Ch. 18 §18.4.3 placement
+   cat /sys/devices/cpu_core/cpus /sys/devices/cpu_atom/cpus            # hybrid parts: P-cores vs E-cores (Ch. 7 §7.4.4)
+   chrt -f 50 taskset -c 3 ./soak 1800                                 # 30-min checksum-verified soak of a pinned/overclocked core (Ch. 7 §7.4.3)
    cat /proc/<pid>/task/*/timerslack_ns                                # 50000 = the default 50 µs timer slack on every sleeping thread (Ch. 49 §49.3); 1 after prctl(PR_SET_TIMERSLACK, 1)
    echo 1 | sudo tee /proc/<pid>/task/<tid>/timerslack_ns              # set it from outside for a component you cannot patch (Ch. 49 §49.4.4)
    cat /proc/sys/kernel/sched_rt_runtime_us                            # 950000 = RT throttle ON: a busy-polling SCHED_FIFO thread stalls 50 ms/s (Ch. 49 §49.3); -1 on isolated boxes (Ch. 53, Appendix C)
@@ -165,6 +184,19 @@ Seeing struct layout and memory behavior (Ch. 10, 16).
 Inspecting and tuning the RX/TX path (Ch. 62, 64, 67, 68).
 
 ```
+   # --- the datapath stage by stage (Ch. 58): health counters first, then the trace
+   grep -E 'NET_RX|NET_TX' /proc/softirqs                              # per-CPU network softirqs: ZERO on hot cpus (Ch. 58 §58.2.2)
+   cat /proc/net/softnet_stat                                          # hex per CPU: col1 processed, col2 backlog drops, col3 time_squeeze
+   nstat -az | grep -E 'UdpRcvbufErrors|UdpInErrors|TcpExtTCPBacklogDrop|TcpExtListenDrops|IpInDiscards'   # socket-level drops (Ch. 58, 104)
+   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'               # NIC/driver drops (Ch. 104)
+   tc -s qdisc show dev eth0                                           # qdisc type, backlog, drops, requeues per TX queue (Ch. 58 §58.2.3)
+   cat /sys/class/net/eth0/queues/tx-*/byte_queue_limits/{limit,inflight}   # BQL: inflight approaching limit = queueing, not stack, latency
+   for q in /sys/class/net/eth0/queues/rx-*; do cat $q/rps_cpus; done   # must be 0 (or housekeeping cpus) — an RPS mask naming a hot cpu = IPIs there
+   nft list ruleset; lsmod | grep -E '^nf_|^nft_|^x_tables'; cat /proc/sys/net/netfilter/nf_conntrack_count   # empty / none / absent on the hot box
+   nft add rule inet raw pre udp dport { 20000-20010 } notrack          # exempt the latency-critical flows when a ruleset must stay (Ch. 58 §58.4.4)
+   ip neigh replace 10.1.2.3 lladdr aa:bb:cc:dd:ee:ff dev eth0 nud permanent   # never ARP on the order path (Ch. 58 §58.2.3)
+   sudo ./udp_rtt spin 1 2 200000                                      # loopback echo RTT + per-CPU NET_RX/time_squeeze deltas (Ch. 58 §58.3)
+   trace-cmd record -M 2 -C x86-tsc -e irq -e napi -e net -e skb -e sock -e 'syscalls:sys_*_recvmsg' -- sleep 10   # the RX path on the IRQ cpu, TSC-stamped
    ethtool -g eth0                              # current vs max RX/TX ring sizes (Ch. 64, 67)
    ethtool -G eth0 rx 4096                       # enlarge RX ring to absorb microbursts (Ch. 64)
    ethtool -c eth0                              # interrupt coalescing settings (Ch. 67)
