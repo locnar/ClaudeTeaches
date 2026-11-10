@@ -156,7 +156,7 @@ The judgment call: move work to compile time when its inputs are genuinely known
 
 ### 21.4.2 `constexpr` tables and lookup generation
 
-The highest-leverage compile-time technique for the hot path: **generate lookup tables at compile time** so the runtime is a single indexed load (Ch. 15.4.2) instead of computation or branching. C++20's expanded `constexpr` makes this clean — write the table-builder as a normal function and assign it to a `static constexpr` array:
+The highest-leverage compile-time technique for the hot path: **generate lookup tables at compile time** so the runtime is a single indexed load (§15.4.2) instead of computation or branching. C++20's expanded `constexpr` makes this clean — write the table-builder as a normal function and assign it to a `static constexpr` array:
 
 ```cpp
 // Generate at compile time; runtime is one load. (Ch. 15 lookup tables, Ch. 37 bit tables.)

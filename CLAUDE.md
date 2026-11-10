@@ -495,47 +495,55 @@ Code & content guidelines:
   The thirteen Parts and their chapter ranges:
   - **I — Foundations & Methodology** (1–7): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup, choosing & clocking the hot-path CPU (Ch. 7, added 2026-11-10 P3-6B).
-  - **II — CPU Microarchitecture** (8–20): caches, the DRAM subsystem below L3 (Ch. 9, added 2026-11-10 P3-6 D1), …NUMA, chiplets/tiles & the core-to-core map (Ch. 18, added
-    2026-11-10 P3-6B), timekeeping.
+  - **II — CPU Microarchitecture** (8–20): caches, the DRAM subsystem below L3 (Ch. 9, added 2026-11-10 P3-6 D1),
+    data-oriented design, object layout, prefetching, pipelines, front-end & code layout, branch prediction,
+    indirect calls, TLB & huge pages, NUMA (Ch. 18), chiplets/tiles & the core-to-core map (Ch. 19, added
+    2026-11-10 P3-6B), timekeeping (Ch. 20).
   - **III — Compile-Time & Language Mechanics** (21–29): compile-time mechanics, templates & zero-cost
-    abstractions (with concepts, §19.4.6), compile-time protocol decoders (Ch. 20, added 2026-11-09 P3-5), the cost
-    of abstractions (with the calling convention and statics/TLS, §21.4.5–§21.4.6), the cost of modern idioms &
-    strings without allocation (Ch. 22, P3-5), aliasing & type punning (with object lifetime / `start_lifetime_as`),
-    the build toolchain, build systems & hermetic toolchains (Ch. 27, P3-5), and enforcing the hot-path rules —
-    static analysis, performance linters & contracts in code (Ch. 28, added 2026-11-10 P3-6C).
+    abstractions (with concepts, §22.4.6), compile-time protocol decoders (Ch. 23, added 2026-11-09 P3-5), the cost
+    of abstractions (Ch. 24, with the calling convention and statics/TLS, §24.4.5–§24.4.6), the cost of modern idioms &
+    strings without allocation (Ch. 25, P3-5), aliasing & type punning (Ch. 26, with object lifetime / `start_lifetime_as`),
+    the build toolchain (Ch. 27), build systems & hermetic toolchains (Ch. 28, P3-5), and enforcing the hot-path rules —
+    static analysis, performance linters & contracts in code (Ch. 29, added 2026-11-10 P3-6C).
   - **IV — Memory Management** (30–34): fundamentals, custom allocators, hot-path-hostile STL & cache-friendly
-    containers (with §31.4.6 small-array search, P3-6C), limit order book engineering (Ch. 32, added 2026-11-10
+    containers (Ch. 32, with §32.4.6 small-array search, P3-6C), limit order book engineering (Ch. 33, added 2026-11-10
     P3-6C), memory mapping.
-  - **V — Numerics & Data Parallelism** (35–40): fixed/floating point, bit tricks, SIMD, and streaming statistics &
-    incremental signal computation (Ch. 37, added 2026-11-10 P3-6C).
-  - **VI — Concurrency** (41–53): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
-    2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 42, P3-4), coroutines, `std::execution`,
-    correctness tooling.
+  - **V — Numerics & Data Parallelism** (35–40): fixed/floating point, fast transcendentals & approximate math
+    (Ch. 36, added 2026-11-10 P3-6 D2), bit tricks, fast hashing, checksums & key design (Ch. 38, P3-6 D2), SIMD,
+    and streaming statistics & incremental signal computation (Ch. 40, added 2026-11-10 P3-6C).
+  - **VI — Concurrency** (41–53): memory model & atomics, concurrency foundations, spinlocks, false sharing,
+    lock-free structures, seqlocks, safe memory reclamation, the Disruptor (Ch. 48), threading topologies & the hot
+    loop (Ch. 49, added 2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 50, P3-4), coroutines,
+    `std::execution`, correctness tooling.
   - **VII — OS, Scheduling & Isolation** (54–62): context switching, timers & deadlines without jitter
-    (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
-    residual noise (Ch. 52, added 2026-11-09 P3-1), warming. Power management & frequency determinism is Ch. 54 (added 2026-11-10 P3-6B).
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (63–69): native I/O, io_uring, zero-copy fast path,
-    IPC, socket tuning, advanced TCP. The datapath anatomy chapter is Ch. 58 (added 2026-11-10 P3-6B).
+    (Ch. 55, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, power management &
+    frequency determinism (Ch. 60, added 2026-11-10 P3-6B), hunting residual noise (Ch. 61, added 2026-11-09 P3-1),
+    warming.
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (63–69): native I/O, anatomy of the Linux network datapath
+    (Ch. 64, added 2026-11-10 P3-6B), io_uring, zero-copy fast path, IPC, socket tuning, advanced TCP.
   - **IX — Market Data, NIC & Fabric** (70–80): decoding, text protocols on the hot path — branch-free parsing &
-    formatting (Ch. 68, added 2026-11-10 P3-6C), reliable multicast, multicast membership & dark-feed detection
-    (Ch. 70), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
+    formatting (Ch. 71, added 2026-11-10 P3-6C), reliable multicast, multi-venue book building, normalization,
+    symbology & smart order routing (Ch. 73, added 2026-11-10 P3-6 D2), multicast membership & dark-feed detection
+    (Ch. 74, P3-1), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
   - **X — Kernel Bypass, RDMA & Transport** (81–86): eBPF/XDP, bypass, RDMA, lossless Ethernet,
-    transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (87–92): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
+    transport beyond TCP, encrypted & web-protocol venues and trading in the cloud (Ch. 86, added 2026-11-10 P3-6 D2).
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (87–92): PCIe, userspace drivers & kernel modules
+    (Ch. 88, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (93–97, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
   - **XIII — Observability & Operations in Production** (98–120): logging, in-band latency tracing
-    (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
-    topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
-    kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
-    order-entry gateway & session layer (Ch. 92, P3-6), crash handling & post-mortem (Ch. 93, P3-2),
-    capture/replay, line-rate capture & timing-faithful replay (Ch. 95, P3-6), the sequencer & replicated
-    deterministic consumers (Ch. 96, P3-4), failover without split-brain (Ch. 97, P3-6), latency-spike
-    forensics (Ch. 98, P3-2), host health telemetry and network health & drop forensics (Ch. 99–100, P3-1),
-    testing latency-critical code (Ch. 101, P3-6), performance engineering in CI & the profile lifecycle
-    (Ch. 102, P3-6), release engineering & measuring changes in production (Ch. 103, P3-6), end-to-end case
-    study (Ch. 104, the capstone, still last).
+    (Ch. 99, added 2026-11-09 P3-2), application telemetry (Ch. 100, P3-1), security, hot reload, process
+    topology (Ch. 103, with §103.4.7–§103.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
+    kill-switch path (Ch. 104, P3-4), idempotent order entry & order-state recovery (Ch. 105, P3-4), the
+    order-entry gateway & session layer (Ch. 106, P3-6), the quoting engine & market-making mechanics (Ch. 107,
+    P3-6 D2), crash handling & post-mortem (Ch. 108, P3-2), capture/replay (Ch. 109), line-rate capture &
+    timing-faithful replay (Ch. 110, P3-6), the sequencer & replicated deterministic consumers (Ch. 111, P3-4),
+    failover without split-brain (Ch. 112, P3-6), latency-spike forensics (Ch. 113, P3-2), host health telemetry
+    and network health & drop forensics (Ch. 114–115, P3-1), testing latency-critical code (Ch. 116, P3-6), the
+    exchange-simulator case study (Ch. 117, P3-6 D2), performance engineering in CI & the profile lifecycle
+    (Ch. 118, P3-6), release engineering & measuring changes in production (Ch. 119, P3-6), end-to-end case
+    study (Ch. 120, the capstone, still last).
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved
   chapter's framing/teasers and regenerating `chapters/README.md` from the chapter files.
@@ -776,9 +784,9 @@ Code & content guidelines:
   machine (authoring is on macOS; target is Linux x86-64); code/flags/`perf` commands are
   reproducible. Real measured runs must be backfilled before a chapter is final.
 - Reference machine: every chapter that shows numbers uses a single-socket Xeon Gold 6326
-  (Ice Lake-SP) — in Part II that is Ch. 8–16 and 19 — except the NUMA chapter (Ch. 17), which
+  (Ice Lake-SP) — in Part II that is Ch. 8–17 and 20 — except the NUMA chapter (Ch. 18), which
   uses a **dual-socket 2× Xeon Gold 6326** because NUMA effects need two sockets, and the chiplet chapter
-  (Ch. 18), which uses the single-socket box for its map and the dual-socket box for the cross-socket row,
+  (Ch. 19), which uses the single-socket box for its map and the dual-socket box for the cross-socket row,
   with a representative Zen 4 EPYC column because the reference machine has no chiplets. Keep the per-chapter machine description consistent with
   these unless a chapter needs otherwise.
   The full **reference toolchain and machine statement** (GCC 14.2 / Clang 18.1, Linux 6.18 LTS,

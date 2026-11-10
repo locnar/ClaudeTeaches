@@ -292,7 +292,7 @@ Three `imul`, two loads from the `.rodata` object (the seed array at offset 1024
 
 ## 38.8 References
 
-- D. E. Knuth, *The Art of Computer Programming*, Vol. 3, §6.4 — multiplicative hashing and the golden ratio (Fibonacci hashing), the three-distance theorem (§38.4.3).
+- D. E. Knuth, *The Art of Computer Programming*, Vol. 3, sec. 6.4 — multiplicative hashing and the golden ratio (Fibonacci hashing), the three-distance theorem (§38.4.3).
 - J.-P. Aumasson and D. J. Bernstein, "SipHash: a fast short-input PRF" (INDOCRYPT 2012); S. Crosby and D. Wallach, "Denial of service via algorithmic complexity attacks" (USENIX Security 2003) — hash flooding and its defence (§38.4.6).
 - Y. Collet, *xxHash* (`XXH3` design notes, `XXH_INLINE_ALL`); Wang Yi, *wyhash*; N. Vigna, *rapidhash* — the modern mixer family and their seeding (§38.2.2, §38.4.1).
 - D. Belazzougui, F. Botelho, M. Dietzfelbinger, "Hash, displace, and compress" (ESA 2009) — the CHD construction of §38.4.4; R. Pagh, "Hash and displace: efficient evaluation of minimal perfect hash functions" (WADS 1999).

@@ -206,10 +206,10 @@ Ch. 103 §103.2.2's "a single ordered log" is produced here; Ch. 103 §103.4.1's
 
 ## 111.8 Additional Reading
 
-- Kleppmann, M. *Designing Data-Intensive Applications*, Ch. 11 ("Consistency and Consensus": total order broadcast) and Ch. 13 ("Stream Processing": the log as the system of record).
+- Kleppmann, M. *Designing Data-Intensive Applications*, ch. 9 ("Consistency and Consensus": total order broadcast) and Ch. 13 ("Stream Processing": the log as the system of record).
 - Kreps, J. "The Log: What every software engineer should know about real-time data's unifying abstraction." LinkedIn Engineering, 2013.
 - Aeron Cluster documentation and Thompson's "Aeron Cluster: Fault-Tolerant Trading Systems" talks — a production replicated-log system with the same determinism requirements.
-- Cachin, C., Guerraoui, R., Rodrigues, L. *Introduction to Reliable and Secure Distributed Programming*, 2nd ed., Ch. 6 (total-order broadcast) — the formal treatment.
+- Cachin, C., Guerraoui, R., Rodrigues, L. *Introduction to Reliable and Secure Distributed Programming*, 2nd ed., ch. 6 (total-order broadcast) — the formal treatment.
 - Gray, J. "Why Do Computers Stop and What Can Be Done About It?" Tandem TR 85.7, 1985 — process pairs, the original hot standby.
 
 ---

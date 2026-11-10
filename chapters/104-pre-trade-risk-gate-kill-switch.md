@@ -71,7 +71,7 @@ A notional is `px × qty` in scaled integers (Ch. 35): 10⁸-scaled price × 10�
    position ≠ drop-copy position beyond tolerance (Ch. 105) │                                                 2. readiness → disarmed (Appendix M.1): may_send() false in every role
    P&L drawdown / loss limit (AcctState)               ├─► kill word (atomic store, release)              3. walk the LIVE-ORDER SET → one cancel per working order into the TX ring
    feed staleness budget breached (Ch. 50 §50.2.3)     │    + control event into every hot loop (Ch. 49)      (or the venue's mass-cancel message, if it has one — one message)
-   heartbeat lost / process dead (Ch. 103 §103.4.3, 89)  │    + journal record (Ch. 109) — the kill is an event 4. flatten or hold per policy (an IOC per net position, or nothing)
+   heartbeat lost / process dead (Ch. 103 §103.4.3, 108) │    + journal record (Ch. 109) — the kill is an event 4. flatten or hold per policy (an IOC per net position, or nothing)
    operator command (control ring)                    ─┘                                                     5. verify: zero working orders in the in-flight table (Ch. 105); alert (Ch. 100)
    time-to-safe-state = detect + propagate + cancels on the wire + venue acks  — §104.3 measures the middle two
 ```
@@ -282,8 +282,8 @@ void Gateway::kill(Scope scope, Reason why, std::uint64_t now) {
 - U.S. Securities and Exchange Commission. *Rule 15c3-5 — Risk Management Controls for Brokers or Dealers with Market Access*, 17 CFR 240.15c3-5 (2010), and the 2014 *Responses to Frequently Asked Questions Concerning Risk Management Controls for Brokers or Dealers with Market Access*.
 - European Commission. *Commission Delegated Regulation (EU) 2017/589 (MiFID II RTS 6)*, Arts. 12 (kill functionality), 15–20 (pre-trade controls, throttles, surveillance).
 - CME Group, *iLink 3 — Order Mass Action Request*; Nasdaq, *OUCH 5.0 Specification* and *Self Match Prevention*; FIX Trading Community, *FIX 5.0 SP2 — OrderMassCancelRequest (q)* — venue-side mass cancel and SMP.
-- McKenney, P. E. *Is Parallel Programming Hard, And, If So, What Can You Do About It?*, Ch. 11 (RCU) — the publication mechanism for limits.
-- GCC manual, §"Built-in Functions to Perform Arithmetic with Overflow Checking"; Intel SDM Vol. 1 §3.4.3 (flags) — the cost of a checked multiply.
+- McKenney, P. E. *Is Parallel Programming Hard, And, If So, What Can You Do About It?*, ch. 9 (RCU) — the publication mechanism for limits.
+- GCC manual, §"Built-in Functions to Perform Arithmetic with Overflow Checking"; Intel SDM Vol. 1 sec. 3.4.3 (flags) — the cost of a checked multiply.
 - Ch. 120 §120.3 and Ch. 1 §1.2.3 of this book — the budget rows this chapter implements.
 
 ## 104.8 Additional Reading

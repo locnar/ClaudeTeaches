@@ -26,7 +26,7 @@ The chapter has two halves that depend on each other. §61.2 is the **noise cata
    residual timer tick              /proc/interrupts LOC increments; timer:tick_stop     a 2nd runnable task, perf event, posix timer or
                                     tracepoint fires with success=0 + a dependency mask  unstable clocksource on the CPU — remove it (Ch. 59)
    ksoftirqd/N, softirqs            sched_switch -> ksoftirqd/N; irq:softirq_entry       softirq *raised on this CPU* — route the IRQ/net
-                                                                                         queue away (Ch. 56, 64 §64.4.2, 67); RT: ksoftirqd at RT
+                                                                                         queue away (Ch. 56, 64 §64.4.2, 75); RT: ksoftirqd at RT
    kworker/N:* (per-CPU work)       sched_switch -> kworker/N:x; workqueue:* events      per-CPU work is queued *from* this CPU (a timer,
                                                                                          a driver, vmstat) — find the queuer in the trace
    unbound kworker/u*               sched_switch -> kworker/uNN:x                        /sys/devices/virtual/workqueue/cpumask = housekeeping

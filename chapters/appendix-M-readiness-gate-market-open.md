@@ -160,7 +160,7 @@ Attestation (M.2) proves the *configuration* is unchanged; it does not prove the
    rdtsc / fenced rdtscp cost (Ch. 20)                         ~6 ns / ~12–25 ns                              within ±10 %
    null syscall (Ch. 54; mitigations= as deployed)             ~50–100 ns (off) / ~150–400 ns (on)            within ±10 %; a band change = mitigation drift
    uncontended atomic RMW; cross-core ping-pong (Ch. 41, 44)   ~5–10 ns; ~40–100 ns per transfer              within ±15 %
-   clock_gettime via vDSO (Ch. 6 §6.4.4, 17)                   ~18–20 ns                                      > 100 ns = clocksource is not tsc: FAIL
+   clock_gettime via vDSO (Ch. 6 §6.4.4, 20)                   ~18–20 ns                                      > 100 ns = clocksource is not tsc: FAIL
    cyclictest -m -p 80 -a <hot> -i 200 -D 60  (Ch. 59)          max ≤ ~2–5 µs                                  max ≤ baseline max + 2 µs; a 10× max = FAIL
    gapdetect --seconds 60 (Ch. 61 §61.3)                        worst gap ≤ a few µs                           worst ≤ baseline worst + 2 µs
    effective core frequency (TSC cycles per fixed work unit)    2.9 GHz = base                                 within ±1 % (turbo off, no throttle)

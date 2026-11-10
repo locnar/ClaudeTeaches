@@ -242,7 +242,7 @@ With the taxonomy in place, the earlier chapters' statements become references: 
 - Brooker, M. "Cache, Conflation and the Cost of Freshness" (blog) — the completeness-vs-freshness trade in another domain.
 - CME Group, *MDP 3.0 Market Data — Conflation* and ICE, *iMpact Conflated Feeds* documentation — venue-side conflation, and what it means for a consumer that conflates again.
 - Welsh, M., Culler, D., Brewer, E. "SEDA: An Architecture for Well-Conditioned, Scalable Internet Services." SOSP 2001 — staged pipelines with per-stage admission control and load shedding; the ideas, minus the thread pools.
-- Gregg, B. *Systems Performance*, 2nd ed., Ch. 2 (queueing theory for practitioners).
+- Gregg, B. *Systems Performance*, 2nd ed., ch. 2 (queueing theory for practitioners).
 - Agrona's `ManyToOneRingBuffer` and `BroadcastTransmitter` source — a lossless MPSC and a lapped-reader broadcast ring, with the exact "lapped" detection the OVERWRITE row needs.
 
 ---

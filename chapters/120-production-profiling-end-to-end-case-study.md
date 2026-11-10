@@ -58,11 +58,11 @@ The capstone measurement: decompose the **end-to-end tick-to-trade latency distr
 |---|---|---|---:|---:|
 | **Wire → NIC → userspace** | packet arrives, kernel-bypass RX (poll-mode) | Ch. 75, 82 | ~700 ns | ~1 µs |
 | **Decode / normalize** | parse ITCH/SBE off the wire, zero-copy | Ch. 70, 37 | ~80 ns | ~200 ns |
-| **Book update / strategy** | update order book, run decision (state machine) | Ch. 33 (the book: ~16 ns/event measured), 37 (the signals: ~19 ns/event), 97, 9–14 | ~150 ns | ~500 ns |
-| **Pre-trade risk** | limit/position/kill-switch check | Ch. 104 (built there: ~11–15 ns measured), 84, 86 | ~40 ns | ~120 ns |
-| **Order encode → TX** | build order message, kernel-bypass TX | Ch. 71 (the template encoder: ~27 ns/message measured), 100, 78 | ~500 ns | ~700 ns |
+| **Book update / strategy** | update order book, run decision (state machine) | Ch. 33 (the book: ~16 ns/event measured), Ch. 40 (the signals: ~19 ns/event), Ch. 103, Ch. 10–15 | ~150 ns | ~500 ns |
+| **Pre-trade risk** | limit/position/kill-switch check | Ch. 104 (built there: ~11–15 ns measured), Ch. 101, Ch. 103 | ~40 ns | ~120 ns |
+| **Order encode → TX** | build order message, kernel-bypass TX | Ch. 71 (the template encoder: ~27 ns/message measured), Ch. 106, Ch. 82 | ~500 ns | ~700 ns |
 | **End-to-end tick-to-trade** | wire-in to wire-out (measured, not summed) | (all) | **~1.5 µs** | **~2.0 µs** |
-| **Quote-pull** (maker side) | underlying tick wire-in → first cancel of the dangerous side wire-out; the same stages plus the chain walk's position (~7.6 cycles/series ahead in priority order) | Ch. 107 §107.4.2 (defined and stamped there), 106 | **~1.6 µs** for a top-priority series | **~2.5 µs**; the whole 2,000-series chain is wire-bound: ~29 µs of 10G serialization for 4,000 binary cancels vs one mass-cancel |
+| **Quote-pull** (maker side) | underlying tick wire-in → first cancel of the dangerous side wire-out; the same stages plus the chain walk's position (~7.6 cycles/series ahead in priority order) | Ch. 107 §107.4.2 (defined and stamped there), Ch. 106 | **~1.6 µs** for a top-priority series | **~2.5 µs**; the whole 2,000-series chain is wire-bound: ~29 µs of 10G serialization for 4,000 binary cancels vs one mass-cancel |
 
 The end-to-end p99.9 is *less* than the sum of the stage p99.9s (~2.5 µs): the stages' tails rarely coincide, so the measured end-to-end tail is roughly the sum of p50s plus the dominant stage's excess — which is why the end-to-end row is measured at the wire, never summed. The Ch. 103 process-per-role topology would add ~3 shared-memory ring hops at ~50–150 ns each (Ch. 67; Ch. 49 §49.3 measures the hop and the topologies) — the containment-vs-latency trade of §103.2.1, paid deliberately or co-located after a benchmark like this one; a sequencer in front of those roles (Ch. 111) replaces the point-to-point rings with one stamped stream for the price of one such hop, and makes the gateway, risk and journal replicas of one fold.
 

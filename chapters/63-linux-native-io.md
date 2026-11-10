@@ -2,7 +2,7 @@
 
 # Chapter 63 — Linux Native I/O
 
-> **Prerequisites:** Ch. 54 (syscalls & context switches — I/O is where they happen; blocking I/O sleeps), Ch. 1 (latency vs throughput), Ch. 3 (measuring round-trip), Ch. 6 (the box), Ch. 68-preview (socket tuning). The busy-poll vs block decision (Ch. 54.4.2) is central here.
+> **Prerequisites:** Ch. 54 (syscalls & context switches — I/O is where they happen; blocking I/O sleeps), Ch. 1 (latency vs throughput), Ch. 3 (measuring round-trip), Ch. 6 (the box), Ch. 68-preview (socket tuning). The busy-poll vs block decision (§54.4.2) is central here.
 >
 > **Leads into:** Ch. 65 (io_uring — the completion-based successor), Ch. 67 (IPC), Ch. 68 (socket/TCP tuning), Ch. 75 (NIC offloads / busy-poll), Ch. 81–82 (XDP / kernel bypass — what you graduate to when the kernel stack is too slow). Opens **Part VIII**: this is the *baseline* kernel I/O path that the rest of the Part improves on or bypasses.
 
@@ -180,7 +180,7 @@ Each syscall is a kernel crossing (~hundreds of ns — Ch. 54); **batching amort
 
 - **Process all ready events per `epoll_wait`.** `epoll_wait` returns *many* ready fds in one call; handle *all* of them before calling `epoll_wait` again — amortizing the `epoll_wait` syscall over the whole batch (the Disruptor batching idea — Ch. 48 — at the syscall level). Don't call `epoll_wait` after each single event.
 - **Scatter/gather and multi-message syscalls.** `readv`/`writev` (scatter/gather — one syscall moves data to/from *multiple* buffers, e.g. header + body without a copy — Ch. 70), and **`recvmmsg`/`sendmmsg`** (receive/send *multiple* datagrams in one syscall — huge for UDP market-data feeds, Ch. 70: one syscall drains many packets). These cut the syscall count per message dramatically on high-rate feeds.
-- **Batch the application work too.** Having received a batch of messages (via `recvmmsg` or draining an ET socket), process them as a batch through the pipeline (Ch. 48) — amortizing not just the syscall but the per-message overhead. The batch grows under load (a burst), self-correcting (Ch. 48.4.2).
+- **Batch the application work too.** Having received a batch of messages (via `recvmmsg` or draining an ET socket), process them as a batch through the pipeline (Ch. 48) — amortizing not just the syscall but the per-message overhead. The batch grows under load (a burst), self-correcting (§48.4.2).
 - **Coalesce writes.** Buffer small outgoing messages and send them with one `writev`/`sendmmsg` where latency allows — fewer syscalls. (On the *order* path, latency usually trumps batching — send immediately; on bulk/non-critical paths, batch.)
 - **The limit — batching is amortization, not elimination.** Batching reduces *syscalls per message* but doesn't remove the per-syscall cost or the stack traversal. It's the right optimization within the kernel model (and io_uring — Ch. 65 — batches *submissions* even better), but the kernel stack floor remains (§63.3) — bypass (Ch. 82) is the elimination.
 

@@ -330,8 +330,8 @@ The `std::terminate` path (an uncaught exception, a `noexcept` violation, `std::
 
 1. Linux man pages: `signal-safety(7)` (the async-signal-safe function list), `sigaction(2)`, `sigaltstack(2)`, `sigreturn(2)`, `core(5)` (`core_pattern` specifiers, pipe semantics, `core_pipe_limit`, `coredump_filter` bits), `madvise(2)` (`MADV_DONTDUMP`/`MADV_DODUMP`), `prctl(2)` (`PR_SET_DUMPABLE`), `proc(5)`, `getrlimit(2)` (`RLIMIT_CORE`), `eventfd(2)`, `backtrace(3)` (the first-call `dlopen` note).
 2. Linux kernel, `fs/coredump.c` (the dump path: `do_coredump`, the `ispipe` limit handling), `arch/x86/kernel/signal.c` and `fpu/signal.c` (`setup_rt_frame`, the XSAVE sigframe), `Documentation/admin-guide/sysctl/kernel.rst` (`core_pattern`, `core_pipe_limit`, `core_uses_pid`).
-3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 1 Ch. 15 "Managing State Using the XSAVE Feature Set" (XSAVE area layout, the init and modified optimizations).
-4. GNU C Library Manual, §34 "Signal Handling" (async-signal safety, `sigaltstack`), and the `backtrace` documentation; libgcc `unwind.h` (`_Unwind_Backtrace`, `_Unwind_GetIP`).
+3. Intel Corporation. *Intel® 64 and IA-32 Architectures Software Developer's Manual*, Vol. 1 ch. 13 "Managing State Using the XSAVE Feature Set" (XSAVE area layout, the init and modified optimizations).
+4. GNU C Library Manual, the "Signal Handling" chapter (async-signal safety, `sigaltstack`), and the `backtrace` documentation; libgcc `unwind.h` (`_Unwind_Backtrace`, `_Unwind_GetIP`).
 5. nongnu.org libunwind documentation, `libunwind(3)` — "Local unwinding" and the notes on signal-handler use with `UNW_LOCAL_ONLY`.
 6. systemd: `systemd-coredump(8)`, `coredump.conf(5)`, `coredumpctl(1)`.
 7. Google Breakpad and Chromium Crashpad project documentation — the minidump format, out-of-process handlers, `minidump_stackwalk`.

@@ -157,8 +157,8 @@ Write the verdict — mechanism, evidence rows, knob or fix, gate entry — into
 
 ## N.9 Additional Reading
 
-- Google SRE, *Site Reliability Engineering*, Ch. 16–17 "Managing Incidents", "Postmortem Culture" — the organisational half this appendix leaves out.
-- Gregg, B. *Systems Performance*, 2nd ed., Ch. 2 "Methodologies" — the drill-down and USE methods the first look follows.
+- Google SRE, *Site Reliability Engineering*, ch. 14–15 "Managing Incidents", "Postmortem Culture" — the organisational half this appendix leaves out.
+- Gregg, B. *Systems Performance*, 2nd ed., ch. 2 "Methodologies" — the drill-down and USE methods the first look follows.
 - Allspaw, J. "Blameless PostMortems and a Just Culture", Etsy Code as Craft — why the bundle records evidence rather than conclusions.
 - Red Hat, *sos report* documentation — the general-purpose ancestor of N.5; what it collects, and why a trading host needs its own bounded version.
 

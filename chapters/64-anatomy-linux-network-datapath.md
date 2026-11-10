@@ -279,7 +279,7 @@ Item 5 is the one that surprises: the hot thread's telemetry `sendto()` to a loc
 ### 64.4.3 Trimming stages on the sockets that stay in the kernel
 
 ```
-   ethtool -K eth0 gro off lro off                                 # stage 5: no batch hold (Ch. 68 §68.3, 67)
+   ethtool -K eth0 gro off lro off                                 # stage 5: no batch hold (Ch. 68 §68.3, 75)
    ethtool -C eth0 rx-usecs 0 rx-frames 1 adaptive-rx off tx-usecs 0   # stage 1: an IRQ per packet (Ch. 75)
    sysctl net.core.default_qdisc=pfifo_fast                        # stage TX-3: no pacing qdisc by default (fq only where Ch. 79 needs it)
    tc qdisc replace dev eth0 root mq                               # per-queue pfifo_fast under mq; check with tc -s qdisc

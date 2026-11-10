@@ -43,7 +43,7 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 13, 14).
    perf stat -a -I 1000 -e 'uncore_iio/data_req_of_cpu.mem_write.part0/'           # PCIe inbound writes per IIO stack = NIC DMA (Ch. 76, 87)
    perf stat -a -I 1000 -e power/energy-pkg/,power/energy-ram/                       # RAPL joules → watts: is the socket power-limited? (Ch. 6, 114)
    perf stat -C 5 -e core_power.lvl0_turbo_license,core_power.lvl1_turbo_license,core_power.lvl2_turbo_license -- sleep 10   # AVX licence time (Ch. 39) — ONE attach IPI; not -I
-   perf stat -a -I 1000 -e msr/smi/                                                  # SMI count per second — must be 0 (Ch. 6 §6.4.4, 46, 82)
+   perf stat -a -I 1000 -e msr/smi/                                                  # SMI count per second — must be 0 (Ch. 6 §6.4.4, 61, 114)
    perf record -e ibs_op//  -c 100000 ./app; perf report                            # AMD IBS: precise op sampling (what perf mem/c2c use on Zen)
    perf record -e ibs_fetch// ./app                                                  # AMD IBS: front-end sampling (Ch. 14)
    perf stat -M PipelineL1 ./app                                                     # Zen 4 pipeline-utilization top-down (names: perf list metricgroup)

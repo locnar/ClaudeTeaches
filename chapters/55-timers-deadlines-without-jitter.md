@@ -268,7 +268,7 @@ void housekeeping_loop(std::chrono::nanoseconds period) {
 ## 55.8 Additional Reading
 
 - Brown, A. "Timer Wheels at Scale" (CppCon talks on user-space timers; also the Netty `HashedWheelTimer` and Kafka purgatory designs) — production user-space wheels and their tuning.
-- Love, R. *Linux Kernel Development*, 3rd ed., Ch. 13 (Timers and Time Management) — the kernel side, readable.
+- Love, R. *Linux Kernel Development*, 3rd ed., ch. 11 (Timers and Time Management) — the kernel side, readable.
 - de Oliveira, D. B. "Real-time Linux Analysis tools: `rtla`" (kernel docs and 2022 talks) — attributing a wake-up's lateness.
 - Aeron's `DeadlineTimerWheel` (Agrona) source — a single-level wheel polled from a duty cycle, with the exact bounded-work-per-poll interface of §55.4.1.
 - Dean, J. "Achieving Rapid Response Times in Large Online Services" (2012) — hedged requests as deadline-driven design at a different scale.

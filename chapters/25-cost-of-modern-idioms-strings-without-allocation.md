@@ -231,7 +231,7 @@ Compare with `std::string::operator==`: a length compare, a `memcmp@PLT` call an
 - P0323R12, *`std::expected`* (V. Botet, J. Bastien) and [optional] — the value-plus-discriminant layout that keeps both in registers when `T` is trivial (§25.2.3).
 - P0792R14, *`function_ref`: a type-erased callable reference* (V. Zverovich, T. Brindle, et al., C++26) and P0288R9, *`move_only_function`* (M. Klimek et al., C++23) — the lighter erasers §25.4.1 points at, measured in Ch. 16 §16.4.5.
 - P0843R14, *`std::inplace_vector`* (G. Dos Reis et al., C++26) — the standard fixed-capacity container behind `FixedString<N>` (§25.4.4).
-- System V Application Binary Interface, AMD64 Architecture Processor Supplement, §3.2.3 *Parameter Passing* — the classification that puts a 16-byte `string_view` in two registers (§25.2.3; Ch. 24 §24.4.5).
+- System V Application Binary Interface, AMD64 Architecture Processor Supplement, sec. 3.2.3 *Parameter Passing* — the classification that puts a 16-byte `string_view` in two registers (§25.2.3; Ch. 24 §24.4.5).
 
 ## 25.9 Additional Reading
 

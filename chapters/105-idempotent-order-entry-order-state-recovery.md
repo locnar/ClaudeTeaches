@@ -238,7 +238,7 @@ Ch. 22 §22.4.5's type-state makes the illegal transitions unrepresentable: a `S
 
 ## 105.8 Additional Reading
 
-- Kleppmann, M. *Designing Data-Intensive Applications*, Ch. 13–14 (exactly-once semantics, idempotence, reconciliation) — the general theory.
+- Kleppmann, M. *Designing Data-Intensive Applications*, ch. 11–12 (exactly-once semantics, idempotence, reconciliation) — the general theory.
 - Onyx / Chronicle Software, "Order Management at Low Latency" (blog series) — a production in-flight table.
 - FIA. *Best Practices for Automated Trading Risk Controls* §"Order Management and Cancel-on-Disconnect" — operational practice around unknown orders.
 - Nasdaq, *Self Match Prevention and Cancel-on-Disconnect* technical notes — the venue-side safety nets.

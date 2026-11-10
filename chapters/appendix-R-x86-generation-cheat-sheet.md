@@ -100,9 +100,9 @@ Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-funct
    DSA           Data Streaming Accelerator: memcpy/memmove/fill,   work queues via ENQCMD/       capture-writer and replay copies, journal
                  CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 109) — bulk copies off the core; a
                  spaces                                             polling or interrupt           submission is ~µs round trip: never a per-message op
-   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 95 §95.4.7),
+   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 109 §109.4.8),
                  decompression (Deflate), filter/scan                                              never on the order path
-   QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 85), VPN; a ~10 µs
+   QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 86), VPN; a ~10 µs
                  asymmetric), compression                           API, OpenSSL engine             round trip, so only for throughput paths
    DLB           Dynamic Load Balancer: hardware queue manager       memory-mapped producer/        a hardware MPMC queue with ordering/atomic
                  (enqueue/dequeue, ordering, load balance across    consumer ports (DPDK eventdev)  scheduling across cores — Ch. 49's shard fan-out in

@@ -22,7 +22,7 @@ But "zero-cost" is a claim that must be **verified, not assumed**, and the abstr
 
 The unifying idea: **replace runtime decisions with compile-time ones by encoding the "varying" part in the *type*.** Where runtime polymorphism stores the choice in data (a vptr, a function pointer) and resolves it per call, static polymorphism encodes it in a template parameter and resolves it *once*, at instantiation, leaving the optimizer a fully-concrete program. Three patterns, increasing in scope:
 
-**CRTP (Curiously Recurring Template Pattern) — static polymorphism.** A base class templated on its derived type, so the base can call into the derived *without* a virtual call (introduced in Ch. 16.4.2):
+**CRTP (Curiously Recurring Template Pattern) — static polymorphism.** A base class templated on its derived type, so the base can call into the derived *without* a virtual call (introduced in §16.4.2):
 
 ```cpp
 template <class Derived>
@@ -141,7 +141,7 @@ The default tool for compile-time-known polymorphism on the hot path (the §22.3
 
 - **Template-method pattern, statically.** The CRTP base holds the *shared* control flow and calls derived hooks via `static_cast<Derived*>(this)->hook()` — every hook inlined. Ideal for a family of strategies/handlers/parsers sharing skeleton logic but differing in specifics, chosen at compile time.
 - **Static interface / mixins.** A CRTP base can inject a whole interface implemented in terms of a few derived primitives (e.g. provide `!=`, `>`, `>=` from the derived's `<` and `==` — the pre-C++20 "comparable" mixin; provide iterator boilerplate from a few core ops). Reusable behavior, zero indirection.
-- **When CRTP fits vs `virtual` (Ch. 16).** CRTP requires the concrete type be known at the call site at *compile* time — true for the hot path's strategies/policies/protocols (a build-time choice). When the type genuinely comes from runtime (a plugin loaded by config, heterogeneous objects in one container), CRTP can't apply; use a *closed-set* runtime mechanism (`std::variant`, Ch. 16.4.3) or an (devirtualized) virtual call. Don't contort runtime selection into CRTP.
+- **When CRTP fits vs `virtual` (Ch. 16).** CRTP requires the concrete type be known at the call site at *compile* time — true for the hot path's strategies/policies/protocols (a build-time choice). When the type genuinely comes from runtime (a plugin loaded by config, heterogeneous objects in one container), CRTP can't apply; use a *closed-set* runtime mechanism (`std::variant`, §16.4.3) or an (devirtualized) virtual call. Don't contort runtime selection into CRTP.
 - **Caveats.** Each derived type instantiates the base (code size — §22.6); CRTP types aren't a common base you can store heterogeneously (no `vector<Base*>` — that's the runtime-polymorphism trade); and the `static_cast` is only valid when the derived really is the template argument (a real-but-rare footgun).
 
 ### 22.4.2 Expression templates
@@ -322,7 +322,7 @@ A concept checks **syntax, not semantics** — `LockingPolicy` is satisfied by a
 
 There is no trace of `StrategyBase`, no `static_cast`, no call — the abstraction is *gone*. This is the proof to demand: **diff the asm of the abstracted and hand-written versions; zero-cost means they're the same.**
 
-**The runtime-polymorphic version, for contrast.** The `virtual` form keeps the indirect call (Ch. 16.5) — the abstraction did *not* compile away:
+**The runtime-polymorphic version, for contrast.** The `virtual` form keeps the indirect call (§16.5) — the abstraction did *not* compile away:
 
 ```asm
         mov     rax, qword ptr [rdi]        ; load vptr

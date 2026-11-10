@@ -165,7 +165,7 @@ Getting the bytes from NIC to decoder without copies:
 - **Parse in place — no copy from the receive buffer.** Decode directly out of the socket/ring receive buffer (§70.2.2) — the overlay-struct/`bit_cast` loads read the buffer in place. Don't `memcpy` the packet to a "work buffer" first (a wasted copy — Ch. 8, 30). The packet's bytes are parsed where they landed.
 - **Scatter/gather (`recvmmsg`, `readv` — Ch. 63).** `recvmmsg` receives *many* datagrams in one syscall (Ch. 63 — essential for draining a microburst, §70.2.4); `readv`/scatter-gather splits a message into header+body buffers without a copy. These cut syscalls and copies on the receive path.
 - **Kernel-bypass zero-copy receive (Ch. 75, 82).** With kernel bypass (ef_vi/DPDK — Ch. 82) or `AF_XDP` (Ch. 81), packets DMA directly into user-space buffers the application reads — *true* zero-copy from wire to decoder, no kernel copy at all. The ultimate receive path for the hot feed; the decoder overlays its structs on the NIC's DMA buffer.
-- **Process the batch through the pipeline (Ch. 48).** A batch of received messages flows as a batch through decode → book → strategy (Ch. 48's batching) — amortizing per-message overhead and self-correcting under burst (Ch. 48.4.2). Decode is the first batched stage.
+- **Process the batch through the pipeline (Ch. 48).** A batch of received messages flows as a batch through decode → book → strategy (Ch. 48's batching) — amortizing per-message overhead and self-correcting under burst (§48.4.2). Decode is the first batched stage.
 - **NIC hardware timestamps (Ch. 75, 78).** Capture the NIC's hardware receive timestamp (Ch. 75) per packet for accurate latency measurement (Ch. 20, 78) and sequencing — read it from the packet metadata, not a software clock (Ch. 20).
 
 ### 70.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 72)
@@ -217,7 +217,7 @@ The zero-copy overlay's promise — "field access is just a load" — is verifia
         ... read the field ...
 ```
 
-**The dispatch on message type.** The per-message `switch (type)` should be a jump table or a data lookup (Ch. 15–16), not a mispredicting branch chain — verify it (Ch. 16.5):
+**The dispatch on message type.** The per-message `switch (type)` should be a jump table or a data lookup (Ch. 15–16), not a mispredicting branch chain — verify it (§16.5):
 
 ```asm
         movzx   eax, byte ptr [rdi]         ; message type byte
