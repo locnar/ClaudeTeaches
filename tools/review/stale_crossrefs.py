@@ -66,6 +66,8 @@ STEPS = [
     ("insert", 31),  # Ch. 32 limit-order-book-engineering
     ("insert", 36),  # Ch. 37 streaming-statistics-incremental-signals
     ("insert", 67),  # Ch. 68 branch-free-parsing-formatting
+    ("insert", 8),  # Ch. 9 dram-subsystem-below-l3
+    ("insert", 83),  # Ch. 84 userspace-drivers-kernel-modules
     # INSERT_STEPS_END
 ]
 def old2new(n):
