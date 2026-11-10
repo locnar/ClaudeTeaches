@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1–3. You reason about the distribution (Ch. 1), you can find a bottleneck with the PMU (Ch. 2), and you can build a trustworthy microbenchmark (Ch. 3). You do **not** need to be an assembly programmer — this chapter teaches you to *read* x86-64, not write it. For the hands-on parts: [Compiler Explorer](https://godbolt.org) (nothing to install) and/or a local GCC/Clang.
 >
-> **Leads into:** This is the verification skill the rest of the book leans on. Every "verify the codegen" section from here forward (Ch. 10–15, 21–25, 32–35, 46, 64, 88) assumes you can read the asm in this chapter. Build-flag effects on that asm are Ch. 26.
+> **Leads into:** This is the verification skill the rest of the book leans on. Every "verify the codegen" section from here forward (Ch. 10–15, 21–25, 33–36, 47, 65, 89) assumes you can read the asm in this chapter. Build-flag effects on that asm are Ch. 26.
 
 ---
 
@@ -44,7 +44,7 @@ Knowing the ABI register order (`rdi` = arg1, `rsi` = arg2, …, `rax` = return)
 
 So when the asm of `f(Order)` reads `[rsp + 16]` where you expected `rdi`, or an `expected<Fill, Err>` return writes three stores through `[rdi]` instead of setting `rax:rdx`, the signature — not the optimizer — decided it: the `Order` is 32 bytes, the `expected` is 24. Ch. 23 §23.4.5 measures what each case costs and how to keep hot-path value types on the register side of the line.
 
-**SIMD registers** — `xmm0–xmm15` (128-bit, SSE), widened to `ymm` (256-bit, AVX/AVX2) and `zmm` (512-bit, AVX-512). When you see `ymm` in a loop, the compiler vectorized it (Ch. 34). Their presence or absence is the single fastest way to confirm vectorization.
+**SIMD registers** — `xmm0–xmm15` (128-bit, SSE), widened to `ymm` (256-bit, AVX/AVX2) and `zmm` (512-bit, AVX-512). When you see `ymm` in a loop, the compiler vectorized it (Ch. 35). Their presence or absence is the single fastest way to confirm vectorization.
 
 **Instruction shape.** This book uses **Intel syntax** (`-masm=intel`), which reads `op dest, src` (destination first) — generally cleaner than AT&T's `op src, dest` with its `%`/`$` sigils. The handful of mnemonics that cover most hot loops:
 
@@ -64,7 +64,7 @@ The leap from "I know the mnemonics" to "I can read optimized code" is accepting
 - **Dead-code elimination** — anything whose result is never observed is deleted. This is the Ch. 3 benchmark hazard, seen from the asm side.
 - **Constant folding / propagation** — `square(7)` becomes `49` at compile time; computations on known constants vanish.
 - **Strength reduction** — expensive ops become cheap ones: `x * 8` → `shl ... 3`, `x / 4` → `shr` for unsigned (for *signed* `int` it is `sar` plus a `lea`/`test`/`cmovns` fix-up, because C++ division truncates toward zero while the shift rounds toward −∞ — one reason to prefer unsigned indices and quantities in hot loops), multiply-by-constant → `lea`/shift/add sequences.
-- **Loop transforms** — **unrolling** (one source iteration becomes 4 or 8 in the asm, to expose ILP and amortize loop overhead — Ch. 12), **vectorization** (the loop body becomes SIMD over `ymm`/`zmm` — Ch. 34), **hoisting** (loop-invariant work moved out), and bounds-check elision.
+- **Loop transforms** — **unrolling** (one source iteration becomes 4 or 8 in the asm, to expose ILP and amortize loop overhead — Ch. 12), **vectorization** (the loop body becomes SIMD over `ymm`/`zmm` — Ch. 35), **hoisting** (loop-invariant work moved out), and bounds-check elision.
 - **Branch → conditional move** — a small `if` becomes a branchless `cmov` when the compiler judges the branch unpredictable or the bodies cheap (Ch. 14).
 - **Register allocation & spilling** — values live in registers when they can; when there aren't enough, the compiler **spills** to the stack (`mov [rsp+N], reg` / `mov reg, [rsp+N]`). Spills in a hot loop are a smell worth investigating (too many live values, failed inlining, missing `restrict` — Ch. 25).
 
@@ -153,7 +153,7 @@ Everything you need to read a loop is here. The **loop body is the block between
 The discipline when reading any hot loop:
 - **Isolate the loop body** (label → back-edge branch) and **count the instructions** — fewer is usually (not always) better; compare to your mental model.
 - **Find the dependency chain** — `s += a[i]` is a single serial chain through `rax`, which caps throughput at one add per latency (Ch. 12 shows how unrolling into multiple accumulators breaks this).
-- **Look for the smells**: `call` (inlining failed), `div`/`idiv` (expensive — Ch. 33), `mov [rsp+…]` round-trips (spilling), or memory operands where you expected registers.
+- **Look for the smells**: `call` (inlining failed), `div`/`idiv` (expensive — Ch. 34), `mov [rsp+…]` round-trips (spilling), or memory operands where you expected registers.
 
 ### 4.4.2 Confirming inlining, vectorization, and elision
 
@@ -175,7 +175,7 @@ The three checks you'll run most:
         vpaddq     xmm0, xmm0, xmm1                      ;     back down to one sum at the end
 ```
 
-That single excerpt teaches two chapters at once: the `ymm`/`vpaddq` confirm **vectorization** (Ch. 34 — four 64-bit lanes added at a time), and the *four independent* `ymm0..ymm3` accumulators are the compiler **breaking the dependency chain** (Ch. 12) so the four packed adds can issue in parallel. If you needed this loop vectorized and saw the scalar `add rax, rdx` from §4.4.1 instead, you'd know to investigate (aliasing? `-march`? a loop-carried dependency? — Ch. 25, 26, 34). For the compiler's own report use `-Rpass=loop-vectorize` / `-Rpass-missed=loop-vectorize` (Clang) or `-fopt-info-vec` (GCC).
+That single excerpt teaches two chapters at once: the `ymm`/`vpaddq` confirm **vectorization** (Ch. 35 — four 64-bit lanes added at a time), and the *four independent* `ymm0..ymm3` accumulators are the compiler **breaking the dependency chain** (Ch. 12) so the four packed adds can issue in parallel. If you needed this loop vectorized and saw the scalar `add rax, rdx` from §4.4.1 instead, you'd know to investigate (aliasing? `-march`? a loop-carried dependency? — Ch. 25, 26, 35). For the compiler's own report use `-Rpass=loop-vectorize` / `-Rpass-missed=loop-vectorize` (Clang) or `-fopt-info-vec` (GCC).
 
 **Elision (and dead-code).** Confirm that bounds checks, redundant copies, or zero-cost-abstraction wrappers compiled away to nothing — the promise of Ch. 21–23. If a `std::span::operator[]` or a `std::unique_ptr` deref produced *extra* instructions versus the raw pointer, you've found a leak in the abstraction. Conversely, if the work you *wanted* measured vanished, that's the Ch. 3 benchmark bug staring back at you from the asm.
 
@@ -228,7 +228,7 @@ The habit: when a change *should* be free or *should* be faster, prove it in the
 2. **Read a loop.** Paste the `sum` function. View it at `-O2 -fno-vectorize` (Clang; `-O2 -fno-tree-vectorize` on GCC) and at `-O2 -march=x86-64-v3` (Clang; on GCC use `-O3 -march=x86-64-v3`, since GCC's `-O2` cost model does not vectorize this loop). Identify the loop body in each. How many `int`s are processed per iteration in each version? Find the multiple accumulators in the vectorized one and explain (Ch. 12) why they exist.
 3. **Confirm a branchless transform.** Compile `x < 0 ? -x : x` and `a > b ? a : b` at `-O2`. Find the `cmov`. Now write the same logic with an explicit `if`/`else` and bitmask tricks — does the compiler converge to the same asm? (Preview of Ch. 14.)
 4. **Catch a failed inline.** Write a small function and call it in a loop; confirm it's inlined (no `call`). Now mark it `[[gnu::noinline]]` and re-read — find the `call`, the argument setup in `rdi`/`rsi`, and the `ret`. Add `-Rpass-missed=inline` and read the compiler's reason on a case where it *won't* inline.
-5. **Spot the expensive instruction.** Write `int f(int x){ return x / 7; }` and `int g(int x){ return x / 8; }`. Diff the asm. Which became a shift (and what are the extra `lea`/`test`/`cmovns` instructions around it doing for negative `x`?), which a `mul`/`shr` magic-number division, and is there a real `idiv` anywhere? (Preview of Ch. 33.)
+5. **Spot the expensive instruction.** Write `int f(int x){ return x / 7; }` and `int g(int x){ return x / 8; }`. Diff the asm. Which became a shift (and what are the extra `lea`/`test`/`cmovns` instructions around it doing for negative `x`?), which a `mul`/`shr` magic-number division, and is there a real `idiv` anywhere? (Preview of Ch. 34.)
 
 **Checklist — verifying codegen**
 
@@ -256,7 +256,7 @@ The habit: when a change *should* be free or *should* be faster, prove it in the
 - *x86-64 Assembly Language Programming with Ubuntu* (Ed Jorgensen, free) and the *Felix Cloutier x86 instruction reference* (felixcloutier.com/x86) — quick lookups when you hit an unfamiliar mnemonic.
 - M. Godbolt, *"Correct by Construction"* and assorted blog posts on reading codegen; the Compiler Explorer documentation on the assembly-mapping and diff views.
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — pairs asm reading with the PMU-driven workflow of Ch. 2.
-- Ch. 26 (*Build Toolchain for Speed*) — the flags (`-march`, LTO, PGO, inlining controls) that change the asm you just learned to read; and Ch. 34 (*SIMD*) for the vector instructions in depth.
+- Ch. 26 (*Build Toolchain for Speed*) — the flags (`-march`, LTO, PGO, inlining controls) that change the asm you just learned to read; and Ch. 35 (*SIMD*) for the vector instructions in depth.
 - Ch. 5 (*Debugging Low-Latency & Optimized Code*) — where reading asm becomes a debugging skill: recovering `<optimized out>` state from registers and disassembly in a live/replayed process.
 
 ---
