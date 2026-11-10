@@ -6,7 +6,7 @@
 >
 > **Prerequisites:** Ch. 8 (the memory hierarchy — NUMA adds a *second axis* of memory latency: not just which cache level, but which socket's DRAM), Ch. 17 (virtual memory — a physical page lives on a *specific node*, and first-touch decides which), Ch. 10–11 (data layout — NUMA rewards node-local, partitioned data), Ch. 2–3 (top-down, benchmarking).
 >
-> **Leads into:** Ch. 30–31 (allocators — NUMA-aware arenas and where pages come from), Ch. 42 (false sharing — cross-node sharing is its most expensive form), Ch. 54 (thread/IRQ pinning — the affinity machinery NUMA placement depends on), Ch. 85 (MPI — topology-aware rank placement at cluster scale). First-touch and binding reappear in Appendix C.
+> **Leads into:** Ch. 30–31 (allocators — NUMA-aware arenas and where pages come from), Ch. 42 (false sharing — cross-node sharing is its most expensive form), Ch. 54 (thread/IRQ pinning — the affinity machinery NUMA placement depends on), Ch. 86 (MPI — topology-aware rank placement at cluster scale). First-touch and binding reappear in Appendix C.
 
 ---
 
@@ -157,9 +157,9 @@ Control where pages land, from coarsest to finest:
 Placement handles *where pages go*; design handles *whether the access ever needs to be remote*:
 
 - **Shared-nothing partitioning by node.** The cleanest NUMA design is *no cross-node sharing*: shard the work so each node owns its data outright. In trading terms — **partition by symbol/venue**: feed handler + book + strategy for symbols A–M pinned to node 0 with their data local, N–Z on node 1. Each tick is processed entirely within one node; the interconnect carries almost nothing. This is the same shared-nothing discipline as Ch. 40, with NUMA as the motivation.
-- **Replicate read-mostly data per node.** Reference/config data read by all threads (symbol tables, tick-size maps, risk limits) can be **copied once per node** so every read is local — trading a little memory for zero remote reads. Combined with lock-free publication (seqlock/ RCU — Ch. 44–45) for updates, each node reads its local replica. (Hot-reload, Ch. 97, re-publishes per-node copies.)
+- **Replicate read-mostly data per node.** Reference/config data read by all threads (symbol tables, tick-size maps, risk limits) can be **copied once per node** so every read is local — trading a little memory for zero remote reads. Combined with lock-free publication (seqlock/ RCU — Ch. 44–45) for updates, each node reads its local replica. (Hot-reload, Ch. 98, re-publishes per-node copies.)
 - **Pin threads to nodes (and to cores) — Ch. 54.** Placement is meaningless if the thread drifts. `sched_setaffinity`/`pthread_setaffinity_np` (or `numactl --cpunodebind`, `taskset`) pin each hot thread to a core on the node holding its data, so locality holds. Affinity + first-touch are the inseparable pair.
-- **Put threads near their I/O.** A feed handler should run on the node whose PCIe hosts its NIC (Ch. 72, 83); a thread doing disk capture (Ch. 103) near that controller. Cross-node I/O adds an interconnect hop to every packet/block. Discover device-to-node mapping (`/sys/.../numa_node`) and pin accordingly.
+- **Put threads near their I/O.** A feed handler should run on the node whose PCIe hosts its NIC (Ch. 72, 83); a thread doing disk capture (Ch. 104) near that controller. Cross-node I/O adds an interconnect hop to every packet/block. Discover device-to-node mapping (`/sys/.../numa_node`) and pin accordingly.
 - **Avoid cross-node false sharing (Ch. 42).** A hot, frequently-written shared line (a counter, a queue index) bounced between cores on *different* nodes pays the remote-HITM cost on every write — the worst memory event on the box. Pad to a cache line, give each node/thread its own counter, and aggregate off the hot path.
 
 The synthesis: **design so the hot path never needs the other node** — partition data and threads per node, replicate read-mostly state, pin everything, and keep shared writable lines out of the cross-node path. The interconnect should be nearly idle during steady-state trading; if it's busy, you have remote accesses to hunt down (§18.3).
@@ -172,7 +172,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 - **Placement without pinning (or vice versa).** Correct first-touch decays the moment the scheduler migrates the thread off its node (Ch. 54); pinning a thread whose data is remote doesn't help either. They're a **pair** — always pin the thread to the node holding its data.
 - **`numactl --interleave` for latency-bound data.** Interleave is for *bandwidth*-bound shared structures; using it for per-thread latency-sensitive data guarantees ~50% of accesses are remote by design. Match policy to the access pattern (latency → bind local; bandwidth-shared → consider interleave).
 - **Cross-node false sharing.** A padded-counter omission (Ch. 42) is bad within a socket and *catastrophic* across sockets — every write is a remote HITM over UPI. Per-node/per-thread counters, padded, aggregated off the hot path.
-- **Threads far from their NIC/device.** Pinning compute correctly but ignoring that the NIC (Ch. 72) or NVMe (Ch. 103) hangs off the *other* socket's PCIe adds an interconnect hop to every packet/block. Place I/O threads on the device's node.
+- **Threads far from their NIC/device.** Pinning compute correctly but ignoring that the NIC (Ch. 72) or NVMe (Ch. 104) hangs off the *other* socket's PCIe adds an interconnect hop to every packet/block. Place I/O threads on the device's node.
 - **Huge pages placed remotely (Ch. 17).** First-touch chooses a *whole* 2 MB (or 1 GB!) page's node; pre-faulting a huge-page region from the wrong thread strands a large, coarse chunk remote. And for *explicit* huge pages first-touch only decides the node if that node's pool has free pages: the pool is per node (`/sys/devices/system/node/nodeN/hugepages/hugepages-2048kB/nr_hugepages`; a global `vm.nr_hugepages` is spread round-robin across nodes), and a fault whose local pool is empty silently takes a page from the other node (or fails under a strict `mbind`). Reserve per node (write the per-node sysfs files, or reserve under `numactl --membind`), pre-fault from the using thread on the right node, and check per-node `free_hugepages` / `numastat -m` after warm-up.
 - **Trusting the OS auto-balancer on a latency box.** Kernel automatic NUMA balancing (page migration, `numa_balancing`) chases locality heuristically but introduces *migration stalls* and jitter (Ch. 1) — usually disabled on a tuned box (`sysctl -w kernel.numa_balancing=0`, or `numa_balancing=disable` on the kernel command line) in favor of explicit placement + pinning.
 - **Measuring without NUMA counters.** Remote access is invisible in cache-miss rates (§18.3); if you don't watch `local_dram`/`remote_dram`/offcore-response, you'll miss it entirely. Measure NUMA explicitly, or you won't know the cliff is there.
@@ -197,7 +197,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 - [ ] Hot threads are **pinned** (Ch. 54) to a core on the node holding their data; placement and affinity are used **together**.
 - [ ] The hot path is **partitioned per node** (shared-nothing, e.g. by symbol/venue); read-mostly reference data is **replicated per node**.
 - [ ] No **cross-node false sharing** — shared writable lines are padded and per-node/per-thread, aggregated off the hot path (Ch. 42).
-- [ ] I/O threads run on the **node hosting their NIC/NVMe** (`/sys/.../numa_node` — Ch. 72, 83, 103); no accidental cross-node device hops.
+- [ ] I/O threads run on the **node hosting their NIC/NVMe** (`/sys/.../numa_node` — Ch. 72, 83, 104); no accidental cross-node device hops.
 - [ ] **Huge pages** (Ch. 17) are first-touched on the right node; `interleave` is used **only** for bandwidth-bound shared data, never latency-bound per-thread data.
 - [ ] Automatic NUMA balancing is **disabled** (`kernel.numa_balancing=0`, or measured to add no jitter) on the latency box; placement is explicit.
 
@@ -215,7 +215,7 @@ The synthesis: **design so the hot path never needs the other node** — partiti
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — NUMA case studies and reading local/remote DRAM counters with `perf`.
 - The `numactl`/`numastat` and `lstopo` (hwloc) documentation — discovering and visualizing node topology, core/device-to-node mapping (Ch. 6).
-- Ch. 31 (*Custom Allocators*) — NUMA-aware per-node arenas; Ch. 42 (*False Sharing*) — the cross-node coherence cost in depth; Ch. 54 (*Thread & Interrupt Pinning*) — the affinity machinery this chapter depends on; Ch. 85 (*MPI*) — topology-aware placement at cluster scale.
+- Ch. 31 (*Custom Allocators*) — NUMA-aware per-node arenas; Ch. 42 (*False Sharing*) — the cross-node coherence cost in depth; Ch. 54 (*Thread & Interrupt Pinning*) — the affinity machinery this chapter depends on; Ch. 86 (*MPI*) — topology-aware placement at cluster scale.
 - **Appendix C** (System Tuning Checklist) — NUMA/snoop-mode firmware settings and `numactl` pinning consolidated (`numa_balancing` is stated in §18.5); **Appendix E** — the local vs remote DRAM latency numbers that frame "the cliff."
 
 ---

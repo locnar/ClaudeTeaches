@@ -45,7 +45,7 @@ Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each 
             │
             DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.18)
             │
-            (… and far below: NVMe/disk, Ch.103 — irrelevant to the hot path)
+            (… and far below: NVMe/disk, Ch.104 — irrelevant to the hot path)
 ```
 
 Two structural facts shape everything:
@@ -83,7 +83,7 @@ The rule that matters for latency: **a core that wants to *write* a line must fi
 
 - **False sharing** (Ch. 42): two threads writing *different variables that happen to share one 64-byte line* suffer this ping-pong even though they share no data logically — one of the nastiest and most invisible scalability killers.
 - **Atomics and lock contention** (Ch. 39–43): every contended atomic is a coherence transaction; the cost of a spinlock or a CAS loop *is* coherence traffic.
-- The reason **single-writer designs** (Ch. 44, 98) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
+- The reason **single-writer designs** (Ch. 44, 99) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
 
 For now the takeaway is conceptual: **shared writable data has a hardware cost measured in coherence traffic**, and a huge fraction of Part VI exists to minimize it.
 
@@ -173,7 +173,7 @@ Concretely, for the hot path:
 
 - **Count the bytes touched per event**, not the total data size. A 1 GiB order book is fine *if* a single update touches only a few cache-resident lines (the top-of-book and the affected level). What kills you is a working *set* — the lines touched per event — that exceeds a cache level.
 - **Shrink the per-event footprint.** Smaller structs (Ch. 11), hot/cold splitting so only hot fields are resident (Ch. 10), and removing pointer indirection (each pointer hop is a potential extra line and a prefetch-defeating dependency) all reduce the lines touched.
-- **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 84) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
+- **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 85) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
 - **Mind L3 sharing.** L3 is shared across the socket (§8.2.1), so your *effective* L3 budget shrinks under noisy neighbors; core isolation (Ch. 6) does *not* protect it — partitioning the L3 with CAT/resctrl (Ch. 56) does.
 
 The measurement loop: pick the data structure, measure its per-event footprint and its MPKI (Ch. 2), and if it's missing, shrink the footprint or improve locality until it fits.

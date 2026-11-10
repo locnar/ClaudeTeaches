@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 79 (kernel bypass — RDMA is bypass taken to remote *memory*), Ch. 34 (mmap / shared memory — RDMA is cross-host shared memory), Ch. 30 (pinned/registered memory), Ch. 43–44 (lock-free / single-writer publication — what you build over RDMA), Ch. 72, 75 (NIC / timestamps), Ch. 8 (the memory the remote side reads/writes).
 >
-> **Leads into:** Ch. 81 (the lossless fabric RoCEv2 needs), Ch. 85 (MPI — often runs over RDMA/InfiniBand), Ch. 83 (PCIe — the host-device boundary RDMA crosses), Ch. 87 (SmartNICs — on-NIC RDMA). The intra-datacenter extreme of low-latency messaging, complementing the kernel bypass of Ch. 79.
+> **Leads into:** Ch. 81 (the lossless fabric RoCEv2 needs), Ch. 86 (MPI — often runs over RDMA/InfiniBand), Ch. 83 (PCIe — the host-device boundary RDMA crosses), Ch. 88 (SmartNICs — on-NIC RDMA). The intra-datacenter extreme of low-latency messaging, complementing the kernel bypass of Ch. 79.
 
 ---
 
@@ -144,7 +144,7 @@ Choosing the RDMA operation for the access pattern:
 The fabric choice — the network RDMA runs over:
 
 - **Native InfiniBand (IB) — purpose-built RDMA fabric.** A dedicated, lossless, low-latency interconnect (HCAs, IB switches, the IB protocol stack) — the lowest latency and the original RDMA fabric. Requires IB hardware (separate from Ethernet) — a parallel network. The choice where absolute lowest latency and a dedicated fabric are warranted (HPC, some HFT clusters).
-- **RoCE (RDMA over Converged Ethernet) — RDMA on Ethernet.** Runs the RDMA verbs over **Ethernet** (RoCEv1 = layer 2; **RoCEv2** = routable, over UDP/IP — the common one) — so you use your Ethernet infrastructure (and routing) instead of a separate IB fabric. Slightly higher latency than native IB, but **converged** (one network) and uses standard Ethernet switches. The pragmatic choice for many datacenters (including cloud — Ch. 85's MPI often runs RoCE).
+- **RoCE (RDMA over Converged Ethernet) — RDMA on Ethernet.** Runs the RDMA verbs over **Ethernet** (RoCEv1 = layer 2; **RoCEv2** = routable, over UDP/IP — the common one) — so you use your Ethernet infrastructure (and routing) instead of a separate IB fabric. Slightly higher latency than native IB, but **converged** (one network) and uses standard Ethernet switches. The pragmatic choice for many datacenters (including cloud — Ch. 86's MPI often runs RoCE).
 - **The lossless requirement (PFC/ECN).** RDMA assumes a (near-)**lossless** network (it doesn't have TCP's heavy retransmit; packet loss is costly). Native IB is lossless by design; **RoCE needs the Ethernet fabric configured lossless** — **PFC** (Priority Flow Control) and **ECN**/DCQCN congestion control — or it performs badly under loss/congestion. Configuring lossless RoCE (PFC/ECN tuning) is the main RoCE operational challenge; misconfiguration causes drops and latency spikes — the subject of Ch. 81.
 - **iWARP — RDMA over TCP.** A third option: RDMA over a TCP/IP stack (offloaded to the NIC) — works over standard routed networks without lossless config, but higher latency than RoCE/IB. Less common for low-latency.
 - **The decision.** Native IB: lowest latency, dedicated fabric, more cost/complexity (separate network). RoCEv2: converged Ethernet, slightly higher latency, needs lossless config (PFC/ECN). iWARP: most compatible, highest latency. For HFT intra-DC, native IB or well-tuned RoCEv2; the choice weighs latency vs infrastructure convergence.
@@ -168,8 +168,8 @@ The low-latency RDMA discipline (ties Ch. 30, 52):
 - **One-sided WRITE without knowing when the remote sees it.** A one-sided WRITE updates remote memory but the **remote CPU isn't notified** — the remote must *poll* its memory (or you signal via a separate mechanism: a flag the remote polls, written after the data — the seqlock/publication ordering of Ch. 39, 44, now across the network). Forgetting that the remote needs a way to *notice* the write is a correctness gap. The verbs API has a first-class answer: **`IBV_WR_RDMA_WRITE_WITH_IMM`** places the data one-sided *and* consumes a posted RECV on the responder, yielding a CQ entry (with a 32-bit immediate) the remote polls — no memory scanning. Otherwise publish the flag/sequence as a *separate* WR on the same QP after the data (RC delivers WRs in order; within one WRITE the NIC writes bytes in no guaranteed order, so a flag inside the payload can land before the data) — Ch. 44.
 - **Memory ordering across RDMA (Ch. 39).** RDMA writes complete in an order, and the remote reads them — the cross-host analog of the memory model (Ch. 39). Ensure the data is fully written before the flag/sequence that signals it (write ordering / RDMA completion semantics) — a torn/early read otherwise (Ch. 44's torn-read concern, across hosts). Understand the RDMA ordering/completion guarantees.
 - **Assuming RDMA helps latency *to the exchange*.** RDMA is **intra-datacenter** (between *your* hosts) — it doesn't reduce latency to the exchange (that's the wire + exchange — Appendix K, Ch. 77; measured with Ch. 75's timestamps). It's for your internal host-to-host messaging (risk cluster, distribution tier, gateway). Don't expect it to help the external leg.
-- **Verbs API complexity / correctness.** The verbs API (QPs, CQs, MRs, WRs, state transitions) is low-level and error-prone; QP setup/teardown, connection management (RDMA CM), and error handling are intricate. Use a higher-level library (`librdmacm`, UCX, or a messaging layer like the one MPI — Ch. 85 — uses) where it fits, and test thoroughly (Ch. 51). Hand-rolling raw verbs is for the ultra-hot path with the engineering to back it.
-- **IOMMU / security (Ch. 83, 96).** RDMA gives a remote NIC DMA access to registered memory — a security consideration (a compromised/buggy peer could read/write your registered memory within the rkey scope). Scope rkeys tightly, configure the IOMMU (Ch. 83), and treat RDMA peers with appropriate trust (Ch. 96).
+- **Verbs API complexity / correctness.** The verbs API (QPs, CQs, MRs, WRs, state transitions) is low-level and error-prone; QP setup/teardown, connection management (RDMA CM), and error handling are intricate. Use a higher-level library (`librdmacm`, UCX, or a messaging layer like the one MPI — Ch. 86 — uses) where it fits, and test thoroughly (Ch. 51). Hand-rolling raw verbs is for the ultra-hot path with the engineering to back it.
+- **IOMMU / security (Ch. 83, 97).** RDMA gives a remote NIC DMA access to registered memory — a security consideration (a compromised/buggy peer could read/write your registered memory within the rkey scope). Scope rkeys tightly, configure the IOMMU (Ch. 83), and treat RDMA peers with appropriate trust (Ch. 97).
 
 ## 80.6 Exercises & checklist
 
@@ -190,7 +190,7 @@ The low-latency RDMA discipline (ties Ch. 30, 52):
 - [ ] The **fabric** is chosen and configured: native **IB** (lowest latency, dedicated) or **RoCEv2** with **lossless PFC/ECN** (not lossy Ethernet) (§80.4.2).
 - [ ] RDMA is used for **intra-datacenter** host-to-host messaging (risk cluster, distribution, gateways) — not expected to help the external **exchange** leg (Appendix K; the switching fabric — Ch. 77); zero-copy registered buffers throughout (§80.4.3).
 - [ ] **Inline** small messages, **batch doorbells / unsignaled completions** for high rate (§80.4.3); a higher-level library (`librdmacm`/UCX) is used where raw verbs complexity isn't justified.
-- [ ] **Security/IOMMU**: rkeys scoped tightly, IOMMU configured (Ch. 83), RDMA peers treated with appropriate trust (Ch. 96).
+- [ ] **Security/IOMMU**: rkeys scoped tightly, IOMMU configured (Ch. 83), RDMA peers treated with appropriate trust (Ch. 97).
 
 ## 80.7 References
 
@@ -202,9 +202,9 @@ The low-latency RDMA discipline (ties Ch. 30, 52):
 
 ## 80.8 Additional Reading
 
-- The UCX (Unified Communication X) documentation — a higher-level RDMA/transport abstraction (used by MPI — Ch. 85).
+- The UCX (Unified Communication X) documentation — a higher-level RDMA/transport abstraction (used by MPI — Ch. 86).
 - Talks on RDMA in trading / distribution tiers and the "one-sided vs two-sided" performance debate — practical patterns.
-- Ch. 79 (*Kernel Bypass*) — local bypass, the prequel; Ch. 34 (*mmap*) / Ch. 65 (*IPC*) — shared memory, of which RDMA is the cross-host version; Ch. 44 (*Seqlocks*) — the publication pattern over one-sided WRITE; Ch. 85 (*MPI*) — runs over RDMA; Ch. 83 (*PCIe*) — the host-device boundary RDMA crosses; Ch. 87 (*SmartNICs*) — on-NIC RDMA; Ch. 39 (*Memory Model*) — ordering, now across hosts.
+- Ch. 79 (*Kernel Bypass*) — local bypass, the prequel; Ch. 34 (*mmap*) / Ch. 65 (*IPC*) — shared memory, of which RDMA is the cross-host version; Ch. 44 (*Seqlocks*) — the publication pattern over one-sided WRITE; Ch. 86 (*MPI*) — runs over RDMA; Ch. 83 (*PCIe*) — the host-device boundary RDMA crosses; Ch. 88 (*SmartNICs*) — on-NIC RDMA; Ch. 39 (*Memory Model*) — ordering, now across hosts.
 - Ch. 81 (*Lossless Ethernet & RDMA Congestion*) — what RoCEv2 needs underneath it: PFC/ECN/DCQCN to make Ethernet lossless, and the incast/deadlock hazards that come with it.
 - **Appendix F** — RDMA/QP/CQ/MR/RoCE glossary.
 

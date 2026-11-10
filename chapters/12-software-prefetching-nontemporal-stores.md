@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (cache hierarchy, lines, and especially the **hardware prefetcher** of §8.2.4 — what it can and can't predict), Ch. 10 (layout), Ch. 11 (sizing). Ch. 2–3 for measuring, Ch. 4 for the asm in §12.5. This chapter is the **fallback** for when good layout and the hardware prefetcher *still* leave miss latency exposed.
 >
-> **Leads into:** Ch. 13 (pipelines/ILP — prefetch works by overlapping misses with compute) and Ch. 32 (the order book, where prefetching the next node/level is a real technique). Non-temporal stores tie to the write path of capture/logging (Ch. 93, 103). SIMD streaming stores connect to Ch. 37.
+> **Leads into:** Ch. 13 (pipelines/ILP — prefetch works by overlapping misses with compute) and Ch. 32 (the order book, where prefetching the next node/level is a real technique). Non-temporal stores tie to the write path of capture/logging (Ch. 94, 104). SIMD streaming stores connect to Ch. 37.
 
 ---
 
@@ -166,7 +166,7 @@ Guidance: prefetch the **line** (64-byte granularity — prefetching two address
 
 Where streaming stores earn their keep — bulk, write-only, cache-line-granular output:
 
-- **Capture / journaling / logging buffers** (Ch. 93, 103): you write packets or log records to a large ring you won't read back on the hot path. Stream them so they don't evict the hot order-book/strategy state from L1/L2.
+- **Capture / journaling / logging buffers** (Ch. 94, 104): you write packets or log records to a large ring you won't read back on the hot path. Stream them so they don't evict the hot order-book/strategy state from L1/L2.
 - **Large `memcpy`/`memset` of write-only data** (zeroing a big arena you'll fault in lazily, staging a DMA buffer). `glibc`'s `memcpy`/`memset` already switch to non-temporal stores above a size threshold; your hand-rolled bulk copies should too.
 - **Producer→consumer hand-off where the producer won't re-read** — though here weigh whether the consumer wants it *in* L3 (then a normal store is better). Streaming wins only when the writer truly won't reuse the cache line and protecting the hot set matters.
 

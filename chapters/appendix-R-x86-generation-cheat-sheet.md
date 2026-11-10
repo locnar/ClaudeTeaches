@@ -94,13 +94,13 @@ Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-funct
 ```
    accelerator   what it is                                         interface                    trading use (and why not the hot path)
    ───────────── ────────────────────────────────────────────────── ──────────────────────────── ─────────────────────────────────────────────────
-   AMX           tile-matrix units: INT8/BF16 (FP16 on GNR) GEMM    instructions (TMUL), tile     ML inference beside the strategy (Ch. 84's GPU
+   AMX           tile-matrix units: INT8/BF16 (FP16 on GNR) GEMM    instructions (TMUL), tile     ML inference beside the strategy (Ch. 85's GPU
                  in 8 1 KiB tile registers                          state is XSAVE-managed        alternative on the host); first use after idle
                                                                                                   pays a tile-config + licence-class power ramp
    DSA           Data Streaming Accelerator: memcpy/memmove/fill,   work queues via ENQCMD/       capture-writer and replay copies, journal
-                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 103) — bulk copies off the core; a
+                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 104) — bulk copies off the core; a
                  spaces                                             polling or interrupt           submission is ~µs round trip: never a per-message op
-   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 90 §90.4.7),
+   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 91 §91.4.7),
                  decompression (Deflate), filter/scan                                              never on the order path
    QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 82), VPN; a ~10 µs
                  asymmetric), compression                           API, OpenSSL engine             round trip, so only for throughput paths
@@ -113,7 +113,7 @@ Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-funct
    APX           Advanced Performance Extensions: 32 GPRs (R16–R31), -mapxf (GCC 14 / Clang 19;     fewer spills and shorter dependency chains on the
                  3-operand integer ops, conditional load/store/cmp   Diamond Rapids / Panther Lake  decode and book kernels (Ch. 13, 68); verify with Ch. 4's
                                                                      and later)                      asm reading when the hardware ships
-   (AMD)         no AMX/DSA/IAA/QAT equivalents on the CPU; AMD's      —                            Pensando DPUs and Xilinx FPGAs (Ch. 87, 86) are the
+   (AMD)         no AMX/DSA/IAA/QAT equivalents on the CPU; AMD's      —                            Pensando DPUs and Xilinx FPGAs (Ch. 88, 87) are the
                  acceleration story is off-socket                                                    accelerator line
 ```
 
