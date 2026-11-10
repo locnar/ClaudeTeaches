@@ -937,7 +937,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 67.2.4 Mechanical sympathy for UDP microbursts: hardware RX rings, software reorder buffers, market-open drops
 - 67.3 Measure it: decode latency per protocol
 - 67.4 Techniques
-  - 67.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing
+  - 67.4.1 `std::from_chars`/`to_chars`; branch-free integer/decimal parsing (now Ch. 68; pointer)
   - 67.4.2 Scatter/gather and zero-copy receive paths
   - 67.4.3 A/B line arbitration; sequence-gap detection (recovery → Ch. 69)
   - 67.4.4 Tuning RX ring sizes, managing UDP reordering in software ring buffers, detecting hardware packet drops
@@ -946,13 +946,23 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 67.7 Exercises & checklist
 
 ### [68. Text Protocols on the Hot Path: Branch-Free Parsing & Formatting](68-branch-free-parsing-formatting.md)
-- 68.1 Why it matters: TODO
-- 68.2 Mental model: TODO
-- 68.3 Measure it: TODO
+- 68.1 Why it matters: FIX is on the order path at most venues, and the encode stage has had no chapter
+- 68.2 Mental model
+  - 68.2.1 Where text sits on the hot path, and its budget
+  - 68.2.2 The cost of a text field: scan, convert, validate — per field, not per byte
+  - 68.2.3 Word- and vector-parallel digit conversion
+  - 68.2.4 Decimals, timestamps and checksums as integer problems
+- 68.3 Measure it: the spectrum on one NewOrderSingle (`strtoll` → `from_chars` → digit loop → SWAR-8 → SIMD-16; decimal price paths; `UTCTimestamp`; tokenisers incl. layout-pinned; checksum; `to_chars` vs digit pairs vs fixed width vs template)
 - 68.4 Techniques
-  - 68.4.1 TODO
-- 68.5 Pitfalls & anti-patterns: TODO
-- 68.6 Exercises & checklist
+  - 68.4.1 Integers: `from_chars` → digit loop → SWAR-8 → SIMD-16, with validation
+  - 68.4.2 Decimal prices straight to scaled integers; rejecting malformed input
+  - 68.4.3 `UTCTimestamp` to nanoseconds and back
+  - 68.4.4 Tag scanning and dispatch: SIMD delimiter find, jump-table switch, bitmask tokenising, layout-pinned parsing
+  - 68.4.5 BodyLength and the checksum
+  - 68.4.6 The encode path: `to_chars`, digit pairs, fixed width, and the template with patched fields
+- 68.5 Verify the codegen: the SWAR path, and the loop the compiler did or did not vectorise
+- 68.6 Pitfalls & anti-patterns: `atoi`/`double` prices, reading past the buffer, trusting BodyLength, pinning without a fallback
+- 68.7 Exercises & checklist
 
 ### [69. Reliable Multicast & Feed Recovery](69-reliable-multicast-feed-recovery.md)
 - 69.1 Why it matters: market data is lossy, and a gap blinds the strategy
