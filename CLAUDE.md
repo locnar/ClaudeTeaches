@@ -60,7 +60,7 @@ Code & content guidelines:
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
 > appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to 95 chapters in thirteen Parts and fifteen appendices (A–O), and then — with the modern-C++ depth chapters — to **98 chapters in thirteen Parts and sixteen appendices (A–P)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below). Do not renumber against this list. The **Appendices** entries (A–P)
+> *Status / Workflow* below), and on 2026-11-10 (P3-6 batch B: the hardware/OS chapters) to **108 chapters in thirteen Parts and eighteen appendices (A–R)**. Do not renumber against this list. The **Appendices** entries (A–R)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
 
@@ -448,20 +448,36 @@ Code & content guidelines:
   `-fno-delete-null-pointer-checks` +0.15 ns/call, `-ftrivial-auto-var-init` 0 where the buffer dies, full
   trapping UBSan 2.5–20× vs the overflow/bounds/shift/null subset 1.0–1.5×) → sanctioned replacement
   (current numbering: Ch. 4, 12–14, 21, 23, 30, 32, 45, 60, 87; Appendices D, H, I).
+- **Appendix Q — AMD Zen (EPYC & Ryzen) Companion** (added 2026-11-10 with the P3-6 batch-B hardware/OS
+  chapters) — what changes from the Intel reference machine for a reader on AMD Zen 3/4/5, in Appendix A's
+  what-changes form: CCD/IOD topology (deferring to Ch. 18), the per-CCD victim L3 and TLB geometry, op cache
+  and predictor, pipeline and vector units (no AVX licence, `pdep`/`pext` fast since Zen 3, `pause` ~65 cycles),
+  the Intel→Zen `perf` event map (`ls_dmnd_fills_from_sys`, `amd_l3`, `amd_df`, `PipelineL1/L2` in place of
+  `--topdown`, IBS for `perf mem`/`c2c`, `rdpru`, uProf), what does not change in the memory model, the EPYC
+  firmware knob names for every Appendix C.1 row, AMD QoS / no DDIO, and what to expect re-running the book's
+  measurements (current numbering: Ch. 2, 6–8, 12–14, 16–18, 33–38, 52, 54, 68, 74; Appendices A, C, D, R).
+- **Appendix R — x86 Generation Cheat Sheet** (added 2026-11-10 with the P3-6 batch-B chapters) — the
+  reference machine's Ice Lake-SP beside Sapphire/Emerald/Granite Rapids and the client Raptor/Arrow Lake
+  parts, and Zen 3 → Zen 5 EPYC/Ryzen: cores, clocks, caches, L3 latency, ROB/DSB/TLB, channels, lanes,
+  SNC/NPS, licences, DDIO, C6 exit; Appendix E restated per generation in ns and cycles at each part's
+  pinned clock (with the cross-domain core-to-core row Appendix E cannot have); the accelerator inventory
+  (AMX, DSA, IAA, QAT, DLB, AVX10, APX) and why each sits beside the hot path (current numbering: Ch. 7, 8,
+  12–14, 16, 18, 34, 37, 54, 68, 78; Appendices D, E, L, Q).
 
 ## Status / Workflow
 - Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 98
-  chapters and appendices A–P — see Phases 2–3 and the five 2026-11-09 insertions below).
+  chapters and appendices A–R — see Phases 2–3, the six 2026-11-09 insertions and the 2026-11-10 insertion below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 104 chapters + 16 appendices (A–P);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 108 chapters + 18 appendices (A–R);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
   with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters, O with
-  the 2026-11-09 design-pattern chapters and P with the 2026-11-09 modern-C++ depth chapters.**
+  the 2026-11-09 design-pattern chapters, P with the 2026-11-09 modern-C++ depth chapters, and Q–R with the
+  2026-11-10 hardware/OS chapters (P3-6 batch B).**
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 104 chapters + 16 appendices (A–P). Appendix H's version numbers and
+  now: front matter + 108 chapters + 18 appendices (A–R). Appendix H's version numbers and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
 - Phase 3 (done): **the book was reorganized into twelve topical Parts** (thirteen since the
@@ -471,7 +487,8 @@ Code & content guidelines:
   The thirteen Parts and their chapter ranges:
   - **I — Foundations & Methodology** (1–7): mindset, profiling, benchmarking, reading asm,
     debugging optimized code, system setup, choosing & clocking the hot-path CPU (Ch. 7, added 2026-11-10 P3-6B).
-  - **II — CPU Microarchitecture** (8–19).
+  - **II — CPU Microarchitecture** (8–19): …NUMA, chiplets/tiles & the core-to-core map (Ch. 18, added
+    2026-11-10 P3-6B), timekeeping.
   - **III — Compile-Time & Language Mechanics** (20–27): compile-time mechanics, templates & zero-cost
     abstractions (with concepts, §19.4.6), compile-time protocol decoders (Ch. 20, added 2026-11-09 P3-5), the cost
     of abstractions (with the calling convention and statics/TLS, §21.4.5–§21.4.6), the cost of modern idioms &
@@ -484,15 +501,15 @@ Code & content guidelines:
     correctness tooling.
   - **VII — OS, Scheduling & Isolation** (48–56): context switching, timers & deadlines without jitter
     (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
-    residual noise (Ch. 52, added 2026-11-09 P3-1), warming.
+    residual noise (Ch. 52, added 2026-11-09 P3-1), warming. Power management & frequency determinism is Ch. 54 (added 2026-11-10 P3-6B).
   - **VIII — Kernel I/O, Sockets & Zero-Copy** (57–63): native I/O, io_uring, zero-copy fast path,
-    IPC, socket tuning, advanced TCP.
+    IPC, socket tuning, advanced TCP. The datapath anatomy chapter is Ch. 58 (added 2026-11-10 P3-6B).
   - **IX — Market Data, NIC & Fabric** (64–72): decoding, reliable multicast, multicast membership &
     dark-feed detection (Ch. 59, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
   - **X — Kernel Bypass, RDMA & Transport** (73–77): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
   - **XI — Heterogeneous Computing & Hardware Acceleration** (78–82): PCIe, GPU, MPI, FPGA, SmartNICs.
-  - **XII — Beyond C++: Languages at the Latency Floor** (76–80, added 2026-11-09 P3-3): hand-written
+  - **XII — Beyond C++: Languages at the Latency Floor** (83–87, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
   - **XIII — Observability & Operations in Production** (88–108): logging, in-band latency tracing
@@ -621,6 +638,38 @@ Code & content guidelines:
   health → testing → CI → release → capstone. Left for later batches: the remaining item-19 gaps (G52–G58,
   G62, G64–G65, G68 and the rest), Appendix E rows (nothing derivable for the reference machine from the
   VM runs), Appendix O rows for the six chapters.
+- **2026-11-10 hardware/OS insertion (work-queue item P3-6 batch B):** four chapters and two appendices were
+  added with `insert_chapter.py` (four ascending insertions, one commit each — no new Part) and by hand
+  (the appendices): **7** Choosing & Clocking the Hot-Path CPU (Part I, after system setup — extends Part I
+  to 1–7), **18** Chiplets, Tiles & NUMA Within the Socket: the Core-to-Core Latency Map (Part II, after
+  NUMA), **54** Power Management & Frequency Determinism (Part VII, between RT scheduling and hunting
+  residual noise), **58** Anatomy of the Linux Network Datapath: Where the Microseconds Go (Part VIII, after
+  native I/O), **Appendix Q** AMD Zen (EPYC & Ryzen) Companion and **Appendix R** x86 Generation Cheat
+  Sheet (both appended after P — re-lettering B–P was judged too disruptive; R carries the per-generation
+  restatement of Appendix E that the G70 brief proposed as §E.3, with §E.3 now a pointer). Renumber map
+  from the post-batch-A numbering: 1–6 unchanged; old 7–16 → 8–17; old 17–51 → 19–53; old 52–54 → 55–57;
+  old 55–104 → 59–108. Composite from the Phase-3 numbering: 1–6 unchanged; 7–16 → 8–17; 17–19 → 19–21;
+  20 → 23; 21 → 25; 22 → 26; 23–37 → 28–42; 38–41 → 45–48; 42–45 → 50–53; 46 → 55; 47 → 57; 48–54 → 59–65;
+  55–70 → 67–82; 71 → 88; 72 → 91; 73 → 92; 74 → 93; 75 → 98; 76 → 108 (`stale_crossrefs.py`'s STEPS chain is
+  the executable form). Also added: Ch. 17 §17.2.3 (SNC/NPS and the chiplet level),
+  Ch. 50 §50.4.3 (choosing which cores from the core-to-core map), Appendix L §L.7 (the `c2c` harness as a
+  standing tool; L.7–L.8 → L.8–L.9), Appendix E §E.3 (pointer to R; E.3–E.4 → E.4–E.5), Ch. 8 §8.2.1's
+  "L3 is shared across the socket" amended, Ch. 39/42/61 "pinned to two cores" lines now say which two,
+  Ch. 53 §53.5 softirq/`ksoftirqd` pitfall, Ch. 55 §55.2 catalog-row pointer, Ch. 6 §6.2.1/§6.4.1 hooks,
+  Appendix A.5 corrected (client x86 is hybrid since 2021) and Appendix A's intro pointing at Q, Appendix
+  C.1 rows (power limits, uncore pin, turbo posture, SNC/NPS/L3-as-NUMA, hybrid parts), C.3 PM QoS and
+  RPS/XPS lines, C.5 flat-clock and softirq checks, Appendix D.2 `-march=znver3/4/5`, Appendix F (CCD/CCX,
+  Infinity Fabric, IOD, tile/EMIB, SNC/NPS, core-to-core map, V-Cache, P/E-cores, turbo ratio/PL1/PL2/ICCmax,
+  PB2/PBO, HWP/EPP, AVX licence, UFS, `rdpru`, C-state exit, PM QoS, cpuidle governor, APERF/MPERF, NAPI,
+  softirq/`ksoftirqd`, GRO/LRO, qdisc, BQL, RPS/RFS/XPS, netfilter/conntrack/`notrack`, veth/macvlan/VF),
+  Appendix G entries and G.6 lines, Appendix I.6/I.8 one-liners, README legend (108 chapters, A–R), Part
+  I/II/VII/VIII intros and the preface counts. Measured on the author's 4-vCPU KVM guest (no PMU, MSRs,
+  cpuidle states or tracefs): `clockprobe`/`soak` (Ch. 7), `c2c` (Ch. 18), `cstates`/`pmqos`/`flatclock`
+  (Ch. 54), `udp_rtt` and the conntrack/ruleset experiment (Ch. 58); everything else in the four chapters
+  and in Q/R is representative for the reference machine or cited from vendor documentation and published
+  measurements and is labelled so. Left for later batches: Appendix E rows (nothing derivable for the
+  reference machine from the VM runs), Appendix O rows for the four chapters, the remaining item-19 gaps
+  (C, D1, D2).
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to
@@ -629,8 +678,10 @@ Code & content guidelines:
   machine (authoring is on macOS; target is Linux x86-64); code/flags/`perf` commands are
   reproducible. Real measured runs must be backfilled before a chapter is final.
 - Reference machine: every chapter that shows numbers uses a single-socket Xeon Gold 6326
-  (Ice Lake-SP) — in Part II that is Ch. 7–15 and 17 — except the NUMA chapter (Ch. 16), which
-  uses a **dual-socket 2× Xeon Gold 6326** because NUMA effects need two sockets. Keep the per-chapter machine description consistent with
+  (Ice Lake-SP) — in Part II that is Ch. 8–16 and 19 — except the NUMA chapter (Ch. 17), which
+  uses a **dual-socket 2× Xeon Gold 6326** because NUMA effects need two sockets, and the chiplet chapter
+  (Ch. 18), which uses the single-socket box for its map and the dual-socket box for the cross-socket row,
+  with a representative Zen 4 EPYC column because the reference machine has no chiplets. Keep the per-chapter machine description consistent with
   these unless a chapter needs otherwise.
   The full **reference toolchain and machine statement** (GCC 14.2 / Clang 18.1, Linux 6.18 LTS,
   `performance` governor with turbo off, ns↔cycles at 2.9 GHz = 0.345 ns/cycle) lives in **Appendix L.3**

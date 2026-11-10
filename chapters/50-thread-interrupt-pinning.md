@@ -175,7 +175,7 @@ Routing interrupts away — the half people miss (§50.1, §50.2):
 
 The fourth criterion is therefore **measured, not read from a datasheet**: run Ch. 18 §18.3's core-to-core ping-pong harness once per box and firmware mode, keep the matrix with the deployment, and place from it —
 
-- **every hot-path handoff pair in one diagonal block** of the map (one CCD / tile / SNC node): the Ch. 39/42 producer and consumer, each stage *N* → *N*+1 of the pipeline (Ch. 43), the caller and callee of the risk gate (Ch. 93), both ends of every shared-memory ring (Ch. 61);
+- **every hot-path handoff pair in one diagonal block** of the map (one CCD / tile / SNC node): the Ch. 39/42 producer and consumer, each stage *N* → *N*+1 of the pipeline (Ch. 43), the caller and callee of the risk gate (Ch. 94), both ends of every shared-memory ring (Ch. 61);
 - **the block that is the NIC's home domain** (`/sys/class/net/<if>/device/numa_node` and `local_cpulist`), so DMA, DDIO and the first consumer never cross the fabric (Ch. 18 §18.4.3, Ch. 68);
 - **the RX queue's IRQ, where one remains, on a housekeeping core in the same block** as its consumer — §50.4.2's "route IRQs to housekeeping cores" becomes "to *that block's* housekeeping core," because a NAPI poll on CCD 3 feeding a consumer on CCD 0 pays the cross-die hop on every packet's cache lines;
 - **the block's housekeeping share planned in**: a CCD is eight cores, so the feed → book → strategy → gateway chain plus one housekeeping core is the budget, and a second strategy goes in a second block with its *own* NIC queue and IRQ, not across the fabric.
