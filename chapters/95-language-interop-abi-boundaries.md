@@ -4,13 +4,13 @@
 
 > **Prerequisites:** Ch. 4 §4.2.1 (the SysV calling convention — the one contract every language on Linux honours), Ch. 11 (object layout — a struct that crosses a boundary has exactly one layout, and both sides must assert it), Ch. 24 §24.6 (a throw across a C frame is undefined behaviour), Ch. 27 §27.4.2 (`-fvisibility=hidden`, the PLT, `-fno-plt`), Ch. 67 (shared-memory IPC — the alternative to calling at all), Ch. 65, 82 and 83 (`liburing`, `ef_vi`/DPDK and `libibverbs`: the vendor C SDKs the hot path is built on and this chapter wraps), Ch. 94 (the Rust side of the boundary).
 >
-> **Leads into:** Ch. 96 (the managed runtimes on the far side of the boundary, and why a call *into* one is a different animal from a call into C), Ch. 97 (the polyglot architecture: where the boundary belongs per latency tier), Ch. 108 §108.4.6 (the research seam — the same hourglass, bound into Python), Appendix B (summary).
+> **Leads into:** Ch. 96 (the managed runtimes on the far side of the boundary, and why a call *into* one is a different animal from a call into C), Ch. 97 (the polyglot architecture: where the boundary belongs per latency tier), Ch. 109 §109.4.6 (the research seam — the same hourglass, bound into Python), Appendix B (summary).
 
 ---
 
 ## 95.1 Why it matters: the hot path already crosses a boundary on every packet
 
-Every book-built hot path calls C. `io_uring_get_sqe` and `io_uring_submit` (Ch. 65), `ef_vi_receive_poll` and `exanic_receive_frame` (Ch. 82), `ibv_post_send` and `ibv_poll_cq` (Ch. 83), `rte_eth_rx_burst` (Ch. 82) — all C functions in C headers, called from C++ with no treatment so far of what the call costs, what the C++ around it may and may not do, or how to wrap it so that RAII and `std::span` protect the caller without adding an instruction. The same boundary appears in the other direction the moment the system is polyglot, which every real one is: a Python research notebook that must run the *production* decoder rather than a drifting reimplementation (Ch. 108 §108.4.6), a Java risk service that reads the C++ book, a Rust component beside the C++ core (Ch. 94), a Go control plane that calls into the engine for a config reload (Ch. 102).
+Every book-built hot path calls C. `io_uring_get_sqe` and `io_uring_submit` (Ch. 65), `ef_vi_receive_poll` and `exanic_receive_frame` (Ch. 82), `ibv_post_send` and `ibv_poll_cq` (Ch. 83), `rte_eth_rx_burst` (Ch. 82) — all C functions in C headers, called from C++ with no treatment so far of what the call costs, what the C++ around it may and may not do, or how to wrap it so that RAII and `std::span` protect the caller without adding an instruction. The same boundary appears in the other direction the moment the system is polyglot, which every real one is: a Python research notebook that must run the *production* decoder rather than a drifting reimplementation (Ch. 109 §109.4.6), a Java risk service that reads the C++ book, a Rust component beside the C++ core (Ch. 94), a Go control plane that calls into the engine for a config reload (Ch. 102).
 
 Two facts organise the chapter, and both are measured in §95.3. **A C ABI call is a call** — the same `call`/`ret`, the same register contract (Ch. 4 §4.2.1), 2.5–3 ns from C++, Rust, Zig or OCaml on the test box, within a few hundred picoseconds of the inlined C++ code; the cost is the lost inlining, not the language. **A call into or out of a managed runtime is a transition**, and its price is the runtime's bookkeeping: 10 ns through Java's foreign-function API with the safepoint transition disabled, 29 ns through JNI, 50 ns through Go's `cgo`, 340–470 ns through Python's `pybind11`/`nanobind`/`ctypes`. The ladder spans two orders of magnitude, and it dictates the architecture: a per-message call across a runtime boundary is a Ch. 1 tail you added on purpose; batch the work on one side, or share memory (Ch. 67) and call nothing. The rest is the discipline that keeps the boundary from becoming the Ch. 101 bug class — opaque handles, parity asserts on both sides, `noexcept` edges, and the knowledge of which things (exceptions, panics, C++ types, allocators, thread-locals) may never cross.
 
@@ -18,7 +18,7 @@ Two facts organise the chapter, and both are measured in §95.3. **A C ABI call 
 
 ### 95.2.1 The hourglass: one narrow C waist
 
-Both halves of a polyglot system are wide — a C++ engine with templates and RAII, a Python/Java/Rust client with its own types — and the boundary between them is a **narrow waist of plain C**: a handful of `extern "C"` functions taking and returning only things C has (integers, pointers, `struct`s of those), with every C++ object hidden behind an **opaque handle** (`typedef struct book_t book_t;` — a pointer to an incomplete type the caller can hold but never dereference). The waist is the only thing either side depends on; the C++ can change its classes and the client its language without touching the other. Ch. 108 §108.4.6 and §95.3's call ladder both use one such waist, `book_c_api.h`:
+Both halves of a polyglot system are wide — a C++ engine with templates and RAII, a Python/Java/Rust client with its own types — and the boundary between them is a **narrow waist of plain C**: a handful of `extern "C"` functions taking and returning only things C has (integers, pointers, `struct`s of those), with every C++ object hidden behind an **opaque handle** (`typedef struct book_t book_t;` — a pointer to an incomplete type the caller can hold but never dereference). The waist is the only thing either side depends on; the C++ can change its classes and the client its language without touching the other. Ch. 109 §109.4.6 and §95.3's call ladder both use one such waist, `book_c_api.h`:
 
 ```c
 /* book_c_api.h — the extern "C" hourglass over the C++ Book (Ch. 97's kernel.hpp): opaque handle, POD-only arguments, nothing throws. */
@@ -60,7 +60,7 @@ API uint32_t book_best_bid(const book_t* h) noexcept { return h->b.best_bid(); }
 
 ### 95.2.2 What may not cross
 
-The C ABI defines registers, stack and the layout of C types. Everything else is a *per-language runtime convention* and must stop at the waist: **C++ exceptions** (a throw through a frame without unwind tables is UB — Ch. 24 §24.6; §95.4.3 shows the three things that actually happen); **Rust panics** (an unwind reaching an `extern "C"` frame aborts the process since Rust 1.81); **C++ types** (`std::string`, `std::vector`, `std::span`, references, templates — none has a C layout or a stable ABI across compilers; pass pointer + length); **ownership of allocations** (memory `new`ed on one side is `delete`d on that side: provide `book_free`, never let the caller `free()` it — different allocators, different runtimes); **thread-locals, signal handlers and `errno`** (a callback invoked on a runtime's thread may not see the TLS you expect — Ch. 107 §107.4.1's signal-safety applies); **callbacks into a managed runtime** (a C→Java/Python/Go call attaches a thread, takes a GIL or transitions a safepoint state — §95.6). The waist carries integers, pointers to POD, and error codes. That is all it should carry.
+The C ABI defines registers, stack and the layout of C types. Everything else is a *per-language runtime convention* and must stop at the waist: **C++ exceptions** (a throw through a frame without unwind tables is UB — Ch. 24 §24.6; §95.4.3 shows the three things that actually happen); **Rust panics** (an unwind reaching an `extern "C"` frame aborts the process since Rust 1.81); **C++ types** (`std::string`, `std::vector`, `std::span`, references, templates — none has a C layout or a stable ABI across compilers; pass pointer + length); **ownership of allocations** (memory `new`ed on one side is `delete`d on that side: provide `book_free`, never let the caller `free()` it — different allocators, different runtimes); **thread-locals, signal handlers and `errno`** (a callback invoked on a runtime's thread may not see the TLS you expect — Ch. 108 §108.4.1's signal-safety applies); **callbacks into a managed runtime** (a C→Java/Python/Go call attaches a thread, takes a GIL or transitions a safepoint state — §95.6). The waist carries integers, pointers to POD, and error codes. That is all it should carry.
 
 ### 95.2.3 The cost model: a call is a call; a transition is not
 
@@ -178,7 +178,7 @@ C is the waist's language and Zig is the best C compiler you can download, and e
 |---|---|---|
 | C header → Rust | `bindgen` (C→Rust), `cbindgen` (Rust→C header), `cxx`/`autocxx` for C++ directly | `cxx` generates a safe bridge with shared structs; still a C-ABI waist underneath |
 | C header → Zig | `zig translate-c` / `@cImport` (older Zig) | opaque types, `extern fn` — §95.4.5 |
-| C/C++ → Python | nanobind (C++17, smallest overhead), pybind11, `ctypes`/`cffi` for pure-C | §95.3: all three are hundreds of ns per call; batch (Ch. 108 §108.4.6 buffer protocol/NumPy) |
+| C/C++ → Python | nanobind (C++17, smallest overhead), pybind11, `ctypes`/`cffi` for pure-C | §95.3: all three are hundreds of ns per call; batch (Ch. 109 §109.4.6 buffer protocol/NumPy) |
 | C → Java | `jextract` (FFM, JDK 22+; preview in 21) ; JNI as legacy | FFM `critical`/`isTrivial` for short callees that touch no Java heap |
 | C → Go | `cgo` (header in a comment) | ~50 ns/call: keep it off the per-message path |
 | C → OCaml | `external` stubs with `[@@noalloc]`/`[@unboxed]`/`[@untagged]`, or `ctypes-foreign` | §95.3: annotated stubs are in the AOT band |
@@ -240,13 +240,13 @@ Checklist for a boundary:
 - *The Rustonomicon*, "FFI" chapter; Rust RFC 2945 (`extern "C-unwind"`) and the Rust 1.81 release notes (abort on unwind through `extern "C"`) (§95.4.3; Ch. 94).
 - The `cgo` command documentation and *"cgo is not Go"* (Cheney) — the stack switch and scheduler interaction behind the 50 ns (§95.3).
 - The OCaml manual, Ch. 27 *Interfacing C with OCaml* — `[@@noalloc]`, `[@unboxed]`, `[@untagged]` (§95.3).
-- nanobind and pybind11 documentation — call overhead, the buffer protocol/`ndarray`, GIL handling (§95.3; Ch. 108 §108.4.6).
+- nanobind and pybind11 documentation — call overhead, the buffer protocol/`ndarray`, GIL handling (§95.3; Ch. 109 §109.4.6).
 - Zig language reference: `extern struct`, `translate-c`, `zig cc`; C11 standard §8.17 (`<stdatomic.h>`) and the C++20 `[atomics]` clause — layout and lock-freedom guarantees (§95.4.4–§95.4.5).
 - libabigail (`abidiff`) documentation — ABI diffing of shared libraries in CI (§95.2.4).
 
 ## 95.9 Additional Reading
 
-- Ch. 65, 82, 83 (the SDKs this chapter wraps), Ch. 67 (shared memory as the zero-call alternative), Ch. 24 §24.6 (exceptions across C), Ch. 27 §27.4.2 (visibility and the PLT), Ch. 94 (the Rust side), Ch. 96 (why the managed rungs cost what they cost), Ch. 108 §108.4.6 (the Python research seam built on this waist).
+- Ch. 65, 82, 83 (the SDKs this chapter wraps), Ch. 67 (shared memory as the zero-call alternative), Ch. 24 §24.6 (exceptions across C), Ch. 27 §27.4.2 (visibility and the PLT), Ch. 94 (the Rust side), Ch. 96 (why the managed rungs cost what they cost), Ch. 109 §109.4.6 (the Python research seam built on this waist).
 - Appendix B (summary and tier table), Appendix D (`-fvisibility`, `-fno-plt`, unwind-table flags), Appendix I.9 (`nm -D`, `objdump`, `readelf` one-liners for checking exports and tables).
 - Hyde & Löwy / Microsoft, *"The Hourglass Interfaces for C++ APIs"* (Stefanus Du Toit, CppCon 2014) — the pattern's name and its rationale.
 

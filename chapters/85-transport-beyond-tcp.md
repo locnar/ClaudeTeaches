@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 68 (sockets, multicast), Ch. 70 (SBE and message encoding — the payload these transports carry), Ch. 83 (RDMA — a transport some of these ride), Ch. 72 (reliable multicast — the recovery ideas generalize here), Ch. 69 (TCP internals — the baseline these improve on), Ch. 48 (the Disruptor / mechanical sympathy — Aeron's lineage).
 >
-> **Leads into:** Ch. 86 (the slow-by-mandate transports — TLS/WebSocket/JSON/REST venues — at the other end of Part X), Ch. 87 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 90 (MPI — collective messaging over the same fabrics), Ch. 103 (process topology — Aeron IPC as the data plane), Ch. 118 (the end-to-end path). Ties back to Ch. 77 (flow steering — getting these transports' packets to the right core) and Ch. 84 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
+> **Leads into:** Ch. 86 (the slow-by-mandate transports — TLS/WebSocket/JSON/REST venues — at the other end of Part X), Ch. 87 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 90 (MPI — collective messaging over the same fabrics), Ch. 103 (process topology — Aeron IPC as the data plane), Ch. 119 (the end-to-end path). Ties back to Ch. 77 (flow steering — getting these transports' packets to the right core) and Ch. 84 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
 
 ---
 
@@ -131,7 +131,7 @@ Many HFT shops build a **custom reliable-UDP** transport, because even Aeron/eRP
 
 ## 85.8 Additional Reading
 
-- Talks on Aeron in production trading systems, and the Aeron Cluster / Raft consensus material (external — the Aeron docs; Ch. 110 covers the sequenced, replicated state machine that Aeron Cluster packages, Ch. 111 §111.4.6 where consensus sits relative to the order path) — the full messaging + clustering stack (§85.4.1).
+- Talks on Aeron in production trading systems, and the Aeron Cluster / Raft consensus material (external — the Aeron docs; Ch. 111 covers the sequenced, replicated state machine that Aeron Cluster packages, Ch. 112 §112.4.6 where consensus sits relative to the order path) — the full messaging + clustering stack (§85.4.1).
 - The datacenter-transport research line (Homa, NDP, pFabric, DCTCP — Ch. 84) — receiver-driven flow, priorities, and incast (§85.4.3).
 - **Ch. 96 §96.4.1** (*Managed Runtimes*) — Chronicle/Aeron (off-heap, garbage-free Java messaging) and **Ch. 95 §95.4.4** — cross-language shared-memory transports; Ch. 77 (*Flow Steering*) — getting these transports' packets to the right core; Ch. 84 (*Lossless Ethernet*) — the fabric under RDMA-based transports; **Appendix F** — HOL-blocking / receiver-driven / reliable-UDP glossary; **Appendix G** — the eRPC/Homa/Aeron bibliography.
 

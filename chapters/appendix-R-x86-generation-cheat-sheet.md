@@ -98,7 +98,7 @@ Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-funct
                  in 8 1 KiB tile registers                          state is XSAVE-managed        alternative on the host); first use after idle
                                                                                                   pays a tile-config + licence-class power ramp
    DSA           Data Streaming Accelerator: memcpy/memmove/fill,   work queues via ENQCMD/       capture-writer and replay copies, journal
-                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 108) — bulk copies off the core; a
+                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 109) — bulk copies off the core; a
                  spaces                                             polling or interrupt           submission is ~µs round trip: never a per-message op
    IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 95 §95.4.7),
                  decompression (Deflate), filter/scan                                              never on the order path

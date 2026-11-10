@@ -41,16 +41,16 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 13, 14).
    perf stat -a -I 1000 -e 'uncore_imc/cas_count_read/,uncore_imc/cas_count_write/'   # DRAM bandwidth: CAS × 64 B per channel (Ch. 8, 18)
    perf stat -a -I 1000 -e 'uncore_upi/txl_flits.all_data/'                         # cross-socket traffic (Ch. 18)
    perf stat -a -I 1000 -e 'uncore_iio/data_req_of_cpu.mem_write.part0/'           # PCIe inbound writes per IIO stack = NIC DMA (Ch. 76, 87)
-   perf stat -a -I 1000 -e power/energy-pkg/,power/energy-ram/                       # RAPL joules → watts: is the socket power-limited? (Ch. 6, 113)
+   perf stat -a -I 1000 -e power/energy-pkg/,power/energy-ram/                       # RAPL joules → watts: is the socket power-limited? (Ch. 6, 114)
    perf stat -C 5 -e core_power.lvl0_turbo_license,core_power.lvl1_turbo_license,core_power.lvl2_turbo_license -- sleep 10   # AVX licence time (Ch. 39) — ONE attach IPI; not -I
    perf stat -a -I 1000 -e msr/smi/                                                  # SMI count per second — must be 0 (Ch. 6 §6.4.4, 46, 82)
    perf record -e ibs_op//  -c 100000 ./app; perf report                            # AMD IBS: precise op sampling (what perf mem/c2c use on Zen)
    perf record -e ibs_fetch// ./app                                                  # AMD IBS: front-end sampling (Ch. 14)
    perf stat -M PipelineL1 ./app                                                     # Zen 4 pipeline-utilization top-down (names: perf list metricgroup)
-   # --- what it costs the hot core, and the syscall-free alternative (Ch. 118 §118.4.4) ---
+   # --- what it costs the hot core, and the syscall-free alternative (Ch. 119 §119.4.4) ---
    perf record -C 5 -e cycles:u -c 2000000 --call-graph fp --overwrite --switch-output=signal -o perf.data -- sleep 36000 &   # bounded, fp, frozen on SIGUSR2
    cat /sys/bus/event_source/devices/cpu/rdpmc                                      # 1 = rdpmc allowed for mmap'd events (default), 2 = always, 0 = never
-   ./rdpmc                                                                           # Ch. 118 §118.4.4's listing: cycles + LLC misses per stage from the thread itself
+   ./rdpmc                                                                           # Ch. 119 §119.4.4's listing: cycles + LLC misses per stage from the thread itself
 ```
 
 **Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 14); **bad speculation** → branch mispredicts (Ch. 15); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 8, 13); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).
@@ -130,10 +130,10 @@ Discovering the machine and placing threads on it (Ch. 18, 56, 57; Appendix C).
    echo x86-tsc > /sys/kernel/tracing/trace_clock        # TSC timestamps that line up with the app's rdtsc (Ch. 20)
    trace-cmd record -M 4 -C x86-tsc -e irq -e sched -e irq_vectors -e tlb -e timer:tick_stop   # to a file; `trace-cmd report` / KernelShark
    perf sched record -C 2 -- sleep 600 && perf sched timehist -C 2    # who ran on cpu2, when, for how long (thread intruders)
-   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 61 §61.4.1, Ch. 113)
+   awk 'NR==1 || /LOC|RES|CAL|TLB|IWI|NMI|PMI/' /proc/interrupts     # the IPI rows: diff two reads a minute apart on the hot cpu's column (Ch. 61 §61.4.1, Ch. 114)
    grep -l -E '^Cpus_allowed_list:.*\b2\b' /proc/[0-9]*/task/*/status  # every thread ALLOWED on cpu2 (want: yours + the per-cpu kthreads)
    cat /proc/irq/*/effective_affinity_list | sort | uniq -c            # where vectors REALLY live (managed ones ignore smp_affinity — Ch. 56)
-   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 113 §113.2.4)
+   sudo rdmsr -p 0 0x34                                                # MSR_SMI_COUNT from a HOUSEKEEPING cpu (rdmsr -a IPIs every core — Ch. 114 §114.2.4)
    turbostat --quiet --show CPU,Busy%,Bzy_MHz,SMI,PkgTmp --interval 5 --cpu 0-1   # --cpu restricts the MSR reads to housekeeping cpus
    # --- clocks, idle states and power (Ch. 60; Ch. 7): read from a HOUSEKEEPING cpu, pin the window to a point
    ./cstates 2 7                                                       # per-state exit/residency/usage/disable + the PM QoS bound (Ch. 60 §60.3)
@@ -210,8 +210,8 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
    # --- the datapath stage by stage (Ch. 64): health counters first, then the trace
    grep -E 'NET_RX|NET_TX' /proc/softirqs                              # per-CPU network softirqs: ZERO on hot cpus (Ch. 64 §64.2.2)
    cat /proc/net/softnet_stat                                          # hex per CPU: col1 processed, col2 backlog drops, col3 time_squeeze
-   nstat -az | grep -E 'UdpRcvbufErrors|UdpInErrors|TcpExtTCPBacklogDrop|TcpExtListenDrops|IpInDiscards'   # socket-level drops (Ch. 64, 114)
-   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'               # NIC/driver drops (Ch. 114)
+   nstat -az | grep -E 'UdpRcvbufErrors|UdpInErrors|TcpExtTCPBacklogDrop|TcpExtListenDrops|IpInDiscards'   # socket-level drops (Ch. 64, 115)
+   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'               # NIC/driver drops (Ch. 115)
    tc -s qdisc show dev eth0                                           # qdisc type, backlog, drops, requeues per TX queue (Ch. 64 §64.2.3)
    cat /sys/class/net/eth0/queues/tx-*/byte_queue_limits/{limit,inflight}   # BQL: inflight approaching limit = queueing, not stack, latency
    for q in /sys/class/net/eth0/queues/rx-*; do cat $q/rps_cpus; done   # must be 0 (or housekeeping cpus) — an RPS mask naming a hot cpu = IPIs there
@@ -234,9 +234,9 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
    cat /proc/net/igmp                           # kernel's view: (device, group) joins, little-endian hex groups; Querier column = IGMP version in use
    ip maddr show dev eth0                       # the same, decoded
    timeout 260 tcpdump -i eth0 -nn -c 1 'igmp and igmp[0]==0x11'   # a General Query within one interval, or the feed goes dark ~260 s after the last join
-   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 74, 114)
+   nstat -az IPReversePathFilter UdpRcvbufErrors UdpNoPorts        # rp_filter drops vs socket-buffer drops vs no-socket drops (Ch. 74, 115)
    sysctl net.ipv4.igmp_max_memberships net.ipv4.conf.eth0.rp_filter   # 20 by default (the 21st join fails ENOBUFS); strict rp_filter drops the feed
-   # --- network health & drop forensics (Ch. 114): which LAYER dropped it
+   # --- network health & drop forensics (Ch. 115): which LAYER dropped it
    ethtool -S eth0 | grep -iE 'missed|out_of_buffer|nodesc'          # host ring full (poll too slow)        — layer 2b
    ethtool -S eth0 | grep -iE 'fifo|over|discards_phy'               # NIC port FIFO / PCIe backpressure      — layer 2a (Ch. 85)
    ethtool -S eth0 | grep -iE 'crc|symbol|fec|pause'                 # link/PHY/FEC and pause frames         — layer 1 / fabric
@@ -247,14 +247,14 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
    sudo bpftrace -e 'tracepoint:skb:kfree_skb { @[args->reason, ksym(args->location)] = count(); }'   # drop REASON + location; arm BEFORE the session (text_poke IPIs)
    ethtool -m eth0 | grep -iE 'power|temperature'                     # optics DOM: rx/tx power vs the module's warning thresholds
    cat /sys/class/net/eth0/carrier_changes                            # link flaps since boot
-   # --- line-rate capture, replay and passive measurement (Ch. 109, Ch. 80 §80.4.4)
+   # --- line-rate capture, replay and passive measurement (Ch. 110, Ch. 80 §80.4.4)
    tcpdump -i eth0 -j adapter_unsynced --time-stamp-precision=nano -B 262144 -w open.pcapng 'udp and dst net 233.0.0.0/8'   # NIC hw stamps, ns, big buffer; -Z/-U as needed
    tshark -r open.pcapng -q -z io,stat,0.001,'udp'                      # packets per ms: the burst's shape (gap histogram: -T fields -e frame.time_delta)
    capinfos -c -u -y open.pcapng                                        # packet count, duration, average rate; the ISB drop counters: tshark -r f -Y pcapng.isb
    cat /proc/net/packet                                                 # every AF_PACKET socket: RxRing/Drops columns = PACKET_STATISTICS (ring full → lossy capture)
-   ethtool -K eth0 gro off lro off rx-vlan-offload off                  # capture what was on the wire, not what the NIC coalesced/stripped (Ch. 109 §109.4.2)
+   ethtool -K eth0 gro off lro off rx-vlan-offload off                  # capture what was on the wire, not what the NIC coalesced/stripped (Ch. 110 §110.4.2)
    ethtool -S eth0 | grep -iE 'drop|miss|fifo' > before; … ; diff before <(ethtool -S eth0 | grep -iE 'drop|miss|fifo')   # the per-session losslessness proof, NIC layer
-   tcpreplay -i eth1 --timer=nano -p 0 open.pcapng                      # best-effort nanosleep pacing (measure its gap error — Ch. 109 §109.3 — before trusting it)
+   tcpreplay -i eth1 --timer=nano -p 0 open.pcapng                      # best-effort nanosleep pacing (measure its gap error — Ch. 110 §110.3 — before trusting it)
    tcpreplay -i eth1 -t open.pcapng                                     # as fast as possible: a THROUGHPUT test, not a timing one
    # --- the order session's liveness timers (Ch. 69 §69.4.4, Ch. 106 §106.4.4)
    ss -tio dst <venue> | grep -oE 'rto:[0-9.]+|backoff:[0-9]+|retrans:[0-9/]+|unacked:[0-9]+'   # is the venue silent? RTO doubling and backoff climbing = no ACKs
@@ -269,7 +269,7 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
 
 ```
 
-**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 70) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 114 §114.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §114.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 78, Appendix K.5).
+**Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 70) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 115 §115.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §115.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 78, Appendix K.5).
 
 ## I.9 Codegen, binaries & sanitizers
 
@@ -282,14 +282,14 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
    nm -D --defined-only -C ./app | wc -l                  # exported (dynamic) symbol count (visibility hygiene; App D.4)
    g++ ... -fno-reorder-blocks-and-partition -Wl,--emit-relocs -o app   # BOLT needs relocations to reorder functions, and does its own hot/cold splitting (App D.5–D.6)
    perf record -e cycles:u -j any,u ./app                 # LBR data for BOLT
-   # --- the PGO profile lifecycle (Ch. 27 §27.4.5, Ch. 116 §116.4.5):
+   # --- the PGO profile lifecycle (Ch. 27 §27.4.5, Ch. 117 §117.4.5):
    LLVM_PROFILE_FILE="prof/%m-%p.profraw" ./app_instr --replay open.pcapng      # Clang: one raw profile per process, keyed by binary signature (%m)
    llvm-profdata merge -output=rev.profdata prof/*.profraw                    # merge; -weighted-input=3,open.profdata -weighted-input=1,mid.profdata to weight the open
    llvm-profdata show --topn=10 rev.profdata                                   # hottest functions / counters in the profile (did the training reach the hot path?)
    gcov-tool merge -w 3,1 prof_open prof_mid -o prof_merged                    # GCC: weighted merge of two .gcda directories
    g++ -fprofile-use -fprofile-correction -Werror=coverage-mismatch -Werror=missing-profile -c x.cpp -o build/x.o   # same -o as the instrumented compile, or the .gcda is not found
    clang++ -fprofile-instr-use=rev.profdata -Werror=profile-instr-out-of-date -Werror=profile-instr-unprofiled x.cpp   # make Clang's silent stale-profile build fatal
-   # --- performance gates in CI (Ch. 116):
+   # --- performance gates in CI (Ch. 117):
    for i in $(seq 20); do ./bench --benchmark_filter=Update --benchmark_out=aa-$i.json --benchmark_out_format=json; done   # A/A: the same binary 20×; the spread is the noise floor
    perf stat -e instructions:u,branches:u,branch-misses:u -r 10 -x, ./bench   # deterministic proxy: instructions:u varies < 0.01 % run to run on any runner
    valgrind --tool=cachegrind --cache-sim=yes --branch-sim=yes ./bench         # simulated misses: slow, exact, machine-independent
@@ -308,16 +308,16 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
 
 ## I.10 Crash, core-dump, live-introspection & incident one-liners
 
-The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 107, Ch. 112 and Appendix N.
+The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 108, Ch. 113 and Appendix N.
 
 ```
-   # --- cores and crash records (Ch. 107) ---
+   # --- cores and crash records (Ch. 108) ---
    readelf -n ./app | grep 'Build ID'                     # the key that matches a core/crash record to its archived .debug (Ch. 5 §5.4.1)
    readelf -p .GCC.command.line ./app                     # the flags it was built with (needs -frecord-gcc-switches; App D.7)
-   cat /proc/sys/kernel/core_pattern                      # "core", "|/usr/lib/systemd/systemd-coredump …" or your pipe handler (Ch. 107 §107.4.4)
+   cat /proc/sys/kernel/core_pattern                      # "core", "|/usr/lib/systemd/systemd-coredump …" or your pipe handler (Ch. 108 §108.4.4)
    cat /proc/$PID/coredump_filter; echo 0x11 > /proc/$PID/coredump_filter   # dump private anon + ELF headers only (no shared/huge segments)
-   grep -E 'VmRSS|VmHWM|HugetlbPages' /proc/$PID/status   # how big the core WOULD be before MADV_DONTDUMP (Ch. 107 §107.3)
-   coredumpctl list; coredumpctl info $PID; coredumpctl gdb $PID            # systemd-stored cores (Ch. 107 §107.4.4)
+   grep -E 'VmRSS|VmHWM|HugetlbPages' /proc/$PID/status   # how big the core WOULD be before MADV_DONTDUMP (Ch. 108 §108.3)
+   coredumpctl list; coredumpctl info $PID; coredumpctl gdb $PID            # systemd-stored cores (Ch. 108 §108.4.4)
    gdb -q ./app.debug -c core -batch -ex 'thread apply all bt' -ex 'info registers'   # every thread's stack, once
    eu-stack --core core -e ./app --debuginfo-path /var/debug   # the same without gdb's start-up (elfutils)
    addr2line -e ./app.debug -f -C -i -p 0x$(( FRAME - LOAD_BASE ))   # a raw crash-record frame → file:line (load base from maps)
@@ -327,20 +327,20 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 107, Ch. 112 and Appendix N
    gdb -q -batch -ex 'set non-stop on' -ex 'set pagination off' -ex "attach $PID" -ex 'info threads' -ex detach
    gdb -q -batch -ex 'set non-stop on' -ex "attach $PID" -ex "thread $HK_TID" -ex 'interrupt' -ex 'bt' -ex detach   # one housekeeping thread only
    gdbserver --attach :2345 $PID                           # debug from another box; still a ptrace stop — housekeeping threads only
-   for t in /proc/$PID/task/*; do printf '%s ' $t; awk '/^(voluntary|nonvoluntary)_ctxt/ {printf "%s ", $0}' $t/status; echo; done   # who stopped (Ch. 113)
+   for t in /proc/$PID/task/*; do printf '%s ' $t; awk '/^(voluntary|nonvoluntary)_ctxt/ {printf "%s ", $0}' $t/status; echo; done   # who stopped (Ch. 114)
    perf record -e mem:0x$ADDR:w -p $PID -- sleep 60        # hardware data breakpoint on a LIVE pid: the next writer's IP (Ch. 5 §5.4.5)
    perf script -F tid,ip,sym,srcline                       # … and who it was
-   # --- latency-spike forensics (Ch. 112) ---
+   # --- latency-spike forensics (Ch. 113) ---
    echo x86-tsc > /sys/kernel/tracing/trace_clock          # make the kernel ring comparable to rdtsc stamps (BEFORE the incident)
    echo 0 > /sys/kernel/tracing/tracing_on; cat /sys/kernel/tracing/per_cpu/cpu5/trace | tail -200   # freeze and read the hot core's ring
    perf record -C 5 -e cycles:u -c 2000000 --call-graph fp -k CLOCK_MONOTONIC --overwrite --switch-output=signal -o perf.data -- sleep 36000 &
-   kill -USR2 %1                                           # dump the last few seconds of the hot core's samples to perf.data.<ts> (Ch. 112 §112.4.3)
+   kill -USR2 %1                                           # dump the last few seconds of the hot core's samples to perf.data.<ts> (Ch. 113 §113.4.3)
    perf record -e intel_pt/cyc/u -C 5 --snapshot=e -k CLOCK_MONOTONIC -o pt.data -- sleep 36000 &   # Intel PT snapshot mode
    kill -USR2 %2; perf script -i pt.data --itrace=i0ns -F time,ip,sym,srcline --time $M0,$M1   # decode the window ELSEWHERE (Ch. 2 §2.4.4)
    perf script -i perf.data --ns -F time,cpu,comm,ip,sym --time $M0,$M1   # the samples inside a CLOCK_MONOTONIC window
    journalctl -k -o short-precise --since=@$T --until=@$((T+1))   # the kernel log second that contains the window
    dmesg --time-format=iso | tail                           # µs-resolution BOOTTIME-based stamps (not -T, which rounds to the second)
-   rdmsr -p 5 0x34                                         # SMI_COUNT on CPU 5 — from a housekeeping core's shell only (Ch. 113 §113.4.2)
+   rdmsr -p 5 0x34                                         # SMI_COUNT on CPU 5 — from a housekeeping core's shell only (Ch. 114 §114.4.2)
    # --- the incident bundle (Appendix N) ---
    incident-collect.sh $CORR $T0 $T1 $PID perf.data.*     # bounded collector: provenance, clocks, rings, host/net windows, capture slice
    perf archive perf.data.2026…                            # the symbols a perf.data needs to be read on another box
@@ -358,7 +358,7 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 107, Ch. 112 and Appendix N
 
 ```
 
-**Interpreting:** the crash record (Ch. 107 §107.4.1) usually names the bug before the core is opened — `si_code`, `si_addr` and the fault error code against the registers; `addr2line` on `frame0` is the second step, the core the third. For a live process the rule is *never an all-stop attach to a process with a hot thread*: `set non-stop on` before `attach`, and interrupt only the housekeeping thread you need (Ch. 5 §5.4.4 measured the all-stop attach at a quarter of a second on the hot thread); `process_vm_readv`/`/proc/PID/mem` of a seqlock-versioned snapshot costs the target nothing. For a spike, the order is Ch. 112 §112.4.4's: the ftrace ring in the window first (did the thread leave the CPU? an IRQ? a shootdown? an empty gap?), the host and network samples second, `perf`/PT decode last and never on the trading host.
+**Interpreting:** the crash record (Ch. 108 §108.4.1) usually names the bug before the core is opened — `si_code`, `si_addr` and the fault error code against the registers; `addr2line` on `frame0` is the second step, the core the third. For a live process the rule is *never an all-stop attach to a process with a hot thread*: `set non-stop on` before `attach`, and interrupt only the housekeeping thread you need (Ch. 5 §5.4.4 measured the all-stop attach at a quarter of a second on the hot thread); `process_vm_readv`/`/proc/PID/mem` of a seqlock-versioned snapshot costs the target nothing. For a spike, the order is Ch. 113 §113.4.4's: the ftrace ring in the window first (did the thread leave the CPU? an IRQ? a shootdown? an empty gap?), the host and network samples second, `perf`/PT decode last and never on the trading host.
 
 ## I.11 Other toolchains: asm, runtime logs and the C-ABI waist
 
@@ -424,7 +424,7 @@ Profiling and policing the build (Ch. 28), checking that an attribute fired (App
    SOURCE_DATE_EPOCH=1700000000 g++ -O2 -ffile-prefix-map=$PWD=/src -frandom-seed=x.cpp -Wl,--build-id=sha1 x.cpp -o x && cmp x x.rebuilt   # reproducible? (Ch. 28 §28.4.6)
    readelf -p .GCC.command.line hot.o                        # the flags THIS object was built with (-frecord-gcc-switches; Ch. 28 §28.4.5)
    llvm-dwarfdump --debug-info hot.o | grep -m1 DW_AT_producer   # same, Clang (DWARF producer string)
-   readelf -n ./app | grep -A1 'Build ID'                    # content-derived build ID (Ch. 28, 107)
+   readelf -n ./app | grep -A1 'Build ID'                    # content-derived build ID (Ch. 28, 108)
    # attributes & UB licences (Appendix P):
    clang++ -O2 -Rpass=inline -Rpass-missed=inline -Rpass-missed=loop-vectorize -c hot.cpp     # what inlined / vectorised, and why not
    g++ -O2 -fopt-info-vec-all -fopt-info-inline-optimized -c hot.cpp

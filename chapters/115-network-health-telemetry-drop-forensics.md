@@ -1,24 +1,24 @@
 # Part XIII — Observability & Operations in Production
 
-# Chapter 114 — Network Health Telemetry & Drop Forensics
+# Chapter 115 — Network Health Telemetry & Drop Forensics
 
-> **Prerequisites:** Ch. 63 (the kernel receive path — ring, NAPI, softirq, socket), Ch. 68 (socket buffers, `TCP_NODELAY`, the UDP knobs), Ch. 70 §70.2.4 and §70.4.4 (RX rings, microbursts, "detect drops at every layer"), Ch. 74 (membership — the drop that produces no counter), Ch. 75 and Ch. 77 (NIC queues, RSS, steering), Ch. 80 (the fabric), Ch. 82 (bypass stacks and the tooling they take away), Ch. 84 (PFC/ECN on lossless fabrics), Ch. 85 (PCIe — the path behind "FIFO" errors), Ch. 100 and Ch. 113 (the scraper, the invariant alert class, the sampler's footprint).
+> **Prerequisites:** Ch. 63 (the kernel receive path — ring, NAPI, softirq, socket), Ch. 68 (socket buffers, `TCP_NODELAY`, the UDP knobs), Ch. 70 §70.2.4 and §70.4.4 (RX rings, microbursts, "detect drops at every layer"), Ch. 74 (membership — the drop that produces no counter), Ch. 75 and Ch. 77 (NIC queues, RSS, steering), Ch. 80 (the fabric), Ch. 82 (bypass stacks and the tooling they take away), Ch. 84 (PFC/ECN on lossless fabrics), Ch. 85 (PCIe — the path behind "FIFO" errors), Ch. 100 and Ch. 114 (the scraper, the invariant alert class, the sampler's footprint).
 >
-> **Leads into:** Ch. 118 (the case study — a drop is the first thing its incident procedure rules out), Appendix M (the feed and link gates read these counters), Appendix I.8 (the one-liners). Four chapters say "monitor `ethtool -S` and alert"; this one says what each counter means, which layer dropped the packet, how to find the exact line of kernel code that freed it, and how to sample all of it without touching the hot core.
+> **Leads into:** Ch. 119 (the case study — a drop is the first thing its incident procedure rules out), Appendix M (the feed and link gates read these counters), Appendix I.8 (the one-liners). Four chapters say "monitor `ethtool -S` and alert"; this one says what each counter means, which layer dropped the packet, how to find the exact line of kernel code that freed it, and how to sample all of it without touching the hot core.
 
 ---
 
-## 114.1 Why it matters: a silent drop at the open is a wrong book and a lost race
+## 115.1 Why it matters: a silent drop at the open is a wrong book and a lost race
 
 Every packet that dies between the exchange's switch and your decoder dies *somewhere*, and the somewhere is the whole diagnosis. A packet dropped because the NIC's host ring was full means your poll loop was too slow for the burst — a software problem, fixed with a bigger ring, busy-polling or steering (Ch. 70, 75, 77). The same packet dropped because the NIC's *internal* FIFO overflowed means the DMA path could not drain into memory — a PCIe link that downtrained, an IOMMU, a NUMA-remote ring (Ch. 18, 85) — and no amount of ring sizing will help. Dropped in the socket buffer, it means the consumer thread fell behind (Ch. 68); dropped by `rp_filter`, it means the feed's source is unroutable (Ch. 74); dropped at the PHY with a CRC error, it means an optic is dying (Ch. 80, Appendix K). Each is a different team, a different fix and a different urgency, and they all look identical from the application: a sequence gap (Ch. 70) or, worse, nothing at all (Ch. 74). Ch. 68, 70, 75 and Appendix I.8 each tell you to "monitor `ethtool -S` and alert on drops"; none says which of the two hundred counters `ethtool -S` prints on a modern NIC means what, which ones are the *same* drop counted twice, or what to do when the counters are clean and the packets are still missing.
 
 The second half of the problem is the **order path**, where the transport is TCP and a "drop" is not a gap but a *stall*: a retransmission timeout on the order session is a 200 ms hole (Ch. 69) during which every order you send sits in the socket buffer, and the counter that records it (`TCPTimeouts`) is one line in `/proc/net/netstat` that nobody reads. Per-socket `TCP_INFO` — the live RTT to the venue, retransmits, the time the connection spent limited by the receive window or by your own send buffer — is the venue session's health in twelve integers, available from a housekeeping thread at 1 Hz.
 
-This chapter is the counter taxonomy the book has deferred, plus the forensic step beyond counters. §114.2 arranges the receive path's counters by **the layer that dropped** — PHY/MAC, NIC buffer and PCIe, driver/NAPI, IP, UDP, TCP, bypass stacks, application — and names the per-driver dialects (`ixgbe`/`i40e`/`ice`, `mlx5`, `sfc`), the duplicates, and the one drop no counter records. §114.3 measures the market-open replay in which each layer saturates in turn and shows which counter lights first, then the cost and footprint of the pollers themselves. §114.4 builds the sampler (the `ethtool -S` ioctl, `softnet_stat`, `nstat`'s sources, `TCP_INFO`), the **drop forensics** workflow (`dropwatch`, the `skb:kfree_skb` tracepoint with its drop reason, `perf`/`bpftrace` one-liners that name the function that freed the packet), the link and fabric signals (pause frames, FEC, optics, flaps, switch telemetry, IGMP state), and the bypass-stack counters that replace the kernel's when the kernel is not in the path; §114.5 and §114.6 close with pitfalls, exercises and the checklist that feeds Appendix M's link and feed gates.
+This chapter is the counter taxonomy the book has deferred, plus the forensic step beyond counters. §115.2 arranges the receive path's counters by **the layer that dropped** — PHY/MAC, NIC buffer and PCIe, driver/NAPI, IP, UDP, TCP, bypass stacks, application — and names the per-driver dialects (`ixgbe`/`i40e`/`ice`, `mlx5`, `sfc`), the duplicates, and the one drop no counter records. §115.3 measures the market-open replay in which each layer saturates in turn and shows which counter lights first, then the cost and footprint of the pollers themselves. §115.4 builds the sampler (the `ethtool -S` ioctl, `softnet_stat`, `nstat`'s sources, `TCP_INFO`), the **drop forensics** workflow (`dropwatch`, the `skb:kfree_skb` tracepoint with its drop reason, `perf`/`bpftrace` one-liners that name the function that freed the packet), the link and fabric signals (pause frames, FEC, optics, flaps, switch telemetry, IGMP state), and the bypass-stack counters that replace the kernel's when the kernel is not in the path; §115.5 and §115.6 close with pitfalls, exercises and the checklist that feeds Appendix M's link and feed gates.
 
-## 114.2 Mental model: the counter hierarchy, by the layer that dropped
+## 115.2 Mental model: the counter hierarchy, by the layer that dropped
 
-### 114.2.1 The receive path and its counters
+### 115.2.1 The receive path and its counters
 
 A packet entering the host crosses eight places where it can be lost or delayed, and each place has its own counters, kept by a different piece of software (or firmware), exposed through a different interface:
 
@@ -59,7 +59,7 @@ A packet entering the host crosses eight places where it can be lost or delayed,
 
 Three facts to read the table with. **The layers are ordered, and a packet dies at the first one that cannot accept it** — so a burst that overflows the socket buffer (layer 5) while layers 1–3 are clean says "the consumer is slow", while a burst that fills the ring (2b) *and* squeezes NAPI (3) says "the kernel path is too slow for this rate" and points at busy-poll or bypass. **The same drop is often counted at two layers with different names** — a ring-full drop appears as the driver's `rx_missed_errors`, the generic `rx_dropped` (on some drivers) and the per-queue `rx-N.rx_dropped`; `UdpInErrors` includes `UdpRcvbufErrors`; do not add them. And **layer 8's "feed age" is the only signal for the drop that happens *before* layer 1** — a packet that never reached your port (membership, upstream prune, venue) moves nothing in the table, which is why Ch. 74's watchdog is part of network health and not a separate concern.
 
-### 114.2.2 Driver dialects: the same drop, five names
+### 115.2.2 Driver dialects: the same drop, five names
 
 `ethtool -S` prints whatever the driver author chose to export; the generic `/sys/class/net/<if>/statistics/` and `ip -s link` fields are the kernel's attempt at a common vocabulary, filled in by each driver differently. The ones that matter on a trading box:
 
@@ -69,9 +69,9 @@ Three facts to read the table with. **The layers are ordered, and a packet dies 
 - **Solarflare/AMD `sfc`**: `rx_nodesc_drop_cnt` (ring empty, 2b), `port_rx_nodesc_drops` (port view of the same), `port_rx_dp_di_dropped_packets` (datapath drops), `port_rx_pause`/`port_tx_pause`, `port_rx_bad` (CRC/frame), per-queue `rx-N.rx_packets`; under Onload/ef_vi the kernel counters are irrelevant (layer 7).
 - **The generic fields** (`ip -s -s link show`, `/sys/class/net/X/statistics/`): `rx_dropped` (driver-reported drops, meaning varies), `rx_missed_errors` (ring/port overflow), `rx_fifo_errors` (FIFO overflow — often *equal* to `rx_missed_errors`, the same event), `rx_over_errors` (receiver overrun), `rx_crc_errors`, `rx_length_errors`, `rx_frame_errors`, and `rx_errors` (a sum). Trust them only after reading the driver's mapping once (`drivers/net/ethernet/<vendor>/*ethtool*.c` is short and definitive).
 
-The rule for a new NIC: *run one deliberately-overflowed burst with the consumer stopped (ring full), one with a PCIe link forced to a lower width (port FIFO), and one with a bad patch cable (CRC), and record which counters move for each.* That table — not the vendor's documentation — is what the sampler's "meaning" column should say (§114.3).
+The rule for a new NIC: *run one deliberately-overflowed burst with the consumer stopped (ring full), one with a PCIe link forced to a lower width (port FIFO), and one with a bad patch cable (CRC), and record which counters move for each.* That table — not the vendor's documentation — is what the sampler's "meaning" column should say (§115.3).
 
-### 114.2.3 Delay is not loss, and loss is not always a counter
+### 115.2.3 Delay is not loss, and loss is not always a counter
 
 - **`time_squeeze` is latency.** NAPI processes up to `netdev_budget` (300) packets or `netdev_budget_usecs` (2,000 µs) per softirq round; if work remains, it yields and **defers the rest to `ksoftirqd`**, a `SCHED_OTHER` thread that runs when the scheduler allows (Ch. 59 — on a shared core, milliseconds later). The packets are not lost — the ring still holds them — but every one of them is late, and if the ring fills before `ksoftirqd` runs, `time_squeeze` turns into `rx_missed_errors`. A rising `time_squeeze` on the market-data path is the warning that precedes the first drop, and the reason a kernel-path feed handler busy-polls (Ch. 63 §63.4.2) or leaves the kernel (Ch. 82).
 - **Pause frames move the drop.** With Ethernet flow control enabled (`ethtool -a`), a NIC whose buffers fill sends **PAUSE** (`tx_pause`), and the switch stops transmitting to you — the packets queue in the *switch* instead of dropping in your NIC. Your counters stay clean while the switch's egress queue, and then its other ports (head-of-line blocking, Ch. 84), absorb your slowness. `tx_pause` increments are therefore a *your-host-is-slow* signal disguised as health; `rx_pause` means the switch is telling *you* to stop. Market-data hosts usually run flow control **off** so that drops happen where they can be seen; lossless RDMA fabrics (Ch. 84) run PFC *on* by design and monitor it as a congestion signal.
@@ -80,11 +80,11 @@ The rule for a new NIC: *run one deliberately-overflowed burst with the consumer
 
 The model: **drops have an address — the layer that could not accept the packet — and each address has a counter with a driver-specific name, a meaning, and an owner; the layers fill in order, so the first counter to move names the bottleneck; `time_squeeze` and pause frames are delay signals that precede loss; bypass stacks carry their own counters; and the drop that moves nothing is detected by time.**
 
-## 114.3 Measure it: the open, layer by layer; and the cost of looking
+## 115.3 Measure it: the open, layer by layer; and the cost of looking
 
 *Toolchain and machine: Appendix L.3.*
 
-**The market-open replay.** Replay a captured open (Ch. 108) at increasing speed into a kernel-path feed handler on the reference box (Intel E810 `ice` driver, 4096-descriptor RX ring, the handler pinned to isolated CPU 5 with the NIC queue steered to it, `SO_RCVBUF` 32 MiB, `netdev_budget` default), with the §114.4.1 sampler on CPU 0, and record which counters move at each rate. Representative:
+**The market-open replay.** Replay a captured open (Ch. 109) at increasing speed into a kernel-path feed handler on the reference box (Intel E810 `ice` driver, 4096-descriptor RX ring, the handler pinned to isolated CPU 5 with the NIC queue steered to it, `SO_RCVBUF` 32 MiB, `netdev_budget` default), with the §115.4.1 sampler on CPU 0, and record which counters move at each rate. Representative:
 
 ```
    replay rate         consumer state             first counters to move (per second)                           app sees
@@ -96,7 +96,7 @@ The model: **drops have an address — the layer that could not accept the packe
    8×                   ksoftirqd cannot keep up   rx-5.rx_dropped +31k/s, rx_missed_errors +31k/s (same drops),    gaps; the RING overflowed before
                                                    time_squeeze +900/s; Udp:RcvbufErrors stops rising             packets reached the socket
    8×, PCIe forced x4   DMA path too slow          port.rx_dropped/rx_fifo_errors +; rx_missed_errors flat;         gaps with a QUIET host — the
-   (link downtrained)                              ice: port.rx_discards; mlx5 would show rx_discards_phy          PCIe path (Ch. 85, 113)
+   (link downtrained)                              ice: port.rx_discards; mlx5 would show rx_discards_phy          PCIe path (Ch. 85, 114)
    8×, busy-poll on     keeps up (no NAPI)         none until 12×: then rx_missed_errors only (ring), no squeeze    flat to 12× — the kernel softirq
    (Ch. 63 §63.4.2)                                                                                                 path was the bottleneck
    8×, bad patch cable  —                          rx_crc_errors +; FEC uncorrectable +; kernel/stack counters 0    gaps + A/B skew (one line's CRCs)
@@ -121,19 +121,19 @@ Each row is a different fix, and the counters tell them apart before the applica
    perf record -e skb:kfree_skb -a (sampling)      per-drop record + buffer flushes      -a includes the hot CPUs: use -C <housekeeping>
 ```
 
-The first five rows are free on the hot core — counters the kernel already maintains, read from a housekeeping CPU, with the one caveat that `ethtool -S` on a firmware-backed NIC is milliseconds of *housekeeping* time and must not be polled at 100 Hz. `TCP_INFO` is the one poller that can touch the hot thread: its socket-lock hold is ~150 ns and a `send()` racing it waits that long — at 1 Hz, an acceptable, measured, once-a-second ~150 ns tail contribution; at 1 kHz, a design error. The tracepoint rows are the §114.4.2 forensics: free while armed, expensive to *arm*, which is why they are armed before the open and left on.
+The first five rows are free on the hot core — counters the kernel already maintains, read from a housekeeping CPU, with the one caveat that `ethtool -S` on a firmware-backed NIC is milliseconds of *housekeeping* time and must not be polled at 100 Hz. `TCP_INFO` is the one poller that can touch the hot thread: its socket-lock hold is ~150 ns and a `send()` racing it waits that long — at 1 Hz, an acceptable, measured, once-a-second ~150 ns tail contribution; at 1 kHz, a design error. The tracepoint rows are the §115.4.2 forensics: free while armed, expensive to *arm*, which is why they are armed before the open and left on.
 
-## 114.4 Techniques
+## 115.4 Techniques
 
-### 114.4.1 The sampler: every counter, by layer, from a housekeeping core
+### 115.4.1 The sampler: every counter, by layer, from a housekeeping core
 
-The sampler reads all of §114.2.1's kernel-side layers once a second — `ethtool -S` through the same `SIOCETHTOOL` ioctl the tool uses (so the per-driver names come straight from the driver), the generic statistics, link flaps, `softnet_stat` per CPU, and the SNMP/netstat MIBs — diffs, and tags each delta with its layer and meaning:
+The sampler reads all of §115.2.1's kernel-side layers once a second — `ethtool -S` through the same `SIOCETHTOOL` ioctl the tool uses (so the per-driver names come straight from the driver), the generic statistics, link flaps, `softnet_stat` per CPU, and the SNMP/netstat MIBs — diffs, and tags each delta with its layer and meaning:
 
 ```cpp
 // netwatch.cpp — the network-health sampler: once a second, from a housekeeping core, read every counter in the receive
 // path by LAYER — NIC/driver (ethtool -S via the SIOCETHTOOL ioctl, /sys/class/net statistics, carrier changes), NAPI
 // (/proc/net/softnet_stat per CPU), IP/UDP/TCP (/proc/net/snmp, /proc/net/netstat) — diff against the previous sample,
-// and print each delta tagged with the layer that dropped and what it means.  (Ch. 114 §114.4.1)
+// and print each delta tagged with the layer that dropped and what it means.  (Ch. 115 §115.4.1)
 // Build: g++ -O2 -std=c++23 netwatch.cpp -o netwatch   (GCC 13/14; Clang 18 same)
 // Run:   taskset -c 0 ./netwatch eth1 [--cpus 2-7] [--period-ms 1000]
 #include <algorithm>
@@ -169,7 +169,7 @@ std::vector<int> parse_list(std::string_view s) {
 }
 
 // --- layer 1-2: the driver's own counters, exactly what `ethtool -S` prints. The ioctl runs DRIVER code (and on some
-// NICs a firmware query) under rtnl_lock — fine from a housekeeping core at 1 Hz, never from a hot thread (§114.3).
+// NICs a firmware query) under rtnl_lock — fine from a housekeeping core at 1 Hz, never from a hot thread (§115.3).
 struct Ethtool {
     int fd; ifreq ifr{}; std::vector<std::string> names;
     explicit Ethtool(const char* ifname) : fd(::socket(AF_INET, SOCK_DGRAM, 0)) {
@@ -240,7 +240,7 @@ int main(int argc, char** argv) {
         for (auto k : kernel_stats) { const u64 v = to_u64(slurp(sysstat + k)); if (v != ks_prev[k]) {
             const char* why = !std::strcmp(k, "rx_missed_errors") ? "<- host RING FULL: poll/NAPI too slow (software side)"
                             : !std::strcmp(k, "rx_fifo_errors") || !std::strcmp(k, "rx_over_errors") ? "<- NIC FIFO/PCIe backpressure (Ch. 85): the DMA path, not the host"
-                            : !std::strcmp(k, "rx_crc_errors") || !std::strcmp(k, "rx_frame_errors") || !std::strcmp(k, "rx_length_errors") ? "<- LINK: cable/optic/FEC (§114.4.4)" : "";
+                            : !std::strcmp(k, "rx_crc_errors") || !std::strcmp(k, "rx_frame_errors") || !std::strcmp(k, "rx_length_errors") ? "<- LINK: cable/optic/FEC (§115.4.4)" : "";
             std::printf("[%d] NIC/kernel  %-40s +%llu %s\n", n, k, (unsigned long long)(v - ks_prev[k]), why); ks_prev[k] = v; } }
         const u64 cc = to_u64(slurp("/sys/class/net/" + ifn + "/carrier_changes")); if (cc != carrier_prev) { std::printf("[%d] LINK FLAP: carrier_changes +%llu\n", n, (unsigned long long)(cc - carrier_prev)); carrier_prev = cc; }
         auto sn = softnet();
@@ -272,13 +272,13 @@ Built with GCC 13.3 and Clang 18.1. On the authoring host (a VM with a `virtio_n
    [1] STACK       Udp:NoPorts         +50    <- traffic for a port no socket is bound to (a join without a socket?)
 ```
 
-— layer 5, with layers 1–3 silent, which is the diagnosis: the consumer, not the NIC. In production the `printf`s are stores into a `NetStats` block of the Ch. 100 segment (per NIC: the watched `ethtool` counters by *your* layer mapping from §114.2.2, the generic stats, carrier changes; per CPU: `softnet` rows; host-wide: the MIB keys), exported beside the application's gap counters so "`rx_missed_errors +31k`" and "post-A/B gaps +400" share a timestamp — and the "any nonzero delta" alert class (Ch. 100 §100.4.4) applies to every drop counter in the table, with the meaning column attached to the ticket. Two additions the listing omits for length: the **per-socket `TCP_INFO`** poll for the order sessions (below), and the **bypass-stack counters** (§114.4.5) when the kernel is not in the path.
+— layer 5, with layers 1–3 silent, which is the diagnosis: the consumer, not the NIC. In production the `printf`s are stores into a `NetStats` block of the Ch. 100 segment (per NIC: the watched `ethtool` counters by *your* layer mapping from §115.2.2, the generic stats, carrier changes; per CPU: `softnet` rows; host-wide: the MIB keys), exported beside the application's gap counters so "`rx_missed_errors +31k`" and "post-A/B gaps +400" share a timestamp — and the "any nonzero delta" alert class (Ch. 100 §100.4.4) applies to every drop counter in the table, with the meaning column attached to the ticket. Two additions the listing omits for length: the **per-socket `TCP_INFO`** poll for the order sessions (below), and the **bypass-stack counters** (§115.4.5) when the kernel is not in the path.
 
 **`TCP_INFO` for the order session.** From the gateway's housekeeping thread, once a second per venue socket:
 
 ```cpp
 tcp_info ti{}; socklen_t len = sizeof ti;
-if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &ti, &len) == 0) {            // ~2 µs; holds the socket lock ~150 ns (§114.3)
+if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &ti, &len) == 0) {            // ~2 µs; holds the socket lock ~150 ns (§115.3)
     publish(venue, "rtt_us", ti.tcpi_rtt, "rttvar_us", ti.tcpi_rttvar,     // the venue round-trip the kernel measures
             "retrans", ti.tcpi_retrans, "total_retrans", ti.tcpi_total_retrans, "lost", ti.tcpi_lost,
             "notsent_bytes", ti.tcpi_notsent_bytes,                        // > 0 with an idle app = data STUCK behind cwnd/rwnd
@@ -289,7 +289,7 @@ if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &ti, &len) == 0) {            // ~2 µ
 
 `tcpi_rtt` is the live round-trip to the venue — its drift is the first sign of a congested path or a re-routed cross-connect (Appendix K); `tcpi_total_retrans` moving on an order session is one lost order message and one RTO-class stall; `tcpi_notsent_bytes > 0` while the strategy is idle means the kernel is holding data it cannot send (congestion window collapsed after idle — Ch. 68 §68.2's slow-start-after-idle, or the venue's receive window closed — `tcpi_rwnd_limited` rising); `tcpi_sndbuf_limited` rising means *your* buffer is the cap. The same fields are what `ss -tim` prints; the `getsockopt` is cheaper and avoids walking every socket on the host.
 
-### 114.4.2 Drop forensics: naming the function that freed the packet
+### 115.4.2 Drop forensics: naming the function that freed the packet
 
 Counters say *which layer*; sometimes you need *which line*. Every packet the kernel discards is freed through `kfree_skb_reason()`, which fires the `skb:kfree_skb` tracepoint with the socket buffer's address, the location (the function that dropped it) and, since Linux 5.17, an enumerated **drop reason** (`SKB_DROP_REASON_*`: `SOCKET_RCVBUFF`, `IP_RPFILTER`, `UDP_CSUM`, `NO_SOCKET`, `TCP_OFO_DROP`, `NETFILTER_DROP`, `DEV_READY`, ... — `/sys/kernel/tracing/events/skb/kfree_skb/format` lists them). Three ways to read it, in increasing precision:
 
@@ -306,9 +306,9 @@ sudo bpftrace -e 'tracepoint:skb:kfree_skb /args->reason == 7/ { @[kstack] = cou
 # the kernel's own per-reason counter view (6.x): drop_monitor via netlink, summarised by `nstat -az` and `perf trace` as above
 ```
 
-Reading the output against §114.2.1: `udp_queue_rcv_one_skb` + `SOCKET_RCVBUFF` is layer 5 (the consumer); `ip_rcv_finish_core` + `IP_RPFILTER` is Ch. 74's `rp_filter`; `__netif_receive_skb_core` + `NO_SOCKET`/`NETFILTER_DROP` is a firewall or a missing listener; `tcp_data_queue` + `TCP_OFO_DROP`/`TCP_RCVQ_DROP` is the order session's receive queue overflowing (the gateway is not reading — Ch. 103's liveness). Drops that never reach `kfree_skb` — the NIC ring (2b) and port FIFO (2a) — are *hardware* drops and appear only in `ethtool -S`; that is the dividing line between the counter layer and the tracepoint layer, and both are needed. The tracepoint costs nothing while packets are not being dropped (the hook is only on the drop path) and ~300 ns per dropped skb when they are; **enabling** it patches kernel text and IPIs every CPU, so it is armed before the open and left armed (Ch. 61 §61.5), with `-C <housekeeping>` so the perf buffers never live on a hot core. XDP (Ch. 81 §81.4.2) adds its own layer *before* the stack: an `XDP_DROP` program's drops are counted by the program (a BPF map) and by `ethtool -S` `rx_xdp_drop` on drivers that export it — not by `kfree_skb`, because no skb was ever allocated.
+Reading the output against §115.2.1: `udp_queue_rcv_one_skb` + `SOCKET_RCVBUFF` is layer 5 (the consumer); `ip_rcv_finish_core` + `IP_RPFILTER` is Ch. 74's `rp_filter`; `__netif_receive_skb_core` + `NO_SOCKET`/`NETFILTER_DROP` is a firewall or a missing listener; `tcp_data_queue` + `TCP_OFO_DROP`/`TCP_RCVQ_DROP` is the order session's receive queue overflowing (the gateway is not reading — Ch. 103's liveness). Drops that never reach `kfree_skb` — the NIC ring (2b) and port FIFO (2a) — are *hardware* drops and appear only in `ethtool -S`; that is the dividing line between the counter layer and the tracepoint layer, and both are needed. The tracepoint costs nothing while packets are not being dropped (the hook is only on the drop path) and ~300 ns per dropped skb when they are; **enabling** it patches kernel text and IPIs every CPU, so it is armed before the open and left armed (Ch. 61 §61.5), with `-C <housekeeping>` so the perf buffers never live on a hot core. XDP (Ch. 81 §81.4.2) adds its own layer *before* the stack: an `XDP_DROP` program's drops are counted by the program (a BPF map) and by `ethtool -S` `rx_xdp_drop` on drivers that export it — not by `kfree_skb`, because no skb was ever allocated.
 
-### 114.4.3 Fabric and membership signals the host can see
+### 115.4.3 Fabric and membership signals the host can see
 
 The host sees the fabric only through what arrives, but three fabric conditions leave host-side traces that belong in the same sampler:
 
@@ -316,76 +316,76 @@ The host sees the fabric only through what arrives, but three fabric conditions 
 - **Per-line arrival skew and silence.** Ch. 70's A/B arbitration statistics — how often A wins, the A−B arrival-time distribution, per-line packet counts — are *fabric* signals: a line whose skew grows by 20 µs over an hour has a path change (a re-routed cross-connect, a switch failing over — Appendix K); a line that goes silent while its twin lives is a membership or port fault on that path (Ch. 74 §74.4.4). They come from the application (Ch. 100 §100.4.2) and are read beside the NIC counters.
 - **Pause frames as a fabric message.** `rx_pause`/`rx_prioN_pause` (the switch asking *you* to stop) means the switch's egress buffer toward you is full — a congested uplink, an oversubscribed replication point (Ch. 80 §80.4.2) — and is the one case where a host counter reports a *switch* condition directly.
 
-### 114.4.4 Link, PHY, optics and switch telemetry
+### 115.4.4 Link, PHY, optics and switch telemetry
 
 Below the packet layer the link has its own health, and its degradation is gradual — which means it is predictable if watched:
 
 - **Error and FEC counters.** `rx_crc_errors`, `rx_length_errors`, `rx_frame_errors`; `ethtool --show-fec <if>` for the FEC mode (RS-FEC at 25/100 GbE); and the per-driver FEC counters (`fec_corrected_blocks`/`fec_uncorrectable_blocks` on `ice`, `rx_corrected_bits_phy`/`rx_err_lane_N_phy`/`rx_pcs_symbol_err_phy` on `mlx5`). Corrected FEC blocks are free individually and *rising* as an optic ages; uncorrectable blocks are CRC errors by another name. Trend the corrected rate; alert on the first uncorrectable one.
 - **Optics DOM.** `ethtool -m <if>` reads the transceiver's digital diagnostics: RX/TX optical power, laser bias, temperature, voltage, with the vendor's alarm and warning thresholds. RX power drifting toward the warning threshold is a cleaning or a replacement, scheduled rather than suffered. The read is an I²C transaction through the NIC firmware (slow — tens of ms; once a minute, housekeeping core).
 - **Link flaps and speed.** `/sys/class/net/<if>/carrier_changes` (and `carrier_up_count`/`carrier_down_count`), `speed`, `duplex`, `ethtool <if>` for the negotiated speed — a 100 GbE link that re-negotiated to 25 GbE after a flap is a fabric event that shows up as `time_squeeze` under load. The sampler reports every carrier change; one is an incident at 09:29.
-- **Switch-side telemetry.** The counters you cannot see from the host — per-port egress discards, queue depth and microburst detection (Arista LANZ, Cisco Nexus queue-drop telemetry, Broadcom/Mellanox buffer statistics), PFC pause counts and ECN marks per queue (Ch. 84 §84.3), IGMP snooping tables (Ch. 74), and in-band network telemetry (INT) where deployed — are pulled by the network team's collector (SNMP, gNMI/streaming telemetry, the vendor API) and should land in the *same* time-series store as the host counters, with the same timestamps (PTP — Ch. 78). An egress discard on the switch port facing you is a drop that *your* counters will never show: it is layer 0 of §114.2.1's table.
+- **Switch-side telemetry.** The counters you cannot see from the host — per-port egress discards, queue depth and microburst detection (Arista LANZ, Cisco Nexus queue-drop telemetry, Broadcom/Mellanox buffer statistics), PFC pause counts and ECN marks per queue (Ch. 84 §84.3), IGMP snooping tables (Ch. 74), and in-band network telemetry (INT) where deployed — are pulled by the network team's collector (SNMP, gNMI/streaming telemetry, the vendor API) and should land in the *same* time-series store as the host counters, with the same timestamps (PTP — Ch. 78). An egress discard on the switch port facing you is a drop that *your* counters will never show: it is layer 0 of §115.2.1's table.
 
-### 114.4.5 When the kernel is not in the path: bypass-stack counters
+### 115.4.5 When the kernel is not in the path: bypass-stack counters
 
 Under kernel bypass (Ch. 82) layers 2b–5 of the table move into the user-space stack, and so must the sampler:
 
 - **DPDK.** `rte_eth_stats_get()` per port: `ipackets`/`ibytes`, **`imissed`** (the NIC dropped because the PMD's RX ring was full — layer 2b, hardware-counted), **`rx_nombuf`** (the PMD could not refill the ring because the mbuf mempool was empty — a *software* exhaustion: the consumer holds too many buffers, Ch. 31), `ierrors` (malformed/CRC — layer 1), `q_errors[]` per queue; and `rte_eth_xstats_get()` for the driver's full `ethtool -S`-equivalent list (`rx_out_of_buffer`, `rx_phy_discard_packets`, FEC and pause counters on `mlx5`/`ice` PMDs). The sampler is a housekeeping lcore calling these at 1 Hz and writing the Ch. 100 segment; the data-plane lcores are never touched (the stats are read from device registers or a PMD-maintained per-queue struct — check which: a register read is a PCIe round-trip on the *housekeeping* core, Ch. 85, fine at 1 Hz).
 - **Onload.** `onload_stackdump stats` / `onload_stackdump lots` for every stack: `rx_discard_*` (by reason — `csum_bad`, `mcast_mismatch`, `crc_bad`, `trunc`, `rights`, `inner_csum_bad`), `rx_no_buf`/`rx_nodesc` (ring/buffer exhaustion), `rx_drop_*`, per-socket `rx_drops`; `onload_stackdump` reads shared memory the stack maintains and costs nothing on the data path.
 - **ef_vi / exanic.** `ef_vi_stats_query()` (`rx_discard_*` by class) and the adapter-level `ethtool -S` still works for the *port* counters (layers 1–2a) because the kernel still owns the netdev; `exanic-config <dev>` for ExaNIC port counters and hardware drops.
-- **The invariant.** Whatever the stack, the sampler's output keeps the §114.2.1 layer tags — "ring full (2b)", "mempool empty (software)", "PHY" — so an incident reads the same on a kernel-path box and a bypass box, and the kernel counters on a bypass box are reported as *not applicable* rather than as zero.
+- **The invariant.** Whatever the stack, the sampler's output keeps the §115.2.1 layer tags — "ring full (2b)", "mempool empty (software)", "PHY" — so an incident reads the same on a kernel-path box and a bypass box, and the kernel counters on a bypass box are reported as *not applicable* rather than as zero.
 
-## 114.5 Pitfalls & anti-patterns
+## 115.5 Pitfalls & anti-patterns
 
-- **"Monitor `ethtool -S` and alert on drops" without the layer.** Two hundred counters, several of them the same event, alerting as a lump. Map every watched counter to its layer and owner once (§114.2.2's three-fault experiment), and alert with the meaning attached.
+- **"Monitor `ethtool -S` and alert on drops" without the layer.** Two hundred counters, several of them the same event, alerting as a lump. Map every watched counter to its layer and owner once (§115.2.2's three-fault experiment), and alert with the meaning attached.
 - **Adding counters that count the same drop.** `rx_missed_errors` + `rx_fifo_errors` + `rx_dropped` + per-queue `rx-N.rx_dropped` summed into one "drops" metric triples the number and hides which layer it was. Pick one per layer; keep the others as corroboration.
-- **Mistaking `time_squeeze` for loss, or ignoring it as "just latency".** It is latency — on the market-data path, latency *is* the loss — and it is the precursor of the ring-full drop (§114.3). Alert on its first appearance during the session; fix with busy-poll/steering before the drops start.
-- **Trusting zero counters on a bypass box.** `/proc/net/snmp` and `ss` report nothing because nothing goes through them. Read the bypass stack's counters (§114.4.5), and make the dashboard say "N/A", not "0".
+- **Mistaking `time_squeeze` for loss, or ignoring it as "just latency".** It is latency — on the market-data path, latency *is* the loss — and it is the precursor of the ring-full drop (§115.3). Alert on its first appearance during the session; fix with busy-poll/steering before the drops start.
+- **Trusting zero counters on a bypass box.** `/proc/net/snmp` and `ss` report nothing because nothing goes through them. Read the bypass stack's counters (§115.4.5), and make the dashboard say "N/A", not "0".
 - **Polling drivers fast.** `ethtool -S` on `mlx5` is a firmware command (ms); at 100 Hz it is 20 % of a housekeeping core and a queue of `rtnl_lock` holders. 1 Hz, housekeeping core.
-- **`TCP_INFO`/`ss -ti` at high rate on the order socket.** Each poll holds the socket lock ~150 ns; a `send()` racing it waits. Once a second is a measured, bounded cost; a 1 kHz "live RTT" display is a self-inflicted tail (§114.3).
+- **`TCP_INFO`/`ss -ti` at high rate on the order socket.** Each poll holds the socket lock ~150 ns; a `send()` racing it waits. Once a second is a measured, bounded cost; a 1 kHz "live RTT" display is a self-inflicted tail (§115.3).
 - **Arming tracepoints during the session.** `perf record -e skb:kfree_skb`, `dropwatch start`, a `bpftrace` probe — each patches kernel text and IPIs every CPU including the hot ones (Ch. 61 §61.5). Arm before the open; use `-C <housekeeping>`; leave armed.
 - **Flow control on, drops hidden.** Ethernet PAUSE moves your drops into the switch's buffers where your counters cannot see them and other hosts pay for them. Off on market-data NICs (unless the fabric is designed lossless and monitored as such — Ch. 84); treat `tx_pause > 0` as "this host is too slow".
 - **Reading only the host.** The switch port facing you drops in its egress queue and your counters stay clean. The network team's per-port telemetry on the same time axis is not optional.
-- **Diagnosing the application first.** A tail incident investigated in the decoder for an hour while `rx_missed_errors` had been climbing since 09:30:02. The incident procedure reads the layer table top-down (link → NIC → NAPI → stack → socket → application) before anyone opens a profiler (Ch. 118).
+- **Diagnosing the application first.** A tail incident investigated in the decoder for an hour while `rx_missed_errors` had been climbing since 09:30:02. The incident procedure reads the layer table top-down (link → NIC → NAPI → stack → socket → application) before anyone opens a profiler (Ch. 119).
 - **Forgetting the drop with no counter.** Feed age (Ch. 74) and recorded-vs-arrived reconciliation (Ch. 100 §100.2.4) belong on the network-health dashboard, or a lost membership will be "no network problem — all counters clean".
 
-## 114.6 Exercises & checklist
+## 115.6 Exercises & checklist
 
 **Exercises**
 
-1. **The three-fault experiment.** On your NIC, induce (a) ring-full drops (stop the consumer during a replayed burst), (b) port-FIFO drops (force the PCIe link to a lower width in the BIOS or with `setpci`, then burst), (c) link errors (a marginal patch cable or `ethtool --set-fec off` on a link that needs it). Record which `ethtool -S`, generic and `softnet` counters move for each, and write your driver's row of §114.2.2.
-2. **The open, layer by layer.** Replay a captured open (Ch. 108) at 1×, 3×, 5×, 8× into a kernel-path handler with `netwatch` running; reproduce §114.3's progression (`time_squeeze` → `RcvbufErrors` or ring drops). Then enable busy-poll (Ch. 63) and find the new first-failing layer and rate.
+1. **The three-fault experiment.** On your NIC, induce (a) ring-full drops (stop the consumer during a replayed burst), (b) port-FIFO drops (force the PCIe link to a lower width in the BIOS or with `setpci`, then burst), (c) link errors (a marginal patch cable or `ethtool --set-fec off` on a link that needs it). Record which `ethtool -S`, generic and `softnet` counters move for each, and write your driver's row of §115.2.2.
+2. **The open, layer by layer.** Replay a captured open (Ch. 109) at 1×, 3×, 5×, 8× into a kernel-path handler with `netwatch` running; reproduce §115.3's progression (`time_squeeze` → `RcvbufErrors` or ring drops). Then enable busy-poll (Ch. 63) and find the new first-failing layer and rate.
 3. **Forensics.** With the socket buffer deliberately small, run `dropwatch -l kas`, `perf record -C 0-1 -e skb:kfree_skb -g` and the `bpftrace` reason histogram during a burst; confirm all three name `udp_queue_rcv_one_skb`/`SOCKET_RCVBUFF`. Then set `rp_filter=1` on the feed NIC and watch the reason change to `IP_RPFILTER`.
 4. **`TCP_INFO`.** Poll a venue (or test-server) session at 1 Hz; induce a lost segment with `tc netem loss 0.1%` and watch `tcpi_total_retrans`, `TCPTimeouts` and `tcpi_rtt`; then let the connection idle 2 s and send — observe `tcpi_notsent_bytes`/`tcpi_snd_cwnd` with and without `tcp_slow_start_after_idle=0` (Ch. 68).
-5. **Poller footprint.** Measure `ethtool -S` latency on your NIC (`strace -T`), `TCP_INFO`'s socket-lock hold (a hot thread doing `send()` in a loop with the poller at 1 Hz, 100 Hz, 1 kHz — HdrHistogram the sends), and the cost of arming `skb:kfree_skb` (`/proc/interrupts` `CAL` on the hot cores before/after `perf record` starts). Reproduce §114.3's second table.
+5. **Poller footprint.** Measure `ethtool -S` latency on your NIC (`strace -T`), `TCP_INFO`'s socket-lock hold (a hot thread doing `send()` in a loop with the poller at 1 Hz, 100 Hz, 1 kHz — HdrHistogram the sends), and the cost of arming `skb:kfree_skb` (`/proc/interrupts` `CAL` on the hot cores before/after `perf record` starts). Reproduce §115.3's second table.
 6. **Bypass.** On a DPDK or Onload test box, run the same burst and show the kernel counters at zero while `imissed`/`rx_nombuf` or `rx_discard_*`/`rx_no_buf` count; extend `netwatch` (or its production equivalent) to read them with the same layer tags.
 7. **Querier age.** Build the "seconds since last general query" gauge (an AF_PACKET or eBPF reader on a housekeeping core); disable the lab switch's querier and show the gauge crossing 2 × Query Interval ~130 s before the feed goes dark (Ch. 74 §74.3).
 
 **Checklist — network health**
 
-- [ ] Every watched counter is **mapped to a layer and an owner** by *measurement* on this NIC/driver (ring full vs port FIFO vs link), and duplicates are not summed (§114.2.2, §114.5).
-- [ ] A sampler on a **housekeeping core** reads at **1 Hz**: `ethtool -S` (ioctl), generic statistics, carrier changes, `softnet_stat` per CPU (flagging any receive on an isolated CPU), the IP/UDP/TCP MIBs, and **`TCP_INFO`** for each order session — and publishes into the Ch. 100 segment beside the application's gap and feed-age counters (§114.4.1).
-- [ ] **`time_squeeze`** is alerted as a delay signal and precursor; **ring-full**, **port-FIFO**, **socket-buffer**, **RTO** and **link-error** deltas are "any nonzero delta" tickets with the meaning attached (§114.2.3, §114.3).
-- [ ] **`skb:kfree_skb` forensics** (`dropwatch`/`perf`/`bpftrace` by reason and location) are armed **before** the session on **housekeeping CPUs only** (§114.4.2).
-- [ ] **Membership and querier age**, **A/B skew and per-line silence**, and **pause frames** are on the network dashboard (§114.4.3); **FEC/CRC trends, optics DOM, flaps and negotiated speed** are sampled, and **switch-side telemetry** shares the time axis (§114.4.4).
-- [ ] On bypass boxes the **stack's own counters** are read with the same layer tags and the kernel's are shown as N/A (§114.4.5).
-- [ ] Flow control is **off** on market-data NICs (or deliberately on and monitored on lossless fabrics — Ch. 84); `tx_pause > 0` is treated as "this host is slow" (§114.2.3).
-- [ ] The incident procedure reads the **layer table top-down** before profiling the application; the **feed-age** and **recorded-vs-arrived** gauges are checked when every counter is clean (§114.5).
+- [ ] Every watched counter is **mapped to a layer and an owner** by *measurement* on this NIC/driver (ring full vs port FIFO vs link), and duplicates are not summed (§115.2.2, §115.5).
+- [ ] A sampler on a **housekeeping core** reads at **1 Hz**: `ethtool -S` (ioctl), generic statistics, carrier changes, `softnet_stat` per CPU (flagging any receive on an isolated CPU), the IP/UDP/TCP MIBs, and **`TCP_INFO`** for each order session — and publishes into the Ch. 100 segment beside the application's gap and feed-age counters (§115.4.1).
+- [ ] **`time_squeeze`** is alerted as a delay signal and precursor; **ring-full**, **port-FIFO**, **socket-buffer**, **RTO** and **link-error** deltas are "any nonzero delta" tickets with the meaning attached (§115.2.3, §115.3).
+- [ ] **`skb:kfree_skb` forensics** (`dropwatch`/`perf`/`bpftrace` by reason and location) are armed **before** the session on **housekeeping CPUs only** (§115.4.2).
+- [ ] **Membership and querier age**, **A/B skew and per-line silence**, and **pause frames** are on the network dashboard (§115.4.3); **FEC/CRC trends, optics DOM, flaps and negotiated speed** are sampled, and **switch-side telemetry** shares the time axis (§115.4.4).
+- [ ] On bypass boxes the **stack's own counters** are read with the same layer tags and the kernel's are shown as N/A (§115.4.5).
+- [ ] Flow control is **off** on market-data NICs (or deliberately on and monitored on lossless fabrics — Ch. 84); `tx_pause > 0` is treated as "this host is slow" (§115.2.3).
+- [ ] The incident procedure reads the **layer table top-down** before profiling the application; the **feed-age** and **recorded-vs-arrived** gauges are checked when every counter is clean (§115.5).
 
-## 114.7 References
+## 115.7 References
 
-- Linux kernel documentation and sources: `Documentation/networking/statistics.rst` (the generic `rtnl_link_stats64` fields and their intended meanings), `Documentation/networking/scaling.rst` (RPS/`netdev_max_backlog`, `softnet_stat`), `Documentation/admin-guide/sysctl/net.rst` (`netdev_budget`, `netdev_budget_usecs`), `include/net/dropreason-core.h` (the `SKB_DROP_REASON_*` enumeration), `net/core/drop_monitor.c`, `Documentation/networking/snmp_counter.rst` (every `/proc/net/snmp` and `netstat` counter explained), `include/uapi/linux/tcp.h` (`struct tcp_info`), `include/uapi/linux/ethtool.h` (`ETHTOOL_GSSET_INFO`/`GSTRINGS`/`GSTATS`) — the sources of §114.2.1 and §114.4.1.
-- Driver statistics sources: `drivers/net/ethernet/intel/ixgbe/ixgbe_ethtool.c`, `intel/ice/ice_ethtool.c`, `mellanox/mlx5/core/en_stats.c`, `sfc/ethtool_common.c` — the definitive mapping of each driver's counter names (§114.2.2); NVIDIA's *Understanding mlx5 ethtool Counters* and Intel's *E810 ethtool statistics* notes.
-- `ethtool(8)` (`-S`, `-a`, `-m`, `--show-fec`, `-g`, `-c`), `nstat(8)`, `ss(8)` (`-t -i -m`), `dropwatch(1)`, `perf-trace(1)`/`perf-record(1)` with tracepoints, the `bpftrace` reference guide (Ch. 81) — the readers of §114.4.
-- DPDK Programmer's Guide (`rte_eth_stats`, `rte_eth_xstats`), AMD/Solarflare *Onload User Guide* (`onload_stackdump`), `ef_vi` API reference — the bypass counters of §114.4.5.
-- Ch. 63 (the receive path), Ch. 68–75, 77 (sockets, decoding, recovery, membership, NIC, steering), Ch. 80 and Ch. 84 (fabric, PFC/ECN), Ch. 82 (bypass), Ch. 85 (PCIe), Ch. 100 and Ch. 113 (the pipeline and the sampler discipline).
+- Linux kernel documentation and sources: `Documentation/networking/statistics.rst` (the generic `rtnl_link_stats64` fields and their intended meanings), `Documentation/networking/scaling.rst` (RPS/`netdev_max_backlog`, `softnet_stat`), `Documentation/admin-guide/sysctl/net.rst` (`netdev_budget`, `netdev_budget_usecs`), `include/net/dropreason-core.h` (the `SKB_DROP_REASON_*` enumeration), `net/core/drop_monitor.c`, `Documentation/networking/snmp_counter.rst` (every `/proc/net/snmp` and `netstat` counter explained), `include/uapi/linux/tcp.h` (`struct tcp_info`), `include/uapi/linux/ethtool.h` (`ETHTOOL_GSSET_INFO`/`GSTRINGS`/`GSTATS`) — the sources of §115.2.1 and §115.4.1.
+- Driver statistics sources: `drivers/net/ethernet/intel/ixgbe/ixgbe_ethtool.c`, `intel/ice/ice_ethtool.c`, `mellanox/mlx5/core/en_stats.c`, `sfc/ethtool_common.c` — the definitive mapping of each driver's counter names (§115.2.2); NVIDIA's *Understanding mlx5 ethtool Counters* and Intel's *E810 ethtool statistics* notes.
+- `ethtool(8)` (`-S`, `-a`, `-m`, `--show-fec`, `-g`, `-c`), `nstat(8)`, `ss(8)` (`-t -i -m`), `dropwatch(1)`, `perf-trace(1)`/`perf-record(1)` with tracepoints, the `bpftrace` reference guide (Ch. 81) — the readers of §115.4.
+- DPDK Programmer's Guide (`rte_eth_stats`, `rte_eth_xstats`), AMD/Solarflare *Onload User Guide* (`onload_stackdump`), `ef_vi` API reference — the bypass counters of §115.4.5.
+- Ch. 63 (the receive path), Ch. 68–75, 77 (sockets, decoding, recovery, membership, NIC, steering), Ch. 80 and Ch. 84 (fabric, PFC/ECN), Ch. 82 (bypass), Ch. 85 (PCIe), Ch. 100 and Ch. 114 (the pipeline and the sampler discipline).
 
-## 114.8 Additional Reading
+## 115.8 Additional Reading
 
 - Brendan Gregg, *Systems Performance* (2nd ed.), the networking chapter — the layer-by-layer methodology and the `netstat`/`ss`/`nstat`/tracing toolkit this chapter specialises; his *BPF Performance Tools* networking chapter for the eBPF versions.
 - Packagecloud's *Monitoring and Tuning the Linux Networking Stack: Receiving Data* — the long-form walk through NAPI, `softnet_stat` and the SNMP counters.
-- Arista and Cisco documentation on microburst detection and queue telemetry (LANZ, streaming telemetry), and the P4/INT literature — what the switch can tell you that the host cannot (§114.4.4).
-- Ch. 118 (*Case Study*) — the incident procedure that reads this chapter's table first; Ch. 74 (*Multicast Membership*) — the drop with no counter; Appendix M — the link and feed gates; **Appendix I.8** — the one-liners; **Appendix E** — the kernel-stack vs bypass RX floor under these counters; **Appendix F** — `time_squeeze` / `rx_missed` / FEC / PAUSE / drop-reason glossary.
+- Arista and Cisco documentation on microburst detection and queue telemetry (LANZ, streaming telemetry), and the P4/INT literature — what the switch can tell you that the host cannot (§115.4.4).
+- Ch. 119 (*Case Study*) — the incident procedure that reads this chapter's table first; Ch. 74 (*Multicast Membership*) — the drop with no counter; Appendix M — the link and feed gates; **Appendix I.8** — the one-liners; **Appendix E** — the kernel-stack vs bypass RX floor under these counters; **Appendix F** — `time_squeeze` / `rx_missed` / FEC / PAUSE / drop-reason glossary.
 
 ---
 
-*Next: Ch. 115 — Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing: before a build may touch any of the above, the book's first test code — table-driven tests of `apply(state, input)`, property-based tests with a shrinker that cut a 200-input failure to two, a deterministic simulation that drove the gateway through 5 000 seeded fault schedules in 120 ms and found a resend bug at seed 1, golden masters cut from captures, and test doubles as policies that compile to the production instructions.*
+*Next: Ch. 116 — Testing Latency-Critical Code: Unit, Property-Based & Deterministic Simulation Testing: before a build may touch any of the above, the book's first test code — table-driven tests of `apply(state, input)`, property-based tests with a shrinker that cut a 200-input failure to two, a deterministic simulation that drove the gateway through 5 000 seeded fault schedules in 120 ms and found a resend bug at seed 1, golden masters cut from captures, and test doubles as policies that compile to the production instructions.*

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 32 (flat/open-addressing tables — this chapter is what goes *into* the hash slot of §32.3's `FlatMap` and why its multiplier is `0x9E3779B97F4A7C15`), Ch. 37 (multiply, shift, rotate, `pdep`/`pext` — the instructions a hash is made of), Ch. 21 (`constexpr` — the compile-time perfect hash of §38.4.4), Ch. 8 (a probe is a cache line), Ch. 15 (a probe loop is a branch), Ch. 4 (reading asm — §38.5).
 >
-> **Leads into:** Ch. 39 (SIMD — SwissTable-style group probing and the CRC/PCLMUL instructions), Ch. 33 (the order book's order-ID map), Ch. @MULTIVENUE@ (symbology — per-venue keys to one dense instrument id), Ch. 70 (the 8-byte symbol load off the wire), Ch. 101 (hash flooding from attacker-controlled keys), Ch. 108 (per-record CRC32C in the journal), Ch. 82 (trusting the NIC's checksum in a userspace stack).
+> **Leads into:** Ch. 39 (SIMD — SwissTable-style group probing and the CRC/PCLMUL instructions), Ch. 33 (the order book's order-ID map), Ch. @MULTIVENUE@ (symbology — per-venue keys to one dense instrument id), Ch. 70 (the 8-byte symbol load off the wire), Ch. 101 (hash flooding from attacker-controlled keys), Ch. 109 (per-record CRC32C in the journal), Ch. 82 (trusting the NIC's checksum in a userspace stack).
 
 ---
 
@@ -200,7 +200,7 @@ The miss path matters as much as the hit: a key not in the set lands on *some* s
 
 ### 38.4.5 CRC32C for records and frames; what to trust from the NIC
 
-Where bytes can be damaged — the capture journal (Ch. 108 §108.4.2), a shared-memory record a crashed writer may have torn (Ch. 67), a custom reliable-UDP frame (Ch. 85 §85.4.4) — stamp a CRC32C and verify it on read:
+Where bytes can be damaged — the capture journal (Ch. 109 §109.4.2), a shared-memory record a crashed writer may have torn (Ch. 67), a custom reliable-UDP frame (Ch. 85 §85.4.4) — stamp a CRC32C and verify it on read:
 
 ```cpp
 // crc32c.hpp — hardware CRC32C over a record; 8 bytes per instruction, tail bytes one at a time.
@@ -212,7 +212,7 @@ inline std::uint32_t crc32c(const void* data, std::size_t n, std::uint32_t seed 
 }
 ```
 
-Single-stream `crc32q` is latency-bound at 3 cycles per 8 bytes (0.375 cycles/byte ideal; 0.26 measured in §38.3 because the loads overlap): a 64-byte record costs 32 cycles, a 1,500-byte frame 430. For bulk (a 64 KiB journal block), three independent streams over three chunks interleave to ~0.1 cycles/byte and are recombined with a PCLMUL-based shift (Gopal et al.'s "slicing-by-3", as in the Linux kernel's `crc32c-intel` and `zlib-ng`); on the *capture* path (Ch. 108 §108.4.3) the record CRC is computed by the drain thread on the housekeeping core, never by the writer on the hot core.
+Single-stream `crc32q` is latency-bound at 3 cycles per 8 bytes (0.375 cycles/byte ideal; 0.26 measured in §38.3 because the loads overlap): a 64-byte record costs 32 cycles, a 1,500-byte frame 430. For bulk (a 64 KiB journal block), three independent streams over three chunks interleave to ~0.1 cycles/byte and are recombined with a PCLMUL-based shift (Gopal et al.'s "slicing-by-3", as in the Linux kernel's `crc32c-intel` and `zlib-ng`); on the *capture* path (Ch. 109 §109.4.3) the record CRC is computed by the drain thread on the housekeeping core, never by the writer on the hot core.
 
 What *not* to compute: the TCP/UDP/IP checksums. A kernel-bypass stack (Ch. 82 §82.4.2) reads the RX descriptor's checksum-OK flags (`ef_vi`'s `EF_EVENT_RX_CSUM`-style bits, DPDK's `RTE_MBUF_F_RX_L4_CKSUM_GOOD`/`BAD`/`UNKNOWN`) and **treats `UNKNOWN` as a frame to verify in software, not as good** — the NIC computes the checksum on every frame it can parse, and a frame it could not parse (an unexpected encapsulation, a VLAN tag the filter did not strip, a truncated header) is exactly the one Ch. 101 says to distrust. On TX, the NIC fills the checksum when the offload is on (Ch. 75 §75.2); a userspace stack that forgets to set the descriptor's checksum-offload bits sends frames the receiver drops silently — the first thing to check when a bypass session "connects but never gets a reply".
 
@@ -267,7 +267,7 @@ Three `imul`, two loads from the `.rodata` object (the seed array at offset 1024
 - **Treating `CKSUM_UNKNOWN` as good.** The NIC could not parse the frame; the software must verify it or drop it (§38.4.5). And a CRC is not a hash for hostile input — it is linear.
 - **`%` by a non-power-of-two capacity.** A 20–40-cycle `div` on every lookup; Lemire's multiply-shift range or a power-of-two capacity with the shift (§38.4.3).
 - **Rebuilding the perfect hash at runtime "because the set might change."** Then it is not a perfect hash; it is a slower open-addressing table. The closed set is a *build* input; intraday additions live in a separate ordinary table (§38.4.4).
-- **Computing the journal CRC on the hot writer.** 32 cycles per record on the core that should be publishing the next tick; the drain thread on the housekeeping core computes it (§38.4.5, Ch. 108 §108.4.3).
+- **Computing the journal CRC on the hot writer.** 32 cycles per record on the core that should be publishing the next tick; the drain thread on the housekeeping core computes it (§38.4.5, Ch. 109 §109.4.3).
 
 ## 38.7 Exercises & checklist
 
@@ -278,7 +278,7 @@ Three `imul`, two loads from the `.rodata` object (the seed array at offset 1024
 3. **Perfect hash the message types.** Take your feed's message-type bytes (ITCH: `A`, `D`, `E`, `F`, `P`, `U`, `X`, …); search a single multiplier at compile time for a 256-slot table; replace a `switch` dispatch with `handlers[ph.find(type)]` and compare the asm (Ch. 16 §16.4.3's jump-table discussion) and the cycles.
 4. **Perfect hash the universe.** Generate your daily instrument list as a `constexpr` array (a build step from the definition feed), build the CHD, measure lookup vs the Ch. 32 flat table on the same keys, and time the compile. Decide the key count at which the build time stops being worth it.
 5. **Flood it.** Write an attacker that generates `ClOrdID` strings colliding under an unkeyed Fibonacci slot (invert the multiply — it is a bijection) and feed them to a gateway table; measure the probe length and the per-message latency. Seed the hash; repeat; then try SipHash and compare the cost per message.
-6. **CRC on the drain.** Add a CRC32C per record to a Ch. 108 journal writer, first on the hot writer, then on the drain thread; measure the hot thread's p99.9 both ways. Then implement the three-stream interleave and measure cycles/byte on 64 KiB blocks.
+6. **CRC on the drain.** Add a CRC32C per record to a Ch. 109 journal writer, first on the hot writer, then on the drain thread; measure the hot thread's p99.9 both ways. Then implement the three-stream interleave and measure cycles/byte on 64 KiB blocks.
 
 **Checklist — hashing, checksums and keys**
 
@@ -304,7 +304,7 @@ Three `imul`, two loads from the `.rodata` object (the seed array at offset 1024
 ## 38.9 Additional Reading
 
 - M. Kulukundis, "Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step" (CppCon 2017) — SwissTable, and what its own mixing expects of your `Hash` functor; M. Ankerl, *unordered_dense* and the hash-map benchmark series.
-- Ch. 32 (*Containers*) — the table the hash feeds; Ch. 33 (*LOB*) — the order-ID map; Ch. 25 (*Strings Without Allocation*) — `Sym8` from the string side; Ch. 70 (*Decoding*) — the 8-byte load; Ch. 101 (*Security*) — the trust boundary; Ch. 108 (*Capture*) — the journal CRC.
+- Ch. 32 (*Containers*) — the table the hash feeds; Ch. 33 (*LOB*) — the order-ID map; Ch. 25 (*Strings Without Allocation*) — `Sym8` from the string side; Ch. 70 (*Decoding*) — the 8-byte load; Ch. 101 (*Security*) — the trust boundary; Ch. 109 (*Capture*) — the journal CRC.
 - **Appendix I.9** — `objdump` on the lookup; **Appendix E** — the hash and CRC rows; **Appendix O.8** — the layout-and-caches catalogue this chapter's probe lengths belong to.
 - The brainstorm review's unscheduled data-structure items (bounded-probe and cuckoo tables, Bloom/cuckoo filters and sketches, fast division beyond the range trick) are adjacent to this chapter and not covered by it.
 

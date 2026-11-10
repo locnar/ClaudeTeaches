@@ -4,13 +4,13 @@
 
 > **Prerequisites:** Ch. 17 (virtual memory, the TLB & huge pages — `mmap` is how you *get* huge-page-backed memory; faults are page faults), Ch. 30 (page faults & pre-faulting — the cost `mmap` regions incur on first touch), Ch. 31 (custom allocators — `mmap` is where their slabs come from), Ch. 18 (NUMA — first-touch placement of mapped pages), Ch. 8 (caches).
 >
-> **Leads into:** Ch. 67 (IPC — shared-memory queues built on `mmap`), Ch. 45/48 (lock-free queues / Disruptor — often in shared memory), Ch. 103 (process topology — shared-memory data planes between isolated processes), Ch. 108 (capture/persistence — `mmap`/`O_DIRECT` journals), Ch. 62 (warming — pre-faulting as warm-up). Closes **Part IV**.
+> **Leads into:** Ch. 67 (IPC — shared-memory queues built on `mmap`), Ch. 45/48 (lock-free queues / Disruptor — often in shared memory), Ch. 103 (process topology — shared-memory data planes between isolated processes), Ch. 109 (capture/persistence — `mmap`/`O_DIRECT` journals), Ch. 62 (warming — pre-faulting as warm-up). Closes **Part IV**.
 
 ---
 
 ## 34.1 Why it matters: shared memory and zero-copy I/O
 
-`mmap` is the system call that maps a region of memory — anonymous, a file, or a shared segment — directly into your process's address space, and it underpins three things a low-latency trading system can't do without: **huge-page-backed memory** for the allocators and books of Part IV (Ch. 17, 31), **shared memory** for the fastest possible inter-process communication (Ch. 67, 103), and **zero-copy file I/O** for capture and replay (Ch. 108). It's the lowest-level memory primitive in the toolkit, and the one that makes the difference between two processes copying messages through the kernel (a syscall and a copy each way) and two processes reading and writing *the same physical pages* with nothing but a memory access between them.
+`mmap` is the system call that maps a region of memory — anonymous, a file, or a shared segment — directly into your process's address space, and it underpins three things a low-latency trading system can't do without: **huge-page-backed memory** for the allocators and books of Part IV (Ch. 17, 31), **shared memory** for the fastest possible inter-process communication (Ch. 67, 103), and **zero-copy file I/O** for capture and replay (Ch. 109). It's the lowest-level memory primitive in the toolkit, and the one that makes the difference between two processes copying messages through the kernel (a syscall and a copy each way) and two processes reading and writing *the same physical pages* with nothing but a memory access between them.
 
 The shared-memory case is the headline for HFT. A modern trading system is decomposed into cooperating processes — feed handler, strategy, order gateway, risk (Ch. 103) — for fault isolation, and they must exchange market data and orders at nanosecond latencies. Routing that through sockets or pipes means a kernel round-trip per message (Ch. 54, 63); routing it through a **shared-memory ring buffer** (Ch. 45, 48) means the producer writes to a page and the consumer reads from the *same* page — no syscall, no copy, just a cache-coherence transfer between cores (Ch. 8). `mmap` with `MAP_SHARED` (or a POSIX `shm_open` segment) is how you create that shared region; it's the substrate for the lock-free IPC that ties the process topology together.
 
@@ -21,7 +21,7 @@ But `mmap` inherits — and concentrates — the page-fault hazard of Ch. 17/30,
 **What `mmap` does.** `mmap(addr, len, prot, flags, fd, offset)` creates a new mapping in the process's virtual address space — a range of pages with permissions (`PROT_READ`/`WRITE`/`EXEC`) backed by *something* determined by `flags`/`fd`. It returns a pointer; thereafter that range is ordinary memory you read/write. `munmap` removes it. The variants that matter:
 
 - **Anonymous (`MAP_ANONYMOUS`)** — not backed by a file; zero-filled on first touch. This is "raw memory from the kernel" — what a custom allocator's slab (Ch. 31) or a private huge-page region uses. `malloc` itself uses anonymous `mmap` for large allocations.
-- **File-backed (`fd` of an open file)** — the file's contents appear as memory; reads fault pages in from the file, writes (if `MAP_SHARED`) go back to the file. The basis of zero-copy file I/O (read a capture by mapping it — Ch. 108) and demand-paged data.
+- **File-backed (`fd` of an open file)** — the file's contents appear as memory; reads fault pages in from the file, writes (if `MAP_SHARED`) go back to the file. The basis of zero-copy file I/O (read a capture by mapping it — Ch. 109) and demand-paged data.
 - **`MAP_PRIVATE` vs `MAP_SHARED`** — `PRIVATE` gives copy-on-write (your writes are private, not seen by others or written back); `SHARED` means writes are visible to *other mappings of the same object* — **the foundation of shared memory** (two processes mapping the same file/segment `MAP_SHARED` share physical pages).
 - **`MAP_HUGETLB` / `MAP_POPULATE` / `MAP_LOCKED`** — request huge pages (Ch. 17), pre-fault at map time, and *try* to lock-resident respectively (the warming knobs of §34.4.2; `MAP_LOCKED` is weaker than `mlock` — see there).
 
@@ -233,7 +233,7 @@ The saving is the copy (~6 ns + 10 ns/KiB here) *and* the bounce buffer's cache 
    the same munmap loop in a SEPARATE process     +1                             <- different mm: no IPI to the hot core
 ```
 
-  `mprotect` costs two flushes (the protection change and the unmap); `MADV_DONTNEED` one; a **separate process** none, because its page tables are not the hot thread's. The fixes, in order: **map once at setup and never unmap, re-protect or `DONTNEED` in the session** (buffers are pools, Ch. 31; the logger and the control plane recycle, they do not free — `malloc` *does* `munmap`/`madvise` large frees, so §30.5's no-`malloc` rule is also a no-shootdown rule); move memory-churning work into **another process** over shared memory (Ch. 67, 103); and make `mremap`/`MADV_COLLAPSE`/`userfaultfd` (§34.4.3) startup-only. The signature in production is the `TLB` and `CAL` rows for the hot CPU moving in Ch. 113's sampler while nothing the hot thread did explains it.
+  `mprotect` costs two flushes (the protection change and the unmap); `MADV_DONTNEED` one; a **separate process** none, because its page tables are not the hot thread's. The fixes, in order: **map once at setup and never unmap, re-protect or `DONTNEED` in the session** (buffers are pools, Ch. 31; the logger and the control plane recycle, they do not free — `malloc` *does* `munmap`/`madvise` large frees, so §30.5's no-`malloc` rule is also a no-shootdown rule); move memory-churning work into **another process** over shared memory (Ch. 67, 103); and make `mremap`/`MADV_COLLAPSE`/`userfaultfd` (§34.4.3) startup-only. The signature in production is the `TLB` and `CAL` rows for the hot CPU moving in Ch. 114's sampler while nothing the hot thread did explains it.
 
 ## 34.6 Exercises & checklist
 
@@ -264,13 +264,13 @@ The saving is the copy (~6 ns + 10 ns/KiB here) *and* the bounce buffer's cache 
 - U. Drepper, *What Every Programmer Should Know About Memory* — virtual memory, mapping, and the page-fault/`mlock` mechanics underpinning §34.2-§34.4.
 - W. R. Stevens & S. Rago, *Advanced Programming in the UNIX Environment*, and Stevens, *UNIX Network Programming, Vol. 2 (IPC)* — POSIX shared memory and memory-mapped I/O patterns (§34.4.1).
 - The Linux `Documentation/admin-guide/mm/` (hugetlbpage, transparent_hugepage) and `vm` sysctl docs — huge-page-backed mappings and overcommit/locking (ties Ch. 17).
-- The kernel `Documentation` on `O_DIRECT`/page cache and the `tmpfs`/`/dev/shm` docs — file-backed and RAM-backed mapping behavior (ties Ch. 108).
+- The kernel `Documentation` on `O_DIRECT`/page cache and the `tmpfs`/`/dev/shm` docs — file-backed and RAM-backed mapping behavior (ties Ch. 109).
 
 ## 34.8 Additional Reading
 
 - M. Thompson / Mechanical Sympathy writings and the Aeron messaging system — shared-memory ring buffers and zero-copy IPC in practice (ties Ch. 48, 67).
 - jemalloc/tcmalloc and kernel `mmap`-allocation writeups — how general allocators use anonymous `mmap`, for contrast with the custom slabs of Ch. 31.
-- Ch. 17 (*TLB & Huge Pages*) — huge-page backing for mappings; Ch. 30–31 (*Memory Fundamentals / Allocators*) — the faults and slabs `mmap` provides; Ch. 67 (*IPC*) — shared-memory queues; Ch. 103 (*Process Topology*) — shared-memory data planes and single-writer discipline; Ch. 108 (*Capture & Replay*) — `mmap`/`O_DIRECT` journals; Ch. 62 (*Warming*) — pre-faulting as warm-up.
+- Ch. 17 (*TLB & Huge Pages*) — huge-page backing for mappings; Ch. 30–31 (*Memory Fundamentals / Allocators*) — the faults and slabs `mmap` provides; Ch. 67 (*IPC*) — shared-memory queues; Ch. 103 (*Process Topology*) — shared-memory data planes and single-writer discipline; Ch. 109 (*Capture & Replay*) — `mmap`/`O_DIRECT` journals; Ch. 62 (*Warming*) — pre-faulting as warm-up.
 - **Appendix C** (System Tuning Checklist) — `mlockall`, swap, hugepage, and `RLIMIT_MEMLOCK` settings; **Appendix E** — the page-fault latency numbers framing §34.3.
 
 ---

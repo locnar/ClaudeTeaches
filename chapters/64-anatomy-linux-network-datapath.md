@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 63 (readiness vs completion, `epoll`, busy-poll — the syscall layer this chapter looks *beneath*), Ch. 54 (syscall and context-switch cost, interrupts), Ch. 56 and Ch. 59 (IRQ affinity and isolated cores — the softirq trap here is their unnamed jitter source), Ch. 61 §61.2 (the noise catalog's `ksoftirqd` row), Ch. 8 (cache lines — an `sk_buff` is several of them), Ch. 20 (TSC timestamps for the attribution).
 >
-> **Leads into:** Ch. 65–66 (io_uring and the zero-copy fast path — which stages they remove), Ch. 68–69 (socket and TCP tuning — the knobs named here get their mechanism), Ch. 70 (decoding — what the application does with the bytes that arrive at the end of this path), Ch. 75–77 (NIC offloads, DDIO, flow steering — the hardware end of the same path), Ch. 79 (ETF/FQ — the qdiscs that plug into §64.2.3), Ch. 81–82 (XDP and kernel bypass — the hooks that cut the path short, and the decision to leave it entirely), Ch. 114 (network health telemetry — this chapter's counters as a continuous signal). The book quotes "5–20 µs for the kernel stack" and moves on to bypass; this chapter is for the sockets that *stay* on the kernel stack — recovery, drop copy, order replies, control plane — and for the jitter the stack inflicts on cores that never touch it.
+> **Leads into:** Ch. 65–66 (io_uring and the zero-copy fast path — which stages they remove), Ch. 68–69 (socket and TCP tuning — the knobs named here get their mechanism), Ch. 70 (decoding — what the application does with the bytes that arrive at the end of this path), Ch. 75–77 (NIC offloads, DDIO, flow steering — the hardware end of the same path), Ch. 79 (ETF/FQ — the qdiscs that plug into §64.2.3), Ch. 81–82 (XDP and kernel bypass — the hooks that cut the path short, and the decision to leave it entirely), Ch. 115 (network health telemetry — this chapter's counters as a continuous signal). The book quotes "5–20 µs for the kernel stack" and moves on to bypass; this chapter is for the sockets that *stay* on the kernel stack — recovery, drop copy, order replies, control plane — and for the jitter the stack inflicts on cores that never touch it.
 
 ---
 
@@ -242,13 +242,13 @@ The table is the chapter's thesis in numbers: the *fixed* stages sum to ~2.8 µs
 
 ### 64.4.1 Attribution: anchor to the wire, trace the path, read the counters first
 
-Before tracing, read the four counters that say whether the path is *healthy* — they cost nothing and are the Ch. 114 telemetry rows for this layer:
+Before tracing, read the four counters that say whether the path is *healthy* — they cost nothing and are the Ch. 115 telemetry rows for this layer:
 
 ```
    grep -E 'NET_RX|NET_TX' /proc/softirqs            # per-CPU: network softirqs must be ZERO on hot cpus, flat on the rest
    cat /proc/net/softnet_stat                        # per-CPU hex: col 1 processed, col 2 dropped (backlog full), col 3 time_squeeze
    nstat -az | grep -E 'UdpRcvbufErrors|UdpInErrors|TcpExtTCPBacklogDrop|TcpExtListenDrops|IpInDiscards'   # socket-level drops
-   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'    # NIC/driver drops (Ch. 114 §114.2)
+   ethtool -S eth0 | grep -iE 'drop|miss|discard|no_buf'    # NIC/driver drops (Ch. 115 §115.2)
    tc -s qdisc show dev eth0                         # backlog, drops, requeues per TX queue — a nonzero backlog is queueing latency
    cat /sys/class/net/eth0/queues/tx-*/byte_queue_limits/{limit,inflight}
 ```
@@ -333,12 +333,12 @@ A hot socket lives in the root namespace. Where a namespace is mandated (multi-t
 2. With a real NIC and two hosts (or a NIC in loopback through a switch), reproduce §64.3 (3)'s table with `trace-cmd` or `bpftrace`. Which stage carries the p99.9? Turn GRO and coalescing off one at a time and re-run: attribute each knob to its stage.
 3. Add one `ct state` rule, then a `notrack` rule for the harness's ports, and measure both against the empty ruleset. Does `notrack` fully recover the baseline? Now `modprobe -r nf_conntrack` — what has to be removed first, and how would you detect in production that the module came back?
 4. Run the server inside a network namespace connected by (a) a `veth` pair and a bridge, (b) `macvlan`, (c) if you have one, an SR-IOV VF. Measure the three with the harness and read `/proc/softirqs` for the extra `NET_RX` passes.
-5. Point an RPS mask at an isolated core (`echo 4 > rps_cpus` on the NIC's queue) and watch `/proc/softirqs`, `/proc/interrupts` (`CAL`) and `rtla osnoise` (Ch. 61) on that core while traffic flows. Then write the Ch. 114 telemetry check that would have caught it in a second.
+5. Point an RPS mask at an isolated core (`echo 4 > rps_cpus` on the NIC's queue) and watch `/proc/softirqs`, `/proc/interrupts` (`CAL`) and `rtla osnoise` (Ch. 61) on that core while traffic flows. Then write the Ch. 115 telemetry check that would have caught it in a second.
 
 **Checklist**
 
 - [ ] The RX path is known stage by stage for the sockets that stay in the kernel, with a measured per-stage median and p99 anchored to the NIC hardware timestamp (§64.3 (3)), and re-measured after every kernel or driver change.
-- [ ] `NET_RX`/`NET_TX` in `/proc/softirqs` are zero on the hot cores for the whole trading day (Ch. 114 samples them); `time_squeeze` is flat on every core.
+- [ ] `NET_RX`/`NET_TX` in `/proc/softirqs` are zero on the hot cores for the whole trading day (Ch. 115 samples them); `time_squeeze` is flat on every core.
 - [ ] NIC queues and their vectors live on housekeeping cores (`isolcpus=managed_irq`, `effective_affinity_list` verified); `rps_cpus` is 0 (or names housekeeping cores only); `xps_cpus` maps TX queues to housekeeping cores.
 - [ ] No hot thread calls `sendmsg`/`sendto` on a kernel socket; bytes leave through a ring to a housekeeping thread that owns the socket.
 - [ ] GRO/LRO and interrupt coalescing are off on the latency NIC; the root qdisc is `mq` + `pfifo_fast` (or `noqueue`), `fq`/ETF only where Ch. 79 uses it; BQL `inflight` never approaches `limit`.
@@ -359,7 +359,7 @@ A hot socket lives in the root namespace. Where a namespace is mandated (multi-t
 ## 64.8 Additional Reading
 
 - Ch. 63 (*Linux Native I/O*) — the syscall layer above this path; Ch. 65–66 (io_uring, zero-copy) — removing syscalls and copies from stages 1 and 10; Ch. 75 (*NIC Features & Offloads*), Ch. 76 (DDIO) and Ch. 77 (flow steering) — the hardware end of stages 1–4; Ch. 81 (XDP) and Ch. 82 (kernel bypass) — the two ways to leave the path.
-- Ch. 61 (*Hunting Residual Noise*) — the `ksoftirqd`/softirq row of the noise catalog and the tracers that catch it; Ch. 114 (*Network Health Telemetry & Drop Forensics*) — this chapter's counters as a continuous signal and the drop-attribution ladder.
+- Ch. 61 (*Hunting Residual Noise*) — the `ksoftirqd`/softirq row of the noise catalog and the tracers that catch it; Ch. 115 (*Network Health Telemetry & Drop Forensics*) — this chapter's counters as a continuous signal and the drop-attribution ladder.
 - Christian Benvenuti, *Understanding Linux Network Internals* (O'Reilly, 2005) — dated in detail, still the clearest book-length account of `netif_receive_skb`, the softirq machinery and the qdisc layer.
 - Appendix C.3 (the RPS/XPS, backlog and busy-poll knobs now pointed at their mechanism here), Appendix I.8 (the one-liners), Appendix F (BQL, NAPI, softirq, conntrack, `veth`).
 

@@ -10,7 +10,7 @@
 
 ## 76.1 Why it matters: where a received packet lands decides the RX latency floor
 
-Kernel bypass (Ch. 82) gets a packet from the NIC to your userspace poll loop without the kernel — but it doesn't answer the more basic question: **when the NIC DMAs the packet into host memory, where does it physically go?** The answer sets a hard floor under receive latency. If the packet lands in **DRAM**, your poll loop's first read of it is a cache miss to main memory (~80–100 ns, Ch. 8) — you pay DRAM latency to even *look* at the bytes you just received. If instead the packet lands directly in the **L3 cache**, that first read is an L3 hit (~15–20 ns) — a 4–5× difference on the very first access, on the hottest path there is (Ch. 70's decode reads the packet immediately). Multiply by every field the decoder touches and it is a real chunk of the tick-to-trade budget (Ch. 118).
+Kernel bypass (Ch. 82) gets a packet from the NIC to your userspace poll loop without the kernel — but it doesn't answer the more basic question: **when the NIC DMAs the packet into host memory, where does it physically go?** The answer sets a hard floor under receive latency. If the packet lands in **DRAM**, your poll loop's first read of it is a cache miss to main memory (~80–100 ns, Ch. 8) — you pay DRAM latency to even *look* at the bytes you just received. If instead the packet lands directly in the **L3 cache**, that first read is an L3 hit (~15–20 ns) — a 4–5× difference on the very first access, on the hottest path there is (Ch. 70's decode reads the packet immediately). Multiply by every field the decoder touches and it is a real chunk of the tick-to-trade budget (Ch. 119).
 
 **Intel DDIO (Data Direct I/O)** is the feature that makes NIC data land in L3 instead of DRAM. On DDIO-capable server parts it is on by default and mostly invisible — which is exactly the problem: because it's invisible, its *downside* is invisible too. DDIO writes into a **limited region of L3**, and under high packet rates that region behaves like a leaky bucket — incoming packets stream through a small set of ways, and if that region overlaps your hot working set (the order book, strategy state, decode tables — Ch. 32), the flood of received packets **evicts your hot data**, or your hot data evicts the packets before you read them. The latency win (RX lands in cache) and a latency hazard (RX pollutes the cache) come from the same mechanism. On an untuned box you get the win and the hazard together and never see either in a profiler that only looks at your code.
 
@@ -84,14 +84,14 @@ The key combined technique (with Ch. 58): stop the NIC's DMA and the strategy's 
 
 - **Give the DDIO region and the hot data disjoint L3 ways.** By default the DDIO ways and your hot working set share the same L3 pool and can evict each other (§76.3). Using CAT (Ch. 58), reserve a CLOS for the hot core's data with ways that **do not overlap** the ways DDIO writes into. On parts that expose DDIO way control (`IIO LLC WAYS` MSR / BIOS knob), you can set the DDIO region explicitly; combined with a complementary CAT mask for the hot path, RX streams through *its* ways and the strategy lives in *its* ways — neither evicts the other.
 - **Tune the DDIO way count if the platform allows.** Some platforms let you widen or narrow the DDIO region (via MSR or BIOS). Widen it if you have many RX queues / high packet rates and packets are spilling to DRAM before you read them; keep it narrow (and CAT-isolated) if RX is modest and you want to protect hot data. Measure both the RX first-read latency (§76.3) *and* the hot-path tail — you're balancing DDIO residency against hot-data protection.
-- **Monitor with CMT (Ch. 58) and the uncore.** Watch the *hot thread's* L3 occupancy with CMT: if it dips under RX load, the regions are still fighting — the masks overlap or the DDIO region is too wide. CMT cannot see the DDIO side directly (on Ice Lake-SP inbound DMA carries no RMID; per-I/O RMID/CLOS tagging is the later I/O RDT feature), so observe DDIO itself with Intel PCM's `pcm-pcie` (PCIe write/read LLC hit vs miss — §76.3). Together they make the fight visible (Ch. 118).
+- **Monitor with CMT (Ch. 58) and the uncore.** Watch the *hot thread's* L3 occupancy with CMT: if it dips under RX load, the regions are still fighting — the masks overlap or the DDIO region is too wide. CMT cannot see the DDIO side directly (on Ice Lake-SP inbound DMA carries no RMID; per-I/O RMID/CLOS tagging is the later I/O RDT feature), so observe DDIO itself with Intel PCM's `pcm-pcie` (PCIe write/read LLC hit vs miss — §76.3). Together they make the fight visible (Ch. 119).
 - **This is the resolution of §76.3's pollution.** Separation gives you *both* halves: DDIO keeps packets hot (fast decode) *and* CAT keeps the strategy hot (no eviction). It's why Ch. 76 builds directly on Ch. 58 — cache partitioning is what makes DDIO safe on a busy hot path.
 
 ### 76.4.3 When to disable DDIO, and cross-socket/peer-to-peer cases
 
 The edge cases:
 
-- **When to disable DDIO.** Rarely — but if a workload does huge inbound DMA that you *don't* read promptly (bulk capture to storage — Ch. 108, where the bytes go straight to disk and the CPU barely touches them), DDIO just pollutes L3 for no benefit. Disabling DDIO (or CAT-isolating the capture NIC's region to a tiny slice) keeps that traffic out of the hot cache. Decide per traffic class: DDIO helps traffic you *read soon*, hurts traffic you *only forward*.
+- **When to disable DDIO.** Rarely — but if a workload does huge inbound DMA that you *don't* read promptly (bulk capture to storage — Ch. 109, where the bytes go straight to disk and the CPU barely touches them), DDIO just pollutes L3 for no benefit. Disabling DDIO (or CAT-isolating the capture NIC's region to a tiny slice) keeps that traffic out of the hot cache. Decide per traffic class: DDIO helps traffic you *read soon*, hurts traffic you *only forward*.
 - **Cross-socket and the NIC's placement.** If you *must* run across sockets (Ch. 18), understand that DDIO lands data on the NIC's socket — route the processing there, or accept the cross-socket cost. Multi-NIC boxes should place each NIC's hot consumer on that NIC's socket. This is the NUMA discipline of Ch. 18/56 applied to the DDIO target.
 - **Peer-to-peer DMA (ties Ch. 87, 91).** NIC-to-FPGA or NIC-to-GPU peer-to-peer transfers (Ch. 87's P2P, Ch. 91's inline FPGA) bypass host memory entirely — no DDIO involved, the data never touches host L3. That's the ultimate "where does it land" answer for the inline-hardware path (Ch. 91): it lands in the accelerator, not the host cache at all.
 
@@ -103,7 +103,7 @@ The edge cases:
 - **Disabling DDIO to "fix" pollution.** Turning DDIO off removes the pollution but also the RX win — now *every* packet read is a DRAM miss (§76.3). The right fix is *separation* (CAT), not disabling; disable only for traffic you don't read promptly (§76.4.3).
 - **Assuming DDIO is on / configured.** DDIO availability and default region size vary by platform, BIOS setting, and generation; some parts expose it, some don't, AMD's data-path behaves differently. Don't assume — verify on your hardware, and measure RX first-read latency to confirm packets are actually arriving hot (§76.3).
 - **Ignoring DDIO when reasoning about the RX path.** Treating "kernel bypass = fast RX" as the whole story (Ch. 82) and being surprised by DRAM-latency first reads. The packet's *cache residency* is as important as skipping the kernel; DDIO (and its NUMA locality) is why a NIC-local bypass path is fast, and forgetting it leaves latency on the table.
-- **DDIO and capture traffic sharing the hot cache.** A capture NIC (Ch. 108) DMAing full line-rate traffic through DDIO into the same L3 as the hot strategy — pure pollution, since capture data goes to disk, not the strategy. Isolate or disable DDIO for the capture path (§76.4.3).
+- **DDIO and capture traffic sharing the hot cache.** A capture NIC (Ch. 109) DMAing full line-rate traffic through DDIO into the same L3 as the hot strategy — pure pollution, since capture data goes to disk, not the strategy. Isolate or disable DDIO for the capture path (§76.4.3).
 
 ## 76.6 Exercises & checklist
 
@@ -123,7 +123,7 @@ The edge cases:
 - [ ] RX ring / buffer-pool size is **balanced against the DDIO window** (residency) as well as microburst absorption (Ch. 70) — not blindly oversized (§76.4.1, §76.5).
 - [ ] The hot path **reads packets promptly** (tight poll, shallow batching) so DDIO-resident packets aren't evicted before use (§76.4.1).
 - [ ] **CMT monitoring** (Ch. 58) confirms the DDIO/RX region and hot region aren't fighting under load (§76.4.2).
-- [ ] **Capture / forward-only NIC traffic** (Ch. 108) is **DDIO-isolated or disabled** so it doesn't pollute the hot cache (§76.4.3); DDIO is left *on* for traffic read promptly.
+- [ ] **Capture / forward-only NIC traffic** (Ch. 109) is **DDIO-isolated or disabled** so it doesn't pollute the hot cache (§76.4.3); DDIO is left *on* for traffic read promptly.
 - [ ] DDIO availability/behavior is **verified on the actual hardware** (BIOS, generation, Intel/AMD), not assumed (§76.5).
 
 ## 76.7 References
@@ -137,7 +137,7 @@ The edge cases:
 
 - Solarflare/Onload, DPDK, and NIC-vendor guidance on DDIO and cache-aware RX buffer placement — practical tuning for the bypass path (§76.4).
 - Talks and papers on cache contention between I/O and compute (the "DDIO is a double-edged sword" line of work) — measuring and taming RX-induced eviction (§76.3).
-- Ch. 58 (*CAT/RDT*) — the partitioning that makes DDIO safe; Ch. 80 (*Fabric*) — what delivers the packets; Ch. 91 (*FPGA*) — the peer-to-peer path that skips host cache entirely; Ch. 108 (*Capture*) — forward-only traffic to keep out of the hot cache; **Appendix E** — the L3-vs-DRAM-vs-cross-socket numbers that drive every decision here; **Appendix F** — DDIO/DMA/NUMA glossary.
+- Ch. 58 (*CAT/RDT*) — the partitioning that makes DDIO safe; Ch. 80 (*Fabric*) — what delivers the packets; Ch. 91 (*FPGA*) — the peer-to-peer path that skips host cache entirely; Ch. 109 (*Capture*) — forward-only traffic to keep out of the hot cache; **Appendix E** — the L3-vs-DRAM-vs-cross-socket numbers that drive every decision here; **Appendix F** — DDIO/DMA/NUMA glossary.
 
 ---
 

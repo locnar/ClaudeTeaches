@@ -45,7 +45,7 @@ Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each 
             │
             DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.18)
             │
-            (… and far below: NVMe/disk, Ch.108 — irrelevant to the hot path)
+            (… and far below: NVMe/disk, Ch.109 — irrelevant to the hot path)
 ```
 
 Two structural facts shape everything:

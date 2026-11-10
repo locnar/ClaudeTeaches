@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 45 (lock-free SPSC queues — the producer→consumer ring under an async logger), Ch. 48 (Disruptor — the batching pipeline pattern), Ch. 30–31 (no allocation/syscalls on the hot path — logging must obey both), Ch. 20 (TSC timestamps — cheap per-record time), Ch. 4 (reading codegen — proving the log call is tiny), Ch. 1 (tail latency — a logging stall is a tail event).
 >
-> **Leads into:** Ch. 100 (telemetry — the same capture-here/format-there discipline applied to counters and histograms), Ch. 108 (capture/persistence — binary logging is the same off-hot-path-writer discipline applied to ticks/orders), Ch. 118 (the case study — logging is how you *see* the tick-to-trade path in production). Opens Part XIII — observability and operations: making a low-latency system *visible* without slowing it down.
+> **Leads into:** Ch. 100 (telemetry — the same capture-here/format-there discipline applied to counters and histograms), Ch. 109 (capture/persistence — binary logging is the same off-hot-path-writer discipline applied to ticks/orders), Ch. 119 (the case study — logging is how you *see* the tick-to-trade path in production). Opens Part XIII — observability and operations: making a low-latency system *visible* without slowing it down.
 
 ---
 
@@ -12,7 +12,7 @@
 
 Every other chapter of this book worked to shave nanoseconds off the tick-to-trade path. A single careless `log("order sent: {} @ {}", id, price)` on that path can throw all of it away — because the *obvious* way to log does, on the hot path, every single thing this book forbids: it **formats** (parses a format string, converts integers/floats to text — hundreds of ns to microseconds), it may **allocate** (Ch. 30 — `std::string`, stream buffers), it takes a **lock** (Ch. 43 — the logger mutex, contended with other threads), and it does **I/O** (Ch. 63 — a `write()` syscall, or worse a blocking disk/network write that can stall for *milliseconds*). Any one of these is a tail-latency catastrophe (Ch. 1): the median is fine, but the one log call that hit a page fault, a lock convoy, or a flushing disk just produced a p99.9 outlier measured in milliseconds on a path with a microsecond budget.
 
-Yet you *cannot* run a production trading system blind. You need to know what every strategy decided, what every order did, why a position is what it is — for debugging, for compliance, for post-trade analysis (Ch. 108–109 for the captures, Ch. 118 §118.4.5 for the join). The requirement is absolute on *both* sides: **log everything you need, and spend almost nothing on the hot path doing it.** The resolution is the theme of this chapter and much of Part XIII: **do the cheap part on the hot path, defer the expensive part off it.** The hot path does the minimum to *capture* the event — copy a few raw bytes into a lock-free buffer (Ch. 45) and move on, ideally in a handful of nanoseconds. A *separate* thread, on a *non-isolated* core (Ch. 56), does the expensive part — formatting, I/O — where its cost doesn't matter because it's off the path that trades.
+Yet you *cannot* run a production trading system blind. You need to know what every strategy decided, what every order did, why a position is what it is — for debugging, for compliance, for post-trade analysis (Ch. 109–110 for the captures, Ch. 119 §119.4.5 for the join). The requirement is absolute on *both* sides: **log everything you need, and spend almost nothing on the hot path doing it.** The resolution is the theme of this chapter and much of Part XIII: **do the cheap part on the hot path, defer the expensive part off it.** The hot path does the minimum to *capture* the event — copy a few raw bytes into a lock-free buffer (Ch. 45) and move on, ideally in a handful of nanoseconds. A *separate* thread, on a *non-isolated* core (Ch. 56), does the expensive part — formatting, I/O — where its cost doesn't matter because it's off the path that trades.
 
 This is "zero-overhead" logging: not *zero* cost (capturing the event costs *something*), but **as close to zero as possible on the hot path**, with all the real work moved to where latency is free. The hot-path log call should compile to little more than "store these few values into the ring buffer and bump a pointer" (§98.5 proves it). This chapter shows the deferred-formatting / binary-logging mental model (§98.2), measures what a naive vs a deferred log call actually costs (§98.3), builds the async/lock-free/binary techniques (§98.4), verifies the hot-path call is tiny in the codegen (§98.5), and warns about the ways logging sneaks back onto the hot path (§98.6).
 
@@ -128,7 +128,7 @@ void on_fill(std::uint64_t order_id, std::int64_t price_ticks, std::uint32_t qty
 }
 ```
 
-- **Compact on disk (ties Ch. 108).** Binary records are *small* (no text bloat) — cheaper to write, cheaper to store, cheaper to replay. The same binary-record discipline is exactly what Ch. 108 uses to journal every tick and order for deterministic replay; a zero-overhead logger and a capture journal are the same machine pointed at different events.
+- **Compact on disk (ties Ch. 109).** Binary records are *small* (no text bloat) — cheaper to write, cheaper to store, cheaper to replay. The same binary-record discipline is exactly what Ch. 109 uses to journal every tick and order for deterministic replay; a zero-overhead logger and a capture journal are the same machine pointed at different events.
 
 ### 98.4.3 `std::print`/`std::println` for off-hot-path output
 
@@ -225,7 +225,7 @@ If the asm shows the few-stores-and-publish shape, the measurement of §98.3 (si
 
 - CppCon talks on low-latency logging and "logging without slowing down" — the deferral and binary-record patterns in practice.
 - The NanoLog and Quill design write-ups — compile-time site IDs, type-safe argument capture, offline decoding.
-- Ch. 108 (*Capture/Persistence*) — the same binary-record, off-hot-path-writer discipline applied to journaling ticks/orders for replay; Ch. 118 (*Case Study*) — logging as production observability of the tick-to-trade path; Ch. 65 (*io_uring*) — getting the consumer's batched writes to disk efficiently; Ch. 101 (*Secure Programming*) — keeping secrets out of logs (§101.4.5).
+- Ch. 109 (*Capture/Persistence*) — the same binary-record, off-hot-path-writer discipline applied to journaling ticks/orders for replay; Ch. 119 (*Case Study*) — logging as production observability of the tick-to-trade path; Ch. 65 (*io_uring*) — getting the consumer's batched writes to disk efficiently; Ch. 101 (*Secure Programming*) — keeping secrets out of logs (§101.4.5).
 - **Appendix E** — the cost of a syscall / page fault (why I/O can't be on the path); **Appendix F** — SPSC/Disruptor glossary.
 
 ---
