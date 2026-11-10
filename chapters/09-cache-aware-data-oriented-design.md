@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (*The Memory Hierarchy & Caches*) — you know cache lines are 64 bytes, that you pay per line, that sequential access is prefetcher-friendly, and that DRAM is ~55× an L1 hit — two orders of magnitude. Ch. 1–6 methodology throughout (distributions, PMU, honest benchmarks, a quiet box).
 >
-> **Leads into:** Ch. 10 (object layout, alignment & padding) makes the *individual struct* as small and line-friendly as this chapter makes the *collection*; Ch. 11 (software prefetch) is the fallback when layout alone can't help. The order-book case study (Ch. 29) is the full-scale version of §9.3–§9.4 here. SoA is also the enabling layout for SIMD (Ch. 33).
+> **Leads into:** Ch. 10 (object layout, alignment & padding) makes the *individual struct* as small and line-friendly as this chapter makes the *collection*; Ch. 11 (software prefetch) is the fallback when layout alone can't help. The order-book case study (Ch. 30) is the full-scale version of §9.3–§9.4 here. SoA is also the enabling layout for SIMD (Ch. 34).
 
 ---
 
@@ -66,7 +66,7 @@ SoA in memory (loop wants only qty):
   qty:    [Q Q Q Q Q Q Q Q ...]   <- loop walks this, 100% of each line useful
 ```
 
-The rule is **access-pattern-driven**: AoS wins when you touch *whole objects, one or a few at a time* (random-access lookups); SoA wins when you touch *one or a few fields across many objects* (bulk scans, the book-update sweep, anything you want to vectorize — Ch. 33). Most hot loops are the latter; most naïve code is the former. SoA is also frequently a prerequisite for SIMD, because a vector load wants 8 adjacent `qty` values, not 8 `qty` fields scattered across 8 fat structs.
+The rule is **access-pattern-driven**: AoS wins when you touch *whole objects, one or a few at a time* (random-access lookups); SoA wins when you touch *one or a few fields across many objects* (bulk scans, the book-update sweep, anything you want to vectorize — Ch. 34). Most hot loops are the latter; most naïve code is the former. SoA is also frequently a prerequisite for SIMD, because a vector load wants 8 adjacent `qty` values, not 8 `qty` fields scattered across 8 fat structs.
 
 ### 9.2.2 Hot/cold field splitting
 
@@ -175,7 +175,7 @@ Read it through Ch. 8:
 - **The miss count is the story, not the miss *rate*.** AoS misses L1 once per level, SoA once per 8 levels — the same ratio as the bytes. Both walks are fully prefetched (a stride-64 sequential walk is exactly what the L2 streamer tracks), so neither is latency-bound; AoS simply pushes 8× as many lines through the same bandwidth.
 - **The win is bandwidth and footprint, not cleverness.** SoA moved 8× fewer bytes. No algorithmic change — just "make the bytes the loop needs contiguous." (Whole-process `time` would have shown 6-25× run to run, because the 256 MiB first-touch setup swings with the kernel — time the steady state.)
 
-This is the order-book case study (Ch. 29) in miniature, and it generalizes: **any per-event bulk scan over a fat struct is paying this 8×–ish tax until you split the hot field out.**
+This is the order-book case study (Ch. 30) in miniature, and it generalizes: **any per-event bulk scan over a fat struct is paying this 8×–ish tax until you split the hot field out.**
 
 ---
 
@@ -198,17 +198,17 @@ The highest-ROI, lowest-risk move in practice (§9.2.2): pull the rarely-touched
 
 - **Find the cold fields** by asking, per field, "does a hot-path event read this?" Logging timestamps, audit ids, human-readable symbols, debug flags, error strings, and back-references are almost always cold.
 - **Keep the hot struct dense and ideally ≤ one cache line** (Ch. 10 will help you measure and pack it). Several hot objects per line is the goal.
-- **Link hot↔cold by index, not pointer**, when they live in parallel arrays — an index is smaller than a 8-byte pointer, doesn't defeat the prefetcher, and survives reallocation (Ch. 29). A pointer reintroduces exactly the chase you're trying to avoid.
-- **C++23 niceties:** `std::flat_map`/`std::flat_set` (Ch. 29) give you contiguous, cache-friendly ordered storage out of the box where you'd otherwise reach for a node-based `std::map`; pair them with hot/cold-split value types.
+- **Link hot↔cold by index, not pointer**, when they live in parallel arrays — an index is smaller than a 8-byte pointer, doesn't defeat the prefetcher, and survives reallocation (Ch. 30). A pointer reintroduces exactly the chase you're trying to avoid.
+- **C++23 niceties:** `std::flat_map`/`std::flat_set` (Ch. 30) give you contiguous, cache-friendly ordered storage out of the box where you'd otherwise reach for a node-based `std::map`; pair them with hot/cold-split value types.
 
 This is often where you get 80% of the SoA benefit for 20% of the disruption — the hot loop sees only hot bytes, but you didn't have to shatter every field into its own array or rewrite every accessor.
 
 ### 9.4.3 SoA for the book-update loop
 
-When the hot path is a *bulk sweep* — recompute aggregate depth, find best bid/ask across levels, apply a vectorized transform — go full **SoA** on the swept fields, as §9.3 showed. Guidance specific to the order-book update loop (full treatment in Ch. 29):
+When the hot path is a *bulk sweep* — recompute aggregate depth, find best bid/ask across levels, apply a vectorized transform — go full **SoA** on the swept fields, as §9.3 showed. Guidance specific to the order-book update loop (full treatment in Ch. 30):
 
 - **Store the swept field(s) as dense parallel arrays** indexed by price level (or a compact level index), so the sweep is a unit-stride scan the prefetcher devours.
-- **SoA unlocks SIMD** (Ch. 33): a contiguous `total_qty[]` can be summed/compared 4–8 lanes at a time; the same field buried in fat structs cannot. If you intend to vectorize the book-update or risk-aggregation loop, SoA is not optional.
+- **SoA unlocks SIMD** (Ch. 34): a contiguous `total_qty[]` can be summed/compared 4–8 lanes at a time; the same field buried in fat structs cannot. If you intend to vectorize the book-update or risk-aggregation loop, SoA is not optional.
 - **Keep the *random-access* path in mind.** A feed handler also does point updates ("modify the qty at *this* price"), which is a single-element access where SoA and AoS are similar — but SoA still wins because the touched arrays are denser (more levels per cache line). The sweep dominates, so SoA is the right call; verify with the per-event footprint.
 - **Mind update locality:** if an add/cancel updates several fields of *one* level together, pure SoA scatters that update across N arrays (N lines touched per point-update). That's the tension §9.5 names — measure whether the sweep savings outweigh the point-update cost for *your* feed. Often a hot/cold split (§9.4.2) with the few co-updated hot fields kept together is the sweet spot.
 
@@ -234,7 +234,7 @@ When the hot path is a *bulk sweep* — recompute aggregate depth, find best bid
 2. **Find the break-even.** Shrink `N` until the AoS book fits in L3, then L2, then L1. At what working-set size does the AoS/SoA gap disappear? Explain via Ch. 8 (when everything's in L1, layout barely matters — and why that's a benchmarking trap).
 3. **Hot/cold split.** Add several cold fields to a hot struct and write a loop that uses one hot field. Measure. Now split hot/cold into parallel arrays indexed in lockstep and re-measure footprint and MPKI. How much of the SoA win did the simpler split capture?
 4. **Make the point-update pay.** Write the *other* access pattern — a loop that, for random levels, updates `price`, `total_qty`, and `order_count` together. Compare AoS vs full SoA for *this* loop. Which wins now, and why? Reconcile with exercise 1's verdict (§9.5).
-5. **SoA enables SIMD.** Sum `total_qty` over the SoA array in a `noinline` function taking a runtime `n` (so the compiler cannot vectorize across passes) at `-O3 -march=native` — with GCC 13 use `-O3` or `-O2 -fvect-cost-model=dynamic`, because the `-O2` very-cheap cost model skips reductions with an unknown trip count — and read the asm (Ch. 4): is it vectorized (`ymm`/`vpaddq`)? Now try to get the compiler to vectorize the *AoS* sum. Can it? Why is SoA the enabler (Ch. 33)?
+5. **SoA enables SIMD.** Sum `total_qty` over the SoA array in a `noinline` function taking a runtime `n` (so the compiler cannot vectorize across passes) at `-O3 -march=native` — with GCC 13 use `-O3` or `-O2 -fvect-cost-model=dynamic`, because the `-O2` very-cheap cost model skips reductions with an unknown trip count — and read the asm (Ch. 4): is it vectorized (`ymm`/`vpaddq`)? Now try to get the compiler to vectorize the *AoS* sum. Can it? Why is SoA the enabler (Ch. 34)?
 
 **Checklist — data-oriented layout**
 
@@ -254,15 +254,15 @@ When the hot path is a *bulk sweep* — recompute aggregate depth, find best bid
 - M. Acton, *"Data-Oriented Design and C++,"* CppCon 2014 — the foundational talk; "the purpose of the program is to transform data," and why layout follows access.
 - R. Fabian, *Data-Oriented Design* (book and dataorienteddesign.com) — the most complete written treatment of AoS/SoA, hot/cold splitting, and existence-based processing.
 - U. Drepper, *"What Every Programmer Should Know About Memory"* — §7's reference, and the source for why per-line, per-stride access dominates layout decisions.
-- Intel, *64 and IA-32 Architectures Optimization Reference Manual* — data-layout and prefetcher guidance, and the SoA-for-SIMD recommendation (Ch. 33).
+- Intel, *64 and IA-32 Architectures Optimization Reference Manual* — data-layout and prefetcher guidance, and the SoA-for-SIMD recommendation (Ch. 34).
 - N. Llopis, *"Data-Oriented Design (Or Why You Might Be Shooting Yourself in the Foot With OOP),"* 2009 — an early, influential statement of the layout-first mindset.
 
 ## 9.8 Additional Reading
 
 - S. Meyers, *"CPU Caches and Why You Care"* (talk) — an accessible bridge from Ch. 8's hardware to this chapter's layout decisions.
-- The EnTT / modern ECS literature and `std::flat_map`/`std::flat_set` proposals (P0429, P1222) — contiguous, cache-friendly containers that operationalize §9.4.2 (Ch. 29).
-- Ch. 10 (*Object Layout, Alignment & Padding*) — sizing and packing the hot struct you just decided to split; Ch. 33 (*SIMD*) — why SoA is the layout vectorization wants.
-- **Appendix E** — the per-line/per-miss costs that make the §9.3 bandwidth argument quantitative; the order-book case study in **Ch. 29** for the production-scale version.
+- The EnTT / modern ECS literature and `std::flat_map`/`std::flat_set` proposals (P0429, P1222) — contiguous, cache-friendly containers that operationalize §9.4.2 (Ch. 30).
+- Ch. 10 (*Object Layout, Alignment & Padding*) — sizing and packing the hot struct you just decided to split; Ch. 34 (*SIMD*) — why SoA is the layout vectorization wants.
+- **Appendix E** — the per-line/per-miss costs that make the §9.3 bandwidth argument quantitative; the order-book case study in **Ch. 30** for the production-scale version.
 
 ---
 
