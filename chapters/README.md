@@ -522,7 +522,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part V — Numerics & Data Parallelism
 
-*Representing prices exactly, fast transcendentals with a measured error bound for the pricing and signal math that is not integer, bit tricks, SIMD, and the strategy stage as computation: streaming statistics maintained in O(1) and fixed memory, with floating-point drift, the denormal cliff and bit-exact replay measured.*
+*Representing prices exactly, fast transcendentals with a measured error bound for the pricing and signal math that is not integer, bit tricks, hashing, checksums and key design for the hot path's tables, SIMD, and the strategy stage as computation: streaming statistics maintained in O(1) and fixed memory, with floating-point drift, the denormal cliff and bit-exact replay measured.*
 
 ### [35. Fixed-Point & Floating-Point Arithmetic](35-fixed-point-floating-point-arithmetic.md)
 - 35.1 Why it matters: representing prices without losing money
