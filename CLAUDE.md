@@ -811,7 +811,7 @@ Code & content guidelines:
   (+ `hints-baseline.txt`), `tools/review/renumber_history.py` (replaces the retired `stale_crossrefs.py`); `sweep.py`
   extended to the full structure contract; `insert_chapter.py` now continues a chapter list past an attached `§`.
   Fixed in the book: 148 list items whose bare chapter number the insertion tool had left behind (Appendix O's *Where*
-  column), 70 more bare numbers it could not see (lists after a `§`, a fenced table in Ch. 113, Ch. 120's ledger),
+  column), 73 more bare numbers it could not see (lists after a `§`, a fenced table in Ch. 113, Ch. 120's ledger),
   21 external-book citations it had renumbered, 48 `Ch. N.M` spellings, 24 references that resolved to the wrong
   chapter (PCIe cited as Ch. 85 sixteen times), stale counts in five chapters, seven README outline lines; Appendix O
   gained rows for eleven chapters, Appendix F is alphabetical again. The PDF build needed three fixes in
