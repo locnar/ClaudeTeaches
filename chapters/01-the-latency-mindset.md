@@ -22,7 +22,7 @@ That single fact reorganizes everything:
 
 Carl Cook's CppCon talk title puts it exactly: *"When a Microsecond Is an Eternity."* At a tick-to-trade budget measured in hundreds of nanoseconds to low single-digit microseconds, a single L3 miss to DRAM (≈ 80–100 ns; Ch. 8), one minor page fault, one unlucky branch mispredict (Ch. 15), or one trip through the kernel's scheduler can be the difference between the fill and the miss. The rest of this book is a catalogue of where those nanoseconds hide. This chapter is about the discipline that makes the hunt worth doing: **always reason about the distribution, never the mean.**
 
-A note on scope and honesty up front. Not every system in a trading firm lives on the tick-to-trade hot path. Risk calculations, backtesting, and research (Ch. 87–88) are throughput problems and should be engineered as such. The latency mindset is a tool you apply where the payoff is a deadline — applying it everywhere is its own kind of waste. Knowing *which* tier a piece of code lives in is the first design decision, and we return to it in §1.4.2.
+A note on scope and honesty up front. Not every system in a trading firm lives on the tick-to-trade hot path. Risk calculations, backtesting, and research (Ch. 88–89) are throughput problems and should be engineered as such. The latency mindset is a tool you apply where the payoff is a deadline — applying it everywhere is its own kind of waste. Knowing *which* tier a piece of code lives in is the first design decision, and we return to it in §1.4.2.
 
 ---
 
@@ -59,7 +59,7 @@ The vocabulary you will use constantly:
 - **Maximum:** the single worst event observed. Noisy and sample-size-dependent, but on a hot path the max is not an outlier to be discarded — it is a real event that happened to real money. Treat it as a defect to be explained, not a statistic to be smoothed.
 - **Jitter:** the *variability* of latency — informally the spread between p50 and the tail. Low, stable latency with tight jitter is the goal. A system with p50 = 1 µs and p99.9 = 1.2 µs has excellent jitter; one with p50 = 1 µs and p99.9 = 30 µs does not, even though their medians are identical.
 
-Latency distributions in real systems are almost never Gaussian. They are **heavily right-skewed with a long tail**: a tight cluster of fast events near a hard physical floor (you cannot beat the speed of light through the NIC and PCIe bus; Ch. 85), and a long thin tail stretching right, populated by cache misses, page faults, context switches, interrupts, TLB misses (Ch. 17), and frequency transitions (Ch. 6). The mean sits somewhere in the sparsely populated middle, describing almost none of the actual events. This is the single most important picture in the book; internalize it:
+Latency distributions in real systems are almost never Gaussian. They are **heavily right-skewed with a long tail**: a tight cluster of fast events near a hard physical floor (you cannot beat the speed of light through the NIC and PCIe bus; Ch. 86), and a long thin tail stretching right, populated by cache misses, page faults, context switches, interrupts, TLB misses (Ch. 17), and frequency transitions (Ch. 6). The mean sits somewhere in the sparsely populated middle, describing almost none of the actual events. This is the single most important picture in the book; internalize it:
 
 ```
  count
@@ -81,20 +81,20 @@ Each lump and spike in that tail has a *cause* in the hardware or the OS. The ar
 
 ### 1.2.3 The tick-to-trade budget, broken down by stage
 
-**Tick-to-trade** is the end-to-end latency that matters: from the first bit of a market-data packet arriving at your NIC ("tick") to the first bit of your resulting order leaving your NIC ("trade"). It is the number your business is measured on, and true wire-to-wire measurement of it requires hardware timestamping and PTP (Ch. 74, 77) — software clocks are not trustworthy at this resolution (Ch. 20).
+**Tick-to-trade** is the end-to-end latency that matters: from the first bit of a market-data packet arriving at your NIC ("tick") to the first bit of your resulting order leaving your NIC ("trade"). It is the number your business is measured on, and true wire-to-wire measurement of it requires hardware timestamping and PTP (Ch. 75, 78) — software clocks are not trustworthy at this resolution (Ch. 20).
 
 The discipline is to treat that end-to-end number as a **budget** and to allocate it across stages, because you cannot improve what you have not decomposed. A representative breakdown for a competitive software (kernel-bypass) path on modern x86-64 — *orders of magnitude, not promises; your hardware and code decide the real values, and the whole point of this book is to teach you to measure your own*:
 
 | Stage | Rough budget | Book chapters |
 |---|---:|---|
-| Wire → NIC → host memory (DMA, kernel bypass) | 0.5–1 µs | Ch. 74, 81, 85 |
+| Wire → NIC → host memory (DMA, kernel bypass) | 0.5–1 µs | Ch. 75, 82, 86 |
 | Feed decode / book update | 100–400 ns | Ch. 32, 70 |
 | Strategy / signal logic | 50–300 ns | Ch. 10–16, 21–26 |
-| Risk checks & order encode | 50–200 ns | Ch. 35, 70, 99, 101, 102 |
-| Host memory → NIC → wire | 0.4–0.8 µs | Ch. 74, 81, 85 |
+| Risk checks & order encode | 50–200 ns | Ch. 35, 70, 100, 102, 103 |
+| Host memory → NIC → wire | 0.4–0.8 µs | Ch. 75, 82, 86 |
 | **Tick-to-trade total** | **≈ 1–3 µs** | the whole book |
 
-Two lessons live in this table. First, **no single stage dominates** — there is no one trick that wins; competitiveness is the sum of dozens of disciplined decisions, which is why the book has 76 chapters. Second, the I/O stages (wire in, wire out) are a large fraction of the budget, which is why kernel bypass, NIC offloads, and even FPGAs (Ch. 81, 89) exist: at some point the only way to cut the budget is to stop touching the general-purpose CPU and OS at all. A pure-software path that does everything right still spends most of its time getting bytes on and off the wire.
+Two lessons live in this table. First, **no single stage dominates** — there is no one trick that wins; competitiveness is the sum of dozens of disciplined decisions, which is why the book has 76 chapters. Second, the I/O stages (wire in, wire out) are a large fraction of the budget, which is why kernel bypass, NIC offloads, and even FPGAs (Ch. 82, 90) exist: at some point the only way to cut the budget is to stop touching the general-purpose CPU and OS at all. A pure-software path that does everything right still spends most of its time getting bytes on and off the wire.
 
 Crucially, **every number in that table is itself a distribution.** The budget must hold at p99.9, not at p50, or you have budgeted for the races you win and ignored the ones you lose. "Decode is 200 ns" is meaningless; "decode is 180 ns at p50 and 240 ns at p99.9" is an engineering statement.
 
@@ -200,7 +200,7 @@ Read that output the way a hot-path engineer reads it:
 
 This is the entire mindset in one program: **the mean told you the system was fine; the percentiles told you the truth.**
 
-> **C++20 fallback for `<print>`.** `std::println` (`<print>`, P2093) ships in GCC 14+ (libstdc++ 14) and Clang 18+ (libc++ 18; the `stdout`/`FILE*` overloads used here were already in libc++ 17) — see Appendix H — and needs `-std=c++23`. On an older toolchain, replace the `std::println(...)` calls with `std::cout << std::format(...) << '\n';` (`<format>`, C++20: GCC 13+/libstdc++ 13, or libc++ 17+ — `<format>` was experimental in libc++ 14–16), or with classic `printf`/iostreams. We use `<print>` throughout the book for *off-hot-path* output and explain in Ch. 96 why formatted I/O never belongs on the hot path itself.
+> **C++20 fallback for `<print>`.** `std::println` (`<print>`, P2093) ships in GCC 14+ (libstdc++ 14) and Clang 18+ (libc++ 18; the `stdout`/`FILE*` overloads used here were already in libc++ 17) — see Appendix H — and needs `-std=c++23`. On an older toolchain, replace the `std::println(...)` calls with `std::cout << std::format(...) << '\n';` (`<format>`, C++20: GCC 13+/libstdc++ 13, or libc++ 17+ — `<format>` was experimental in libc++ 14–16), or with classic `printf`/iostreams. We use `<print>` throughout the book for *off-hot-path* output and explain in Ch. 97 why formatted I/O never belongs on the hot path itself.
 
 ---
 
@@ -225,13 +225,13 @@ Treat latency like a financial budget. Three steps:
 
 1. **State the end-to-end target** as a percentile, e.g. "tick-to-trade ≤ 2.5 µs at p99.9." A target without a percentile is undefined.
 2. **Decompose into stages** and allocate a sub-budget to each — wire-in, decode, strategy, risk, encode, wire-out (§1.2.3). The allocation forces the question "is this stage worth its slice?" and exposes the stages with no slack.
-3. **Measure each stage against its sub-budget at the target percentile**, continuously, in production (Ch. 116). A stage that blows its budget at p99.9 is a defect even if its mean is fine.
+3. **Measure each stage against its sub-budget at the target percentile**, continuously, in production (Ch. 117). A stage that blows its budget at p99.9 is a defect even if its mean is fine.
 
 The budget is also where you decide a piece of code's **latency tier**, which is the highest-leverage decision you will make about it:
 
-- **Hot path (steady state):** runs per market event; on the critical race. The non-negotiable disciplines of this book apply — zero allocation (Ch. 30–31), no syscalls, no locks that can block (Ch. 43, 45), no logging that formats inline (Ch. 96), nothing that can fault or context-switch (Ch. 30, 54). Every nanosecond and, more importantly, every *variance source* is fought.
-- **Warm path (near hot):** runs occasionally — a new-symbol setup, a parameter change (Ch. 100). Should not stall the hot path, but a few microseconds is acceptable. Keep it *off* the hot core's critical section.
-- **Cold path (setup / control / research):** startup, configuration, risk batch jobs, backtests (Ch. 87–88). A throughput problem. Spending hot-path effort here is wasted effort, and the latency mindset, misapplied, becomes premature optimization.
+- **Hot path (steady state):** runs per market event; on the critical race. The non-negotiable disciplines of this book apply — zero allocation (Ch. 30–31), no syscalls, no locks that can block (Ch. 43, 45), no logging that formats inline (Ch. 97), nothing that can fault or context-switch (Ch. 30, 54). Every nanosecond and, more importantly, every *variance source* is fought.
+- **Warm path (near hot):** runs occasionally — a new-symbol setup, a parameter change (Ch. 101). Should not stall the hot path, but a few microseconds is acceptable. Keep it *off* the hot core's critical section.
+- **Cold path (setup / control / research):** startup, configuration, risk batch jobs, backtests (Ch. 88–89). A throughput problem. Spending hot-path effort here is wasted effort, and the latency mindset, misapplied, becomes premature optimization.
 
 Most of the bytes in a trading system are cold. The latency mindset's *first* job is to tell you which 5% is hot, so the other 95% can be written for clarity and the hot 5% can be fought for at the nanosecond level. Misclassifying cold code as hot wastes engineering; misclassifying hot code as cold loses races. Get the tier right first.
 
@@ -247,7 +247,7 @@ The tail is not random — every spike has a mechanism. The rest of the book is,
 | Heap allocation (`malloc`) | µs spikes, unbounded tail | Ch. 30–31 |
 | System call | ~50–400 ns (mitigation-dependent) + cache/TLB pollution | Ch. 54, 63 |
 | Context switch / preemption | µs–ms; correlated with load | Ch. 54, 56, 57, 59 |
-| Interrupt (IRQ) | µs; correlated with NIC traffic | Ch. 56, 74 |
+| Interrupt (IRQ) | µs; correlated with NIC traffic | Ch. 56, 75 |
 | Lock contention | unbounded; load-dependent | Ch. 42–45 |
 | Frequency / C-state transition | µs on first event after idle | Ch. 6, 62 |
 | NUMA-remote access | ~1.5–2× local DRAM | Ch. 18 |
@@ -258,7 +258,7 @@ The strategic insight is that the worst tail offenders — page faults, allocati
 
 ## 1.5 Pitfalls & anti-patterns: why means lie; throughput-driven design
 
-- **Reporting (or optimizing) the average.** The cardinal sin, demonstrated in §1.3. A mean on a heavy-tailed distribution describes almost no real event and actively *hides* the cliff that costs you races. If a dashboard, a benchmark, or a colleague reports "average latency," the correct response is "at what percentile, and what does the tail look like?" — and when the dashboard *does* show a percentile, the next question is whether it was averaged across hosts or windows, which quietly turns it back into a mean (Ch. 98 §98.2.2).
+- **Reporting (or optimizing) the average.** The cardinal sin, demonstrated in §1.3. A mean on a heavy-tailed distribution describes almost no real event and actively *hides* the cliff that costs you races. If a dashboard, a benchmark, or a colleague reports "average latency," the correct response is "at what percentile, and what does the tail look like?" — and when the dashboard *does* show a percentile, the next question is whether it was averaged across hosts or windows, which quietly turns it back into a mean (Ch. 99 §99.2.2).
 - **Throughput-driven design on the hot path.** Batching, buffering, and pipelining all trade latency for throughput. They are the right tools for the cold/research tier and the wrong tools for the race. Reaching for them reflexively — because that is how general-purpose backend systems are built — is the most common way good engineers build slow trading systems.
 - **Running the box hot.** "We have 40% idle CPU, plenty of room" is the queueing-theory trap of §1.2.1: latency explodes as utilization approaches 1, and the bursts that push you there arrive exactly when the money is on the table. Hot-path cores are kept deliberately under-utilized and, ideally, isolated (Ch. 56, 59).
 - **Trusting a single run, or a tiny sample.** Tail percentiles are sample-size hungry: you cannot measure p99.9 honestly with 1,000 samples (you have only one event out there). And the tail is where the variance lives, so one run tells you almost nothing. Ch. 3 makes this rigorous.

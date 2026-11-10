@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (cache hierarchy, lines, and especially the **hardware prefetcher** of §8.2.4 — what it can and can't predict), Ch. 10 (layout), Ch. 11 (sizing). Ch. 2–3 for measuring, Ch. 4 for the asm in §12.5. This chapter is the **fallback** for when good layout and the hardware prefetcher *still* leave miss latency exposed.
 >
-> **Leads into:** Ch. 13 (pipelines/ILP — prefetch works by overlapping misses with compute) and Ch. 32 (the order book, where prefetching the next node/level is a real technique). Non-temporal stores tie to the write path of capture/logging (Ch. 96, 106). SIMD streaming stores connect to Ch. 39.
+> **Leads into:** Ch. 13 (pipelines/ILP — prefetch works by overlapping misses with compute) and Ch. 32 (the order book, where prefetching the next node/level is a real technique). Non-temporal stores tie to the write path of capture/logging (Ch. 97, 107). SIMD streaming stores connect to Ch. 39.
 
 ---
 
@@ -75,7 +75,7 @@ The write-path tool. A normal store to a not-yet-cached line triggers a **read-f
 
 **Non-temporal / streaming stores** (`movnti` for scalars, `vmovntps`/`vmovntdq` for SIMD — verified in §12.5) write directly toward memory through a **write-combining** buffer, **bypassing the cache hierarchy** (no RFO, no cache pollution). The trade-offs you must respect:
 
-- They are **weakly ordered** on x86 (unlike normal stores' total store order) — you **must fence** (`_mm_sfence()`) before another thread, a DMA engine, or a dependent reader can rely on the data being visible. Note the trap for a Ch. 41 reader: x86-TSO's ordering guarantee — and therefore a C++ release fence or release store, which compile to nothing / a plain `mov` — does **not** cover `movnt*` stores; only `sfence`, `mfence` or a `lock`-prefixed RMW (a `seq_cst` store or `fetch_add`) orders them. Publishing a streamed buffer through a release-store flag is exactly the bug. (Ch. 85 §85.4.1 meets the same rule for write-combining MMIO.) Forgetting the fence is a correctness bug.
+- They are **weakly ordered** on x86 (unlike normal stores' total store order) — you **must fence** (`_mm_sfence()`) before another thread, a DMA engine, or a dependent reader can rely on the data being visible. Note the trap for a Ch. 41 reader: x86-TSO's ordering guarantee — and therefore a C++ release fence or release store, which compile to nothing / a plain `mov` — does **not** cover `movnt*` stores; only `sfence`, `mfence` or a `lock`-prefixed RMW (a `seq_cst` store or `fetch_add`) orders them. Publishing a streamed buffer through a release-store flag is exactly the bug. (Ch. 86 §86.4.1 meets the same rule for write-combining MMIO.) Forgetting the fence is a correctness bug.
 - They pay off only for **large, write-only, cache-line-granular** regions written sequentially (to fill write-combining buffers fully). For small or read-back-soon data they're a pessimization (you'd want the data *in* cache).
 - They're most effective writing **full cache lines**; partial-line non-temporal stores are inefficient.
 
@@ -157,7 +157,7 @@ Read it the Ch. 1 way:
    book update latency (ns): p50 219  p99   790  p99.9 2,100     l2_lines_out.useless_hwpf    0     l2_rqsts.all_pf    0   L1 misses 12.4M
 ```
 
-The p50 moved 3 % the wrong way (the few sequential walks the book does lose their prefetch); the p99 halved and the p99.9 fell 3×. The mechanism is the `useless_hwpf` column: 41 M lines the L2 streamer fetched and evicted *without their ever being used*, each one pushing a line of the book out of L2 (and, with the neighbour's traffic, out of the L3 ways the hot core had left), so the book's real accesses missed to L3 and DRAM in the tail. With the prefetchers off, the book stays resident and the L1 miss count is unchanged — the demand misses were always the same; the prefetch traffic was the eviction pressure. The same effect, from the other direction, is Ch. 75 §75.4.2: hardware prefetch streams running through the DDIO region evict packets the NIC just delivered. This is the experiment to run before deciding the per-core policy §12.4.3 describes; the outcome depends on how much of the hot path is sequential (a SoA sweep — Ch. 10 — wants the streamer on; a pointer-chasing book wants it off), which is why it is a per-core, measured setting and not a BIOS default.
+The p50 moved 3 % the wrong way (the few sequential walks the book does lose their prefetch); the p99 halved and the p99.9 fell 3×. The mechanism is the `useless_hwpf` column: 41 M lines the L2 streamer fetched and evicted *without their ever being used*, each one pushing a line of the book out of L2 (and, with the neighbour's traffic, out of the L3 ways the hot core had left), so the book's real accesses missed to L3 and DRAM in the tail. With the prefetchers off, the book stays resident and the L1 miss count is unchanged — the demand misses were always the same; the prefetch traffic was the eviction pressure. The same effect, from the other direction, is Ch. 76 §76.4.2: hardware prefetch streams running through the DDIO region evict packets the NIC just delivered. This is the experiment to run before deciding the per-core policy §12.4.3 describes; the outcome depends on how much of the hot path is sequential (a SoA sweep — Ch. 10 — wants the streamer on; a pointer-chasing book wants it off), which is why it is a per-core, measured setting and not a BIOS default.
 
 ---
 
@@ -178,7 +178,7 @@ Guidance: prefetch the **line** (64-byte granularity — prefetching two address
 
 Where streaming stores earn their keep — bulk, write-only, cache-line-granular output:
 
-- **Capture / journaling / logging buffers** (Ch. 96, 106): you write packets or log records to a large ring you won't read back on the hot path. Stream them so they don't evict the hot order-book/strategy state from L1/L2.
+- **Capture / journaling / logging buffers** (Ch. 97, 107): you write packets or log records to a large ring you won't read back on the hot path. Stream them so they don't evict the hot order-book/strategy state from L1/L2.
 - **Large `memcpy`/`memset` of write-only data** (zeroing a big arena you'll fault in lazily, staging a DMA buffer). `glibc`'s `memcpy`/`memset` already switch to non-temporal stores above a size threshold; your hand-rolled bulk copies should too.
 - **Producer→consumer hand-off where the producer won't re-read** — though here weigh whether the consumer wants it *in* L3 (then a normal store is better). Streaming wins only when the writer truly won't reuse the cache line and protecting the hot set matters.
 
@@ -201,12 +201,12 @@ The mechanics on Linux:
    $ wrmsr -p 2 0x1a4 0x3                                  # core 2: only the two L2 prefetchers off (keep the L1 ones)
    $ for c in 0 1 8 9 10 11; do wrmsr -p $c 0x1a4 0x0; done   # housekeeping/batch cores: everything on
    # kernel >= 5.9 refuses MSR writes unless booted with msr.allow_writes=on (and logs each write); kernel lockdown (Secure Boot,
-   # Ch. 99 §99.4.9) refuses them regardless — so the write belongs in a signed early-boot unit, before the trading unit (Ch. 101 §101.4.9)
+   # Ch. 100 §100.4.9) refuses them regardless — so the write belongs in a signed early-boot unit, before the trading unit (Ch. 102 §102.4.9)
    # verify at the gate (Appendix M.2): the MSR is per core and is reset by a reboot, a suspend, and some microcode loads
    $ for c in 2 3 4 5; do echo -n "cpu$c "; rdmsr -p $c 0x1a4; done
 ```
 
-Three rules: **(1) per core, by role** — hot cores off (or the two L2 bits off — measure both), DDIO/RX-polling cores usually off (Ch. 75 §75.4.2), batch/replay/risk cores on, because a SoA sweep without a streamer is 2–3× slower; **(2) re-applied at every boot**, from the unit that runs before the trading process, and *verified* by `rdmsr` in the readiness gate (the setting does not survive a reboot, and a BIOS "prefetcher = enabled" setting re-enables it below the MSR on some firmware); **(3) measured with `useless_hwpf`** — if the §12.3 column is small on your hot core, the prefetchers are not hurting and the SoA parts of the path want them on. Record the per-core map in the host fingerprint (Appendix M.2) beside the C-state and governor settings.
+Three rules: **(1) per core, by role** — hot cores off (or the two L2 bits off — measure both), DDIO/RX-polling cores usually off (Ch. 76 §76.4.2), batch/replay/risk cores on, because a SoA sweep without a streamer is 2–3× slower; **(2) re-applied at every boot**, from the unit that runs before the trading process, and *verified* by `rdmsr` in the readiness gate (the setting does not survive a reboot, and a BIOS "prefetcher = enabled" setting re-enables it below the MSR on some firmware); **(3) measured with `useless_hwpf`** — if the §12.3 column is small on your hot core, the prefetchers are not hurting and the SoA parts of the path want them on. Record the per-core map in the host fingerprint (Appendix M.2) beside the C-state and governor settings.
 
 ---
 
@@ -299,7 +299,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 
 - M. Kulukundis, *"Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step"* (CppCon 2017) — group prefetching in Swiss tables; S. Chen, P. Gibbons, T. Mowry, *"Improving Index Performance through Prefetching"* (SIGMOD 2001) — prefetching B-trees: the practical §12.4.1 patterns.
 - The `glibc` `memcpy`/`memset` source and its non-temporal-store size thresholds — a production example of §12.4.2.
-- Ch. 13 (*CPU Pipelines & Execution*) — instruction-level and memory-level parallelism, the mechanism prefetch exploits; Ch. 32 (*…Building the Limit Order Book*) — prefetching real book structures; Ch. 39 (*SIMD*) — the vector registers and `<immintrin.h>` intrinsics the streaming stores here operate on; Ch. 85 §85.4.1 — the same weak-ordering-plus-`sfence` discipline for write-combining MMIO.
+- Ch. 13 (*CPU Pipelines & Execution*) — instruction-level and memory-level parallelism, the mechanism prefetch exploits; Ch. 32 (*…Building the Limit Order Book*) — prefetching real book structures; Ch. 39 (*SIMD*) — the vector registers and `<immintrin.h>` intrinsics the streaming stores here operate on; Ch. 86 §86.4.1 — the same weak-ordering-plus-`sfence` discipline for write-combining MMIO.
 - **Appendix A** — the ARM port: a tuned distance and hint must be re-measured there (the ISA spellings are `PRFM` and the non-temporal `LDNP`/`STNP` pair, with a weaker memory model that changes the fencing story).
 
 ---

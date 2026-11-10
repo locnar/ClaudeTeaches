@@ -4,7 +4,7 @@
 
 ## R.1 How to read this appendix
 
-Three tables and a note. **R.2** is the Intel server line from the reference generation forward (Ice Lake-SP → Sapphire Rapids → Emerald Rapids → Granite Rapids) with the client parts Ch. 7 discusses; **R.3** is AMD Zen 3 → 4 → 5 (EPYC and Ryzen). Both list the quantities the book's chapters depend on: core counts and clocks (Ch. 7), cache sizes and the L3 topology (Ch. 8, 19), ROB and dispatch width (Ch. 13), µop-cache size (Ch. 14), TLB reach (Ch. 17), memory channels and PCIe lanes (Ch. 7, 85), the deep C-state exit (Ch. 60), AVX-512 behaviour (Ch. 39) and DDIO (Ch. 75). **R.4** restates Appendix E.1's latency rows per generation, in nanoseconds *and* cycles at each part's typical pinned clock, because a cycle is a different length on each. **R.5** is the accelerator inventory — AMX, DSA, IAA, QAT, DLB, AVX10, APX — and why each belongs beside the hot path rather than on it. Where a cell says "~", it is a range across SKUs; where it says (m), an independent measurement; otherwise, the vendor's specification.
+Three tables and a note. **R.2** is the Intel server line from the reference generation forward (Ice Lake-SP → Sapphire Rapids → Emerald Rapids → Granite Rapids) with the client parts Ch. 7 discusses; **R.3** is AMD Zen 3 → 4 → 5 (EPYC and Ryzen). Both list the quantities the book's chapters depend on: core counts and clocks (Ch. 7), cache sizes and the L3 topology (Ch. 8, 19), ROB and dispatch width (Ch. 13), µop-cache size (Ch. 14), TLB reach (Ch. 17), memory channels and PCIe lanes (Ch. 7, 86), the deep C-state exit (Ch. 60), AVX-512 behaviour (Ch. 39) and DDIO (Ch. 76). **R.4** restates Appendix E.1's latency rows per generation, in nanoseconds *and* cycles at each part's typical pinned clock, because a cycle is a different length on each. **R.5** is the accelerator inventory — AMX, DSA, IAA, QAT, DLB, AVX10, APX — and why each belongs beside the hot path rather than on it. Where a cell says "~", it is a range across SKUs; where it says (m), an independent measurement; otherwise, the vendor's specification.
 
 ## R.2 Intel: Ice Lake-SP → Sapphire → Emerald → Granite Rapids (and the client parts)
 
@@ -89,20 +89,20 @@ Appendix E.1's rows at each part's *typical pinned* clock (the clock named in th
 
 ## R.5 On-die accelerators: beside the hot path, not on it
 
-Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-function and matrix hardware. None of it is on the tick-to-trade path, because each is reached either through a device-style submission/completion interface with a PCIe-class round trip (Ch. 85) or through a mode switch with a warm-up cost; several are useful *beside* it.
+Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-function and matrix hardware. None of it is on the tick-to-trade path, because each is reached either through a device-style submission/completion interface with a PCIe-class round trip (Ch. 86) or through a mode switch with a warm-up cost; several are useful *beside* it.
 
 ```
    accelerator   what it is                                         interface                    trading use (and why not the hot path)
    ───────────── ────────────────────────────────────────────────── ──────────────────────────── ─────────────────────────────────────────────────
-   AMX           tile-matrix units: INT8/BF16 (FP16 on GNR) GEMM    instructions (TMUL), tile     ML inference beside the strategy (Ch. 87's GPU
+   AMX           tile-matrix units: INT8/BF16 (FP16 on GNR) GEMM    instructions (TMUL), tile     ML inference beside the strategy (Ch. 88's GPU
                  in 8 1 KiB tile registers                          state is XSAVE-managed        alternative on the host); first use after idle
                                                                                                   pays a tile-config + licence-class power ramp
    DSA           Data Streaming Accelerator: memcpy/memmove/fill,   work queues via ENQCMD/       capture-writer and replay copies, journal
-                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 106) — bulk copies off the core; a
+                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 107) — bulk copies off the core; a
                  spaces                                             polling or interrupt           submission is ~µs round trip: never a per-message op
-   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 93 §93.4.7),
+   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 94 §94.4.7),
                  decompression (Deflate), filter/scan                                              never on the order path
-   QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 84), VPN; a ~10 µs
+   QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 85), VPN; a ~10 µs
                  asymmetric), compression                           API, OpenSSL engine             round trip, so only for throughput paths
    DLB           Dynamic Load Balancer: hardware queue manager       memory-mapped producer/        a hardware MPMC queue with ordering/atomic
                  (enqueue/dequeue, ordering, load balance across    consumer ports (DPDK eventdev)  scheduling across cores — Ch. 49's shard fan-out in
@@ -113,11 +113,11 @@ Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-funct
    APX           Advanced Performance Extensions: 32 GPRs (R16–R31), -mapxf (GCC 14 / Clang 19;     fewer spills and shorter dependency chains on the
                  3-operand integer ops, conditional load/store/cmp   Diamond Rapids / Panther Lake  decode and book kernels (Ch. 13, 70); verify with Ch. 4's
                                                                      and later)                      asm reading when the hardware ships
-   (AMD)         no AMX/DSA/IAA/QAT equivalents on the CPU; AMD's      —                            Pensando DPUs and Xilinx FPGAs (Ch. 90, 89) are the
+   (AMD)         no AMX/DSA/IAA/QAT equivalents on the CPU; AMD's      —                            Pensando DPUs and Xilinx FPGAs (Ch. 91, 90) are the
                  acceleration story is off-socket                                                    accelerator line
 ```
 
-The rule Ch. 7 and Ch. 85 share: **a round trip to anything that is not the core's own execution units is ≥ 1 µs**, which is the whole tick-to-trade budget on a good day; accelerators earn their place on capture, replay, storage, encryption and research, and DLB is the one to benchmark against Ch. 45's queues before believing its brochure. AVX10 and APX are compiler flags whose codegen effect is read with Ch. 4 and Appendix D, and whose *frequency* effect is checked with Ch. 60.
+The rule Ch. 7 and Ch. 86 share: **a round trip to anything that is not the core's own execution units is ≥ 1 µs**, which is the whole tick-to-trade budget on a good day; accelerators earn their place on capture, replay, storage, encryption and research, and DLB is the one to benchmark against Ch. 45's queues before believing its brochure. AVX10 and APX are compiler flags whose codegen effect is read with Ch. 4 and Appendix D, and whose *frequency* effect is checked with Ch. 60.
 
 ## R.6 References
 

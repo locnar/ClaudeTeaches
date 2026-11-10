@@ -187,13 +187,13 @@ struct PriceDelta { std::int64_t ticks; auto operator<=>(const PriceDelta&) cons
 struct Qty        { std::int64_t v;     constexpr explicit Qty(std::int64_t q) : v(q) {}      auto operator<=>(const Qty&) const = default; };
 struct Notional   { std::int64_t v;     auto operator<=>(const Notional&) const = default; };
 enum class SymbolId : std::uint32_t {};  enum class Seq : std::uint64_t {};                 // ids: an enum class is the cheapest strong type — no arithmetic, no implicit conversion
-struct ClOrdId    { std::uint64_t v; std::uint32_t slot() const { return std::uint32_t(v); } std::uint32_t gen() const { return std::uint32_t(v >> 32); } bool operator==(const ClOrdId&) const = default; };   // Ch. 103
+struct ClOrdId    { std::uint64_t v; std::uint32_t slot() const { return std::uint32_t(v); } std::uint32_t gen() const { return std::uint32_t(v >> 32); } bool operator==(const ClOrdId&) const = default; };   // Ch. 104
 
 // the allowed-operations matrix — everything NOT listed does not compile:
 [[nodiscard]] constexpr PriceDelta operator-(Price a, Price b)      { return {a.ticks - b.ticks}; }   // price − price → delta
 [[nodiscard]] constexpr Price      operator+(Price a, PriceDelta d) { return Price{a.ticks + d.ticks}; }
 [[nodiscard]] constexpr Price      operator-(Price a, PriceDelta d) { return Price{a.ticks - d.ticks}; }
-[[nodiscard]] constexpr Notional   operator*(Price p, Qty q)        { return {p.ticks * q.v}; }       // price × qty → notional (checked variant: Ch. 102 §102.2.3)
+[[nodiscard]] constexpr Notional   operator*(Price p, Qty q)        { return {p.ticks * q.v}; }       // price × qty → notional (checked variant: Ch. 103 §103.2.3)
 [[nodiscard]] constexpr Qty        operator+(Qty a, Qty b)          { return Qty{a.v + b.v}; }
 [[nodiscard]] constexpr Qty        operator-(Qty a, Qty b)          { return Qty{a.v - b.v}; }
 Price      operator+(Price, Price) = delete;                                                            // no price + price
@@ -206,8 +206,8 @@ static_assert(sizeof(Price) == 8 && std::is_trivially_copyable_v<Price> && std::
 ```
 
 - **Explicit construction, defaulted comparison, no implicit conversion.** `explicit Price(int64)` means a raw tick count must be *named* as a price where it enters the typed world (the decoder, Ch. 70 §70.4); `operator<=>() = default` gives the full set of comparisons for free; there is no `operator int64_t`, so a `Price` cannot leak into untyped arithmetic by accident — reach `.ticks` on purpose at the codec and the journal.
-- **The matrix is the design.** Write down what each pair of units may do and define exactly those operators; `= delete` the tempting wrong ones so the compiler's error names the intent. The Ch. 102 gate reads as `if (o.px * o.qty > L.max_notional)` with every operand's unit checked; a transposed argument is a compile error, not a Tuesday.
-- **Ids are `enum class`.** `SymbolId`, `Seq`, a port id: no arithmetic should exist, so the cheapest strong type is an `enum class` with an explicit underlying type — comparable, hashable, switchable, convertible only by `static_cast`. `ClOrdId` is a struct because it *has* operations (slot/gen unpacking — Ch. 103 §103.2.1).
+- **The matrix is the design.** Write down what each pair of units may do and define exactly those operators; `= delete` the tempting wrong ones so the compiler's error names the intent. The Ch. 103 gate reads as `if (o.px * o.qty > L.max_notional)` with every operand's unit checked; a transposed argument is a compile error, not a Tuesday.
+- **Ids are `enum class`.** `SymbolId`, `Seq`, a port id: no arithmetic should exist, so the cheapest strong type is an `enum class` with an explicit underlying type — comparable, hashable, switchable, convertible only by `static_cast`. `ClOrdId` is a struct because it *has* operations (slot/gen unpacking — Ch. 104 §104.2.1).
 - **`[[nodiscard]]` on every operator** — a computed notional that is dropped is a bug.
 - **Concepts, not SFINAE, to constrain generics** (C++20): `Money` above lets a `clamp`, a `scale_bp` or a serializer accept exactly the unit family it is written for.
 - **Trivially copyable, standard layout, one member** — this is what makes the wrapper free: the Itanium ABI passes such a struct in the same register as its member and the optimizer sees through the constructor; §22.5's asm is the proof. (Members with non-trivial special functions, or two members, change the ABI class and *do* cost — a `Price` with a destructor is passed in memory.)
@@ -215,17 +215,17 @@ static_assert(sizeof(Price) == 8 && std::is_trivially_copyable_v<Price> && std::
 
 ### 22.4.5 Type-state and compile-time state machines
 
-The order lifecycle of Appendix J.3 and the session state machine beneath it (Logon → LoggedOn → Logout) are *runtime* state — a byte in the in-flight table (Ch. 103 §103.2.2), because states are data that must be journaled and replayed. The *API* through which code performs transitions can nevertheless make the illegal ones unrepresentable: **type-state** encodes the state in the type, so that `send()` exists only on a `Session<LoggedOn>` and `on_fill()` only on an `Order<Acked>`.
+The order lifecycle of Appendix J.3 and the session state machine beneath it (Logon → LoggedOn → Logout) are *runtime* state — a byte in the in-flight table (Ch. 104 §104.2.2), because states are data that must be journaled and replayed. The *API* through which code performs transitions can nevertheless make the illegal ones unrepresentable: **type-state** encodes the state in the type, so that `send()` exists only on a `Session<LoggedOn>` and `on_fill()` only on an `Order<Acked>`.
 
 ```cpp
-// typestate.hpp — the state in the type; illegal transitions do not compile. The runtime table still stores the state as a byte (Ch. 103).
+// typestate.hpp — the state in the type; illegal transitions do not compile. The runtime table still stores the state as a byte (Ch. 104).
 struct Disconnected {}; struct LoggedOn {}; struct LoggingOut {};
 template <class State> class Session;
 template <> class Session<Disconnected> { public: [[nodiscard]] Session<LoggedOn> logon(SeqNums ours) &&;   /* no send(): there is nothing to send on */ };
 template <> class Session<LoggedOn>     { public: [[nodiscard]] ClOrdId send(const NewOrder&) &;  [[nodiscard]] Session<LoggingOut> logout() &&; [[nodiscard]] Session<Disconnected> dropped() &&; };
 template <> class Session<LoggingOut>   { public: [[nodiscard]] Session<Disconnected> confirmed() &&; };
 // Session<LoggedOn> s = Session<Disconnected>{}.logon(seqs);  s.send(o);   // ok
-// Session<Disconnected> d; d.send(o);                                      // error: no member 'send' — the bug Ch. 103 §103.5 lists is now a compile error
+// Session<Disconnected> d; d.send(o);                                      // error: no member 'send' — the bug Ch. 104 §104.5 lists is now a compile error
 
 struct Sent {}; struct Acked {}; struct Terminal {};
 template <class S> struct Order;
@@ -244,12 +244,12 @@ constexpr OState TRANSITION[int(OState::N)][int(Event::N)] = {
     /*PartFill */ {X,              OState::PartFilled, OState::Filled, OState::Cancelled, X},
     /*Filled   */ {X, X, X, X, X}, /*Cancelled*/ {X, X, X, X, X}, /*Rejected*/ {X, X, X, X, X} };
 static_assert(TRANSITION[int(OState::Filled)][int(Event::Cancel)] == X, "terminal states accept nothing");
-constexpr OState step(OState s, Event e) { return TRANSITION[int(s)][int(e)]; }       // one table load at runtime (Ch. 15 §15.4.2); X → the Ch. 103 stale/illegal path
+constexpr OState step(OState s, Event e) { return TRANSITION[int(s)][int(e)]; }       // one table load at runtime (Ch. 15 §15.4.2); X → the Ch. 104 stale/illegal path
 ```
 
-- **Rvalue-qualified transitions** (`&&`) consume the old state object, so the stale `Session<Disconnected>` cannot be used after `logon()` — the C++ approximation of a move-only typestate (Rust's borrow checker enforces it fully — Ch. 92).
-- **Type-state is the API; the byte is the data.** Ch. 103's table stores `OState` because it must be journaled, snapshotted and replayed; `on_venue` reconstructs the typed view for the transition and writes the byte back. The two agree because both derive from the one `TRANSITION` table — `static_assert` the typed transitions against it.
-- **Compile-time tables** are the branch-light form of a state machine (Ch. 15 §15.4.2): one load instead of a `switch`, with every illegal cell visible at compile time. For the deterministic core (Ch. 101 §101.2.2) this is the shape `apply()` takes for its protocol states.
+- **Rvalue-qualified transitions** (`&&`) consume the old state object, so the stale `Session<Disconnected>` cannot be used after `logon()` — the C++ approximation of a move-only typestate (Rust's borrow checker enforces it fully — Ch. 93).
+- **Type-state is the API; the byte is the data.** Ch. 104's table stores `OState` because it must be journaled, snapshotted and replayed; `on_venue` reconstructs the typed view for the transition and writes the byte back. The two agree because both derive from the one `TRANSITION` table — `static_assert` the typed transitions against it.
+- **Compile-time tables** are the branch-light form of a state machine (Ch. 15 §15.4.2): one load instead of a `switch`, with every illegal cell visible at compile time. For the deterministic core (Ch. 102 §102.2.2) this is the shape `apply()` takes for its protocol states.
 - **Runtime-selected states still need a `variant`.** When the state is not known at compile time (which it never is for an *incoming* message), the typed objects live inside a `std::variant<Order<Sent>, Order<Acked>, Order<Terminal>>` and `std::visit` dispatches (Ch. 16 §16.4.3) — a jump table, cheap, but the type-state's zero cost applies *within* a known state, not to the dispatch into it.
 - **The honest trade-off**: one class per state multiplies instantiations (§22.6's bloat axis), error messages name `Session<LoggedOn>` rather than "session not logged on", and a state added later touches every specialization. Use type-state for the handful of protocol objects whose misuse is expensive (session, order, the Ch. 49 slot handle) — not for every enum in the program.
 
@@ -365,7 +365,7 @@ No wrapper, no load/store through a stack slot, no extra `mov`: a trivially-copy
 
 - **For any "zero-cost" abstraction on the hot path, diff its asm against the hand-written equivalent.** Same instructions = the claim holds. A stray `call`, extra moves, or a missing inline = it leaked.
 - **Confirm the dispatch inlined** (no `call [rax]`, the §22.3 winner pattern), the wrapper types produced no extra loads/stores, and empty policies added no size (`sizeof` unchanged — Ch. 11).
-- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 116).
+- **Treat a codegen regression as a bug.** When an abstraction *stops* matching hand-written code after a change (a missed inline, an accidental copy), the asm diff catches it — make it part of the perf-regression discipline (Ch. 117).
 
 **Four dispatch mechanisms, one instruction.** The §22.4.6 `read<uint64_t>` under tag dispatch, `if constexpr`, SFINAE and concepts (`clang++ -O2 -std=c++23 -march=x86-64-v3`; GCC 13.3 identical bar `endbr64`):
 
@@ -437,7 +437,7 @@ Zero runtime cost is *not* zero cost (Ch. 21): each instantiation is build time 
 
 - CppCon talks on "zero-cost abstractions," CRTP, and policy-based design — including before/after asm walkthroughs that mirror §22.5.
 - Ch. 16 (*Indirect Calls & Virtual Dispatch*) — the runtime-polymorphism cost CRTP avoids; Ch. 21 (*Compile-Time Mechanics*) — the `if constexpr`/template foundation; Ch. 24 (*The Cost of Abstractions*) — abstractions that *aren't* free; Ch. 32 (*Cache-Friendly Containers*) and Ch. 31 (*Custom Allocators*) — policy-based containers/allocators in practice; Ch. 39 (*SIMD*) — expression-template vectorization.
-- **Ch. 92 §92.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
+- **Ch. 93 §93.4.5** — static dispatch and zero-cost abstraction in Rust (monomorphized traits/generics vs `dyn Trait`'s fat-pointer vtable), measured beside this chapter's C++; **Appendix B** (B.3) — the cross-language map.
 
 ---
 
