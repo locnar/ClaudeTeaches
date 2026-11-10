@@ -289,4 +289,4 @@ Eight-lane `ymm` arithmetic and a one-time horizontal reduction after the loop �
 
 ---
 
-*Next: Ch. 37 — Streaming Statistics & Incremental Signal Computation on the Hot Path.*
+*Next: Ch. 37 — Streaming Statistics & Incremental Signal Computation on the Hot Path, closing Part V. With prices represented, bits mastered and lanes filled, the last numerics chapter is the strategy stage itself as computation: a pure `on_event` core over per-instrument state, every signal — Welford, EWMA, rolling sums and extrema, order-flow imbalance, VWAP — maintained in O(1) and fixed memory, floating-point drift and the denormal cliff measured, and the build pinned so that a replay reproduces the same bits.*

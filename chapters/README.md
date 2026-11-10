@@ -538,13 +538,23 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 36.7 Exercises & checklist
 
 ### [37. Streaming Statistics & Incremental Signal Computation on the Hot Path](37-streaming-statistics-incremental-signals.md)
-- 37.1 Why it matters: TODO
-- 37.2 Mental model: TODO
-- 37.3 Measure it: TODO
+- 37.1 Why it matters: the strategy stage is the tail, and its arithmetic is the stage
+- 37.2 Mental model
+  - 37.2.1 The strategy as `on_event(state, event) → actions`
+  - 37.2.2 Per-instrument state: what is hot, what is cold, and which layout
+  - 37.2.3 Streaming statistics: O(1) updates, and the numerics of each
+  - 37.2.4 Determinism: the same bits on the replay box
+- 37.3 Measure it: incremental vs recompute (W = 64/256/1024), SoA vs AoS, 1e9-update drift (double/float/int64), naive vs Welford variance, the EWMA denormal cliff, the bit-exact state hash across layouts/compilers/flags
 - 37.4 Techniques
-  - 37.4.1 TODO
-- 37.5 Pitfalls & anti-patterns: TODO
-- 37.6 Exercises & checklist
+  - 37.4.1 The core and its state
+  - 37.4.2 Welford: mean, variance and covariance without the cancellation
+  - 37.4.3 EWMA and EW variance with precomputed decay; irregular time without `exp`
+  - 37.4.4 Rolling sums, rolling min/max, and the signals read straight off the book
+  - 37.4.5 Fixed-memory windows and the throttle's decayed counter
+  - 37.4.6 Determinism in practice
+- 37.5 Verify the codegen: the EWMA chain and where the FMAs went
+- 37.6 Pitfalls & anti-patterns: `E[x²]−E[x]²`, the clock inside the core, quiet-input denormals, `float` sums, contraction
+- 37.7 Exercises & checklist
 
 ## Part VI — Concurrency
 
