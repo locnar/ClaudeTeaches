@@ -204,6 +204,8 @@ inline bool take_token(Bucket& b, std::uint64_t now_tsc) {
 
 ### 104.4.5 Kill-switch triggers as runtime monitors
 
+*(This is MiFID II RTS 6's "kill functionality" and 15c3-5's control requirement made mechanical; Appendix K.8 maps each rule to the code path, the measurable requirement — trigger-to-zero-resting time, the algo id on 100% of orders, conformance and stress tests on record — and the chapter.)*
+
 Each trigger is a monitor over published telemetry (Ch. 100), evaluated on a housekeeping core, writing one word:
 
 - **Reject-rate spike**: venue rejects per second per session over a short window exceeding a threshold (and *any* `NOTIONAL_OVF` or `COLLAR` reject from our own gate above a trickle — our strategies should not be producing those).

@@ -261,6 +261,14 @@ Inspecting and tuning the RX/TX path (Ch. 68, 70, 75, 76).
    sysctl net.ipv4.tcp_retries2 net.ipv4.tcp_keepalive_time net.ipv4.tcp_syn_retries           # 15 (≈ 924 s), 7200 s, 6 (≈ 127 s) — the defaults a gateway must not rely on
    iptables -I INPUT -i lo -p tcp --sport <peer-port> -j DROP           # dead-peer drill on loopback (Ch. 106 §106.3's tcpdetect); -D to remove
 
+   # --- layer-2/3 hygiene and the link (Ch. 68 §68.4.3, Ch. 80 §80.2/§80.4.5, Ch. 75 §75.3)
+   ip neigh show nud permanent; ip neigh replace <gw-ip> lladdr <mac> dev <if> nud permanent   # pinned neighbours: no ARP wait on the first packet
+   ip route get <venue-ip>; sysctl net.ipv4.conf.<if>.rp_filter net.ipv4.conf.<if>.arp_ignore net.ipv4.conf.<if>.arp_announce
+   ethtool --show-fec <if>; ethtool --set-fec <if> encoding off                              # RS-FEC on a 25/100G link: ~100–250 ns per link; off only on a clean short DAC, both ends
+   cat /proc/net/bonding/bond0 | egrep 'Mode|Currently Active|MII Status|Polling'           # active-backup, the active slave, miimon — the failover time
+   ethtool -i <if> | egrep 'driver|^version|firmware'; cat /sys/module/<drv>/parameters/*  # the NIC baseline triple and the parameters that move latency
+   openssl s_client -connect <venue>:443 -tls1_3 -ciphersuites TLS_AES_128_GCM_SHA256 </dev/null 2>&1 | egrep 'Protocol|Cipher|Early data'   # what the venue negotiates (Ch. 86 §86.4.1)
+
    # --- fault injection for the resilience drills (Ch. 116 §116.4.7; the catalogue names the fault, these are the hands)
    tc qdisc add dev <if> root netem delay 50ms 5ms loss 1% reorder 10% duplicate 1%   # slow/lossy/reordering venue path; `tc qdisc del dev <if> root` to clear
    tc qdisc add dev <if> root netem loss 100%                                           # black-hole one line (gap on A only: use the line's own interface/VLAN)

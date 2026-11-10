@@ -136,7 +136,7 @@ Reduce what a compromised process *can do* — and structure it so the restricti
 
 ### 101.4.7 Build/supply-chain integrity; reproducible and signed builds
 
-The binary that trades must be the binary you built from the source you reviewed:
+The binary that trades must be the binary you built from the source you reviewed (and the record it writes must be tamper-evident for the regulators of Appendix K.8 — signed manifests over the journal's CRC'd segments, Ch. 109 §109.4.2, Ch. 38 §38.4.5):
 
 - **Vet and pin dependencies.** A compromised dependency is a compromised hot path. Minimize the dependency surface (the low-latency ethos already favors few, well-understood libraries), pin versions, and review what goes into the parser/decoder especially (the untrusted-input surface, §101.4.1).
 - **Reproducible builds.** A bit-for-bit reproducible build lets you verify the deployed binary matches the audited source — no injected backdoor in the toolchain step. Pin the compiler and flags (Ch. 27, Appendix D).

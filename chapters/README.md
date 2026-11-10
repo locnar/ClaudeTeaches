@@ -1908,6 +1908,8 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - K.5 Time distribution at the venue (grandmaster, PPS, PTP boundary clocks)
 - K.6 Redundancy & path diversity
 - K.7 The trade-offs: latency, cost, and regulation
+- K.8 Regulation that touches latency engineering: 15c3-5, RTS 6 (kill functionality, algo ids, conformance/stress testing, OTR), RTS 25, RTS 24/CAT record keeping, venue rules, Reg NMS, surveillance — each mapped to a code path, a measurable requirement and the chapter
+- K.9 Site redundancy and disaster recovery: asynchronous-by-construction cross-site replication (journal shipping), cold/warm/hot tiers with RPO/RTO/MTTR, the kill from the surviving site, venue-side DR, the drill
 
 ### [Appendix L — Reproducible Benchmark & Measurement Harness](appendix-L-benchmark-harness.md)
 - L.1 A Google Benchmark skeleton (throughput & mean latency)

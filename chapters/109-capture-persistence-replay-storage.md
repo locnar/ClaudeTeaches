@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-- **Self-describing and versioned.** The format carries a version and enough framing to parse it back years later (compliance retention is long). Pair the journal with the *schema*/decoder (and the strategy/config versions that consumed it — §102.4.2) so a replay is fully reproducible.
+- **Self-describing and versioned.** The format carries a version and enough framing to parse it back years later (compliance retention is long — RTS 24's five years and CAT's event fields and linkage keys are the journal's *schema*, not an export; Appendix K.8). Pair the journal with the *schema*/decoder (and the strategy/config versions that consumed it — §102.4.2) so a replay is fully reproducible.
 - **Compact = cheaper everywhere.** Binary records are small → less disk bandwidth (helps the writer keep up, §109.4.3), less storage (retention is expensive at feed volumes), faster to read back for replay. This is the Ch. 98 win at capture scale.
 - **Optionally compress off-path (§109.4.8 measures the codecs).** Compression (for retention) happens on the writer/archival side (off the hot path), never on the capture path — and often *after* the capture is durable, during compaction (§109.4.4).
 
