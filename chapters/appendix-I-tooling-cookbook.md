@@ -159,6 +159,29 @@ Discovering the machine and placing threads on it (Ch. 18, 54, 55; Appendix C).
    cat /proc/sys/kernel/sched_rt_runtime_us                            # 950000 = RT throttle ON: a busy-polling SCHED_FIFO thread stalls 50 ms/s (Ch. 53 §53.3); -1 on isolated boxes (Ch. 57, Appendix C)
    perf trace -e 'timer:hrtimer_expire_entry' -C 2 -- sleep 10         # whose hrtimers fire on the isolated cpu (want: none but the hot thread's own — Ch. 53 §53.4.4)
    sudo cyclictest -p 80 -i 200 -h 400 -a 1 -t 1 -D 60s                # wake-up latency of a sleeping RT thread on cpu1 — the kernel-timer half of Ch. 53, after Ch. 57's tuning
+   # --- inside the scheduler (Ch. 57 §57.2.1–§57.2.2, §57.4.3): EEVDF slices, DEADLINE contracts, the RT kernel
+   cat /sys/kernel/debug/sched/base_slice_ns /sys/kernel/debug/sched/preempt   # EEVDF default slice; PREEMPT_DYNAMIC model (none/voluntary/full/lazy)
+   chrt -d --sched-runtime 50000 --sched-deadline 1000000 --sched-period 1000000 0 ./sampler   # SCHED_DEADLINE: 50 us every 1 ms (unpinned, or on a cpuset partition)
+   chrt -p <tid>                                 # policy + priority of a running thread; `grep dl /proc/<pid>/sched` for a DEADLINE task's runtime
+   echo HRTICK_DL > /sys/kernel/debug/sched/features   # hrtimer-accurate CBS enforcement instead of tick-granular (CONFIG_SCHED_HRTICK)
+   cat /sys/kernel/debug/sched/fair_server/cpu2/{runtime,period}   # the 6.12+ fair deadline server that replaced the RT throttle
+   ps -eLo pid,tid,cls,rtprio,psr,comm | grep 'irq/'    # threaded IRQ handlers (threadirqs / PREEMPT_RT): where they run and at what priority
+   stalld -t 60 -r 20 -d 1000 -l                 # boost a task starved > 60 s by an RT spinner for 20 us per 1 s; log it (a boost = a config bug)
+   cat /sys/fs/cgroup/<unit>/cpu.max /sys/fs/cgroup/<unit>/cpu.stat | grep -E 'max|nr_throttled'   # NO quota on latency-sensitive units (Ch. 57 §57.4.4)
+   # --- hardware prefetchers per core (Ch. 12 §12.4.3): msr module, root, NOT under lockdown; re-applied at every boot
+   modprobe msr && rdmsr -p 2 0x1a4              # IA32_MISC_FEATURE_CONTROL: 0 = all on; bits 0-3 = L2 streamer, adjacent-line, DCU streamer, DCU IP (1 = off)
+   wrmsr -p 2 0x1a4 0xf                          # hot core 2: all four off (0x3: only the two L2 prefetchers off); batch cores stay 0x0
+   perf stat -C 2 -e l2_lines_out.useless_hwpf,l2_rqsts.all_pf sleep 10   # prefetch traffic the core fetched and evicted unused: the eviction pressure
+   # --- speculative-execution state (Ch. 6 §6.2.3, §6.4.5; Ch. 97 §97.4.9)
+   grep . /sys/devices/system/cpu/vulnerabilities/*     # one line per vulnerability: Not affected / Mitigation: … / Vulnerable — record with the microcode revision
+   grep -m1 microcode /proc/cpuinfo; dmesg | grep -i 'microcode: updated early'   # the revision, and whether it was an early (initramfs) load
+   grep Speculation_Store_Bypass /proc/<pid>/task/*/status   # 'thread vulnerable' = SSBD off; 'thread force mitigated' = the seccomp trap
+   # --- the guest's view (Appendix S): exits, steal, clock
+   perf kvm stat live -p <qemu-pid>              # ON THE HOST: VM exits by reason (EPT_VIOLATION, HLT, MSR_WRITE, CPUID, PAUSE_INSTRUCTION) for one guest
+   awk '/^cpu /{print "steal jiffies:",$9}' /proc/stat   # IN THE GUEST: time the vCPU was runnable but the host ran something else
+   cat /sys/devices/system/clocksource/clocksource0/{current,available}_clocksource   # tsc, not kvm-clock, for a guest that timestamps
+   virsh vcpupin <dom> 0 8; virsh emulatorpin <dom> 2-3; virsh iothreadpin <dom> 1 2-3   # 1:1 vCPU pins + QEMU/iothreads off the vCPU cores
+
 ```
 
 **Interpreting:** `lstopo` is the map you tune against (Ch. 55) — it shows which logical CPUs are SMT siblings and which cores share an L2/L3, so you can leave siblings idle (Ch. 55) and keep a thread and its data on one NUMA node (Ch. 18). These are the runtime counterparts to the boot-time isolation in Appendix C.
@@ -237,6 +260,13 @@ Inspecting and tuning the RX/TX path (Ch. 66, 68, 72, 73).
    ss -tio dst <venue> | grep -oE 'rto:[0-9.]+|backoff:[0-9]+|retrans:[0-9/]+|unacked:[0-9]+'   # is the venue silent? RTO doubling and backoff climbing = no ACKs
    sysctl net.ipv4.tcp_retries2 net.ipv4.tcp_keepalive_time net.ipv4.tcp_syn_retries           # 15 (≈ 924 s), 7200 s, 6 (≈ 127 s) — the defaults a gateway must not rely on
    iptables -I INPUT -i lo -p tcp --sport <peer-port> -j DROP           # dead-peer drill on loopback (Ch. 102 §102.3's tcpdetect); -D to remove
+   # --- the device boundary (Ch. 84 §84.4.1; Appendix S §S.5): IOMMU groups, binding, VFs
+   find /sys/kernel/iommu_groups/ -type l | sort -V          # every IOMMU group and its member BDFs — the group is the unit VFIO hands out
+   lspci -vv -s 3b:00.0 | grep -E 'LnkSta|NUMA|ACSCtl'       # negotiated width/speed, the device's node, ACS on the path
+   driverctl set-override 0000:3b:00.0 vfio-pci; driverctl list-overrides     # persistent bind to vfio-pci (survives reboot); or dpdk-devbind.py -b vfio-pci
+   ls -l /dev/vfio/                                          # /dev/vfio/vfio (container) + one file per bound group; udev-grant rw to the trading group
+   echo 4 > /sys/bus/pci/devices/0000:3b:00.0/sriov_numvfs; ip link set enp59s0f0 vf 0 mac 02:…   # carve VFs from the PF; set VF MAC/VLAN/rate from the host
+
 ```
 
 **Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 68) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 110 §110.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §110.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 75, Appendix K.5).
@@ -315,6 +345,17 @@ The operational face of Ch. 5 §5.4.4–§5.4.5, Ch. 103, Ch. 108 and Appendix N
    incident-collect.sh $CORR $T0 $T1 $PID perf.data.*     # bounded collector: provenance, clocks, rings, host/net windows, capture slice
    perf archive perf.data.2026…                            # the symbols a perf.data needs to be read on another box
    sha256sum -c sha256sums.txt                             # the bundle is intact
+   # --- the kernel's own security subsystems (Ch. 97 §97.4.9) and the host lifecycle (Ch. 99 §99.4.9)
+   auditctl -s; auditctl -l                                  # audit enabled? rule order ('-a task,never' must be first, before the trading unit starts)
+   auditctl -a task,never                                    # exempt every task created from now on (put in the unit's ExecStartPre=)
+   ausearch -ts today -k trading --format csv | head         # what the audit trail recorded for the keyed rules (housekeeping-side cost: ~1-3 us per record)
+   getenforce; semanage permissive -a trading_t              # keep the LSM enforcing for the box, the trading domain permissive
+   cat /sys/kernel/security/lockdown /proc/sys/kernel/yama/ptrace_scope   # what lockdown refuses (MSR writes, resourceN, kexec of unsigned); who may ptrace
+   getpcaps <pid>; grep Cap /proc/<pid>/status               # the trading unit after its capability drop: CapEff should be empty on the hot process
+   systemd-analyze critical-chain trading@strategy-3.service; systemd-analyze blame | head   # boot-to-ready: the dependency path and the long poles
+   systemctl show trading@strategy-3 -p NotifyAccess,WatchdogUSec,CPUAffinity,LimitMEMLOCK,AmbientCapabilities   # the unit as systemd sees it
+   systemctl kexec                                            # software reboot that skips firmware POST (~5 s vs ~2 min); signed kernel under lockdown
+
 ```
 
 **Interpreting:** the crash record (Ch. 103 §103.4.1) usually names the bug before the core is opened — `si_code`, `si_addr` and the fault error code against the registers; `addr2line` on `frame0` is the second step, the core the third. For a live process the rule is *never an all-stop attach to a process with a hot thread*: `set non-stop on` before `attach`, and interrupt only the housekeeping thread you need (Ch. 5 §5.4.4 measured the all-stop attach at a quarter of a second on the hot thread); `process_vm_readv`/`/proc/PID/mem` of a seqlock-versioned snapshot costs the target nothing. For a spike, the order is Ch. 108 §108.4.4's: the ftrace ring in the window first (did the thread leave the CPU? an IRQ? a shootdown? an empty gap?), the host and network samples second, `perf`/PT decode last and never on the trading host.
