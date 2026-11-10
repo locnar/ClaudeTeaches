@@ -99,7 +99,7 @@ intrinsic latency/throughput (Agner Fog / uops.info — the AMD rows are quoted,
    pdep/pext  Intel, AMD Zen 3+: ~3 cyc   |   AMD Zen 1/Zen 2: ~18-290 cyc, mask-dependent (microcoded!)  <- §37.6
 ```
 
-Read it the Ch. 13/14 way: the intrinsic is a flat ~3-cycle op; the naive scan is a *variable-length loop with a data-dependent branch* (Ch. 15) whose cost depends on where the first set bit is (0 to 63 iterations) and mispredicts at its exit — ~50× slower on average and with a tail that the single instruction simply does not have. The single instruction is both faster and *deterministic*. The op-latency block is the cost model to keep: `popcnt`/`lzcnt`/`tzcnt`/`blsr` are cheap and pipelined (use freely), while **`pdep`/`pext` carry the Zen 1/Zen 2 warning** (§37.6) — verify the deployment CPU before relying on them. As always, confirm the compiler emitted the instruction (§37.5): `std::countr_zero` *should* be a single `tzcnt`, but check.
+Read it the Ch. 13/15 way: the intrinsic is a flat ~3-cycle op; the naive scan is a *variable-length loop with a data-dependent branch* (Ch. 15) whose cost depends on where the first set bit is (0 to 63 iterations) and mispredicts at its exit — ~50× slower on average and with a tail that the single instruction simply does not have. The single instruction is both faster and *deterministic*. The op-latency block is the cost model to keep: `popcnt`/`lzcnt`/`tzcnt`/`blsr` are cheap and pipelined (use freely), while **`pdep`/`pext` carry the Zen 1/Zen 2 warning** (§37.6) — verify the deployment CPU before relying on them. As always, confirm the compiler emitted the instruction (§37.5): `std::countr_zero` *should* be a single `tzcnt`, but check.
 
 ## 37.4 Techniques
 

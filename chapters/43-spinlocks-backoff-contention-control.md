@@ -2,7 +2,7 @@
 
 # Chapter 43 — Spinlocks, Backoff & Contention Control
 
-> **Prerequisites:** Ch. 41 (atomics & memory ordering — a spinlock is an atomic acquire/release protocol), Ch. 42 (shared-nothing — a spinlock is for the sharing you *couldn't* eliminate), Ch. 8 & 33-preview (cache coherence / false sharing — the lock line bounces), Ch. 54 (context switching — what blocking costs), Ch. 6/56 (isolated/pinned cores — where spinning is viable).
+> **Prerequisites:** Ch. 41 (atomics & memory ordering — a spinlock is an atomic acquire/release protocol), Ch. 42 (shared-nothing — a spinlock is for the sharing you *couldn't* eliminate), Ch. 8 & Ch. 44-preview (cache coherence / false sharing — the lock line bounces), Ch. 54 (context switching — what blocking costs), Ch. 6/56 (isolated/pinned cores — where spinning is viable).
 >
 > **Leads into:** Ch. 44 (false sharing — padding the lock), Ch. 45 (lock-free — the alternative when even a good spinlock contends), Ch. 48 (Disruptor — busy-spin waiting), Ch. 54, 56, 57, 59 (scheduling — why spinning needs an isolated core). Futex internals tie to Ch. 54 (syscalls).
 

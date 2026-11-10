@@ -2,7 +2,7 @@
 
 # Chapter 42 — Multithreading & Concurrency Foundations
 
-> **Prerequisites:** Ch. 41 (atomics & the memory model — the cost of sharing this chapter designs *around*), Ch. 8 & 42-preview (cache coherence / false sharing — the physical cost of contention), Ch. 18 (NUMA — cross-socket sharing), Ch. 1 (tail latency — contention spikes the tail), Ch. 3 (measuring scalability curves).
+> **Prerequisites:** Ch. 41 (atomics & the memory model — the cost of sharing this chapter designs *around*), Ch. 8 & Ch. 44-preview (cache coherence / false sharing — the physical cost of contention), Ch. 18 (NUMA — cross-socket sharing), Ch. 1 (tail latency — contention spikes the tail), Ch. 3 (measuring scalability curves).
 >
 > **Leads into:** Ch. 43 (spinlocks/contention control — when you *must* share), Ch. 44 (false sharing), Ch. 45–48 (lock-free structures, seqlocks, Disruptor — the shared-nothing-friendly communication primitives), Ch. 54–62 (scheduling/pinning — the OS side of keeping threads on cores), Ch. 103 (process topology — shared-nothing across processes).
 

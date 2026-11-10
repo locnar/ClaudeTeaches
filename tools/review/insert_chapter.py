@@ -150,9 +150,10 @@ class PartShifter:
         return re.sub(rf"\b{old} Parts\b", f"{new} Parts", text)
 
 
-# Tokens that mean "the number before me was a quantity, not a chapter".
+# Tokens that mean "the number before me was a quantity, not a chapter". ("way" is not one of them: "8-way" is
+# caught by the hyphen rule, and "read it the Ch. 13/15 way" must be renumbered — it went stale twice.)
 UNIT_GUARD = re.compile(
-    r"\s?(?:-?(?:bytes?|bit|byte|way|core|cores|thread|threads|entry|entries|lane|lanes|"
+    r"\s?(?:-?(?:bytes?|bit|byte|core|cores|thread|threads|entry|entries|lane|lanes|"
     r"B|KiB|MiB|GiB|KB|MB|GB|ns|µs|us|ms|s|Hz|kHz|MHz|GHz|%|×|x)\b|-[A-Za-z])")
 
 CH_PREFIX = re.compile(r"\b(Ch(?:apter)?s?\.?|Chs\.)(\s| )?(?=\d)")
