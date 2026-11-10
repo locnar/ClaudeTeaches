@@ -73,6 +73,7 @@ STEPS = [
     ("insert", 72),  # Ch. 73 multi-venue-book-normalization-symbology-sor
     ("insert", 85),  # Ch. 86 encrypted-web-protocol-venues-cloud
     ("insert", 106),  # Ch. 107 quoting-engine-market-making-mechanics
+    ("insert", 116),  # Ch. 117 case-study-exchange-simulator
     # INSERT_STEPS_END
 ]
 def old2new(n):

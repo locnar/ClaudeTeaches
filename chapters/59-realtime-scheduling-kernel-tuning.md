@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
 - **`SCHED_DEADLINE` admission that "failed silently" — or succeeded for the wrong reason.** `EPERM` from `sched_setattr` after pinning (affinity narrower than the root domain), `EAGAIN` from `pthread_create` in a DEADLINE thread, and two tasks oversubscribing one core but admitted because the root domain is the whole box (§59.2.2, §59.4.3). Make the core a cpuset partition first; check `nr_throttled`-style evidence (`/proc/<pid>/sched`'s `dl.runtime`) rather than trusting the return code.
 - **`cpu.max` on a latency-sensitive container.** A 50 % quota is a 49 ms stall every 100 ms (§59.4.4) — the single most common "periodic multi-ms gap in the risk service" finding. `cpu.max = max`, cpusets for confinement, `cpu.weight` for priority; `nr_throttled` must read 0 at the gate.
 - **`isolcpus` deprecation / wrong interface.** `isolcpus` works but is semi-deprecated in favor of cgroup v2 `cpuset` isolated partitions on newer kernels; using the wrong/old interface (or both inconsistently) can give surprising behavior. Know your kernel's preferred isolation mechanism.
-- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail — and the isolation itself — continuously (Ch. 114, 119).
+- **Assuming tuned once = tuned forever.** Kernel/distro updates, BIOS updates, and config drift can silently re-enable `irqbalance`, change `CONFIG_HZ`, reset RT throttling, or re-route IRQs. **Re-run `cyclictest` after any change** and monitor the production tail — and the isolation itself — continuously (Ch. 114, 120).
 - **RT priority on a shared/general core without isolation.** Giving a thread `SCHED_FIFO` on a *non*-isolated core can *starve* the rest of the system (it preempts everything, including things the box needs) — RT priority belongs with isolation. Don't RT-prioritize on a general-purpose core casually.
 
 ## 59.6 Exercises & checklist
@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
 - [ ] The **BIOS/firmware layer** (Ch. 6) is tuned *under* the kernel: deep **C-states off**, **P-states/turbo** fixed, **SMIs** minimized, **HT** handled (Ch. 57).
 - [ ] I **measured jitter with `cyclictest`** before/after each change (max latency = the tail — Ch. 1), drove the max down to single-digit µs under realistic load, and chased remaining spikes to their source.
 - [ ] Everything-not-hot is **confined to housekeeping cores** (cgroups/`cpuset`), with **enough housekeeping capacity**; I didn't over-isolate or over-tune into instability.
-- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail — and the core's quietness — is **monitored continuously** (Ch. 114, 119); residual spikes are attributed with Ch. 61's catalog and tools, not tolerated.
+- [ ] Tuning is **re-verified after kernel/BIOS/config changes** (no drift — `irqbalance` re-enabled, `CONFIG_HZ` changed, throttling reset) and the production tail — and the core's quietness — is **monitored continuously** (Ch. 114, 120); residual spikes are attributed with Ch. 61's catalog and tools, not tolerated.
 
 ## 59.7 References
 

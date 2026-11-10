@@ -47,10 +47,10 @@ Attributing stalls to a microarchitectural cause (Ch. 2, 13, 14).
    perf record -e ibs_op//  -c 100000 ./app; perf report                            # AMD IBS: precise op sampling (what perf mem/c2c use on Zen)
    perf record -e ibs_fetch// ./app                                                  # AMD IBS: front-end sampling (Ch. 14)
    perf stat -M PipelineL1 ./app                                                     # Zen 4 pipeline-utilization top-down (names: perf list metricgroup)
-   # --- what it costs the hot core, and the syscall-free alternative (Ch. 119 §119.4.4) ---
+   # --- what it costs the hot core, and the syscall-free alternative (Ch. 120 §120.4.4) ---
    perf record -C 5 -e cycles:u -c 2000000 --call-graph fp --overwrite --switch-output=signal -o perf.data -- sleep 36000 &   # bounded, fp, frozen on SIGUSR2
    cat /sys/bus/event_source/devices/cpu/rdpmc                                      # 1 = rdpmc allowed for mmap'd events (default), 2 = always, 0 = never
-   ./rdpmc                                                                           # Ch. 119 §119.4.4's listing: cycles + LLC misses per stage from the thread itself
+   ./rdpmc                                                                           # Ch. 120 §120.4.4's listing: cycles + LLC misses per stage from the thread itself
 ```
 
 **Interpreting (Ch. 2):** the top-down buckets tell you *where* to look before *how* to fix — **front-end-bound** → I-cache/DSB/decode (Ch. 14); **bad speculation** → branch mispredicts (Ch. 15); **back-end-bound** → data cache/memory or execution-port pressure (Ch. 8, 13); **retiring** → you're actually doing work (optimize the algorithm, not the microarchitecture).
@@ -282,14 +282,14 @@ Verifying what the compiler produced, and catching bugs before production (Ch. 4
    nm -D --defined-only -C ./app | wc -l                  # exported (dynamic) symbol count (visibility hygiene; App D.4)
    g++ ... -fno-reorder-blocks-and-partition -Wl,--emit-relocs -o app   # BOLT needs relocations to reorder functions, and does its own hot/cold splitting (App D.5–D.6)
    perf record -e cycles:u -j any,u ./app                 # LBR data for BOLT
-   # --- the PGO profile lifecycle (Ch. 27 §27.4.5, Ch. 117 §117.4.5):
+   # --- the PGO profile lifecycle (Ch. 27 §27.4.5, Ch. 118 §118.4.5):
    LLVM_PROFILE_FILE="prof/%m-%p.profraw" ./app_instr --replay open.pcapng      # Clang: one raw profile per process, keyed by binary signature (%m)
    llvm-profdata merge -output=rev.profdata prof/*.profraw                    # merge; -weighted-input=3,open.profdata -weighted-input=1,mid.profdata to weight the open
    llvm-profdata show --topn=10 rev.profdata                                   # hottest functions / counters in the profile (did the training reach the hot path?)
    gcov-tool merge -w 3,1 prof_open prof_mid -o prof_merged                    # GCC: weighted merge of two .gcda directories
    g++ -fprofile-use -fprofile-correction -Werror=coverage-mismatch -Werror=missing-profile -c x.cpp -o build/x.o   # same -o as the instrumented compile, or the .gcda is not found
    clang++ -fprofile-instr-use=rev.profdata -Werror=profile-instr-out-of-date -Werror=profile-instr-unprofiled x.cpp   # make Clang's silent stale-profile build fatal
-   # --- performance gates in CI (Ch. 117):
+   # --- performance gates in CI (Ch. 118):
    for i in $(seq 20); do ./bench --benchmark_filter=Update --benchmark_out=aa-$i.json --benchmark_out_format=json; done   # A/A: the same binary 20×; the spread is the noise floor
    perf stat -e instructions:u,branches:u,branch-misses:u -r 10 -x, ./bench   # deterministic proxy: instructions:u varies < 0.01 % run to run on any runner
    valgrind --tool=cachegrind --cache-sim=yes --branch-sim=yes ./bench         # simulated misses: slow, exact, machine-independent

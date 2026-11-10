@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 109 (the journal, the storage and the deterministic-core replay — this chapter owns the *wire* side of capture and replay that Ch. 109 §109.4.1 and §109.4.5 point at), Ch. 63 (the kernel receive path — where an `AF_PACKET` tap sits), Ch. 70 §70.2.4 and §70.4.4 (microbursts and drop detection), Ch. 75 and Ch. 78 (NIC hardware timestamps and PTP — the capture time base), Ch. 77 (RSS/flow steering — `PACKET_FANOUT` is the capture-side analogue), Ch. 79 (precise scheduled transmission — `SO_TXTIME`/LaunchTime, the hardware-paced replay), Ch. 80 §80.4.3–§80.4.4 (switch replication, SPAN, taps and the passive-measurement method), Ch. 55 (timer slack — why a sleeping replayer cannot pace a burst), Ch. 81–82 (AF_XDP and DPDK as capture and replay engines), Ch. 115 (the counters that prove a capture lossless).
 >
-> **Leads into:** Ch. 116 §116.4.4 (golden-master tests cut from captures), Ch. 117 (the nightly replay gate runs this chapter's replayer against the tuned box), Ch. 118 §118.4.4 (shadow runs on a layer-1-replicated feed), Ch. 119 §119.4.5 (post-trade analytics joins wire captures with venue timestamps). Three chapters' exercises say "replay a captured market-open microburst" and one sentence in Ch. 109 names taps, SPAN and `AF_PACKET`; this chapter builds the capture point, the host capture stack that keeps up with the open, the replayer that reproduces its cadence onto the wire with a measured timing error, and the independent wire-level measurement a desk uses to check the application's own numbers.
+> **Leads into:** Ch. 116 §116.4.4 (golden-master tests cut from captures), Ch. 118 (the nightly replay gate runs this chapter's replayer against the tuned box), Ch. 119 §119.4.4 (shadow runs on a layer-1-replicated feed), Ch. 120 §120.4.5 (post-trade analytics joins wire captures with venue timestamps). Three chapters' exercises say "replay a captured market-open microburst" and one sentence in Ch. 109 names taps, SPAN and `AF_PACKET`; this chapter builds the capture point, the host capture stack that keeps up with the open, the replayer that reproduces its cadence onto the wire with a measured timing error, and the independent wire-level measurement a desk uses to check the application's own numbers.
 
 ---
 
@@ -55,7 +55,7 @@ A `recvfrom()` per packet is a syscall per packet (Ch. 63) and a socket buffer t
 
 ### 110.2.3 Timestamps and formats
 
-The wire format for a capture is **pcapng** (Ch. 109 §109.4.1): nanosecond timestamps with the resolution declared per interface, an *Interface Statistics Block* carrying the capture's own drop counts, and comments for the capture point and clock source. `pcap` has microsecond stamps unless the nanosecond-precision variant is used — a 2 µs burst gap is *two* µs ticks, and a replayer fed microsecond stamps reproduces a different open. Hardware stamps reach the file three ways: the NIC's `SOF_TIMESTAMPING_RX_HARDWARE` into the ring record (Ch. 75), a **timestamp trailer** appended to the frame by a switch or tap (Arista 7130/MetaWatch, Cisco Nexus ERSPAN headers) that the reader must strip and interpret, or the capture card's native format. Whatever the source, the file must record *which clock* stamped it and how it was disciplined (Ch. 78); the post-trade join in Ch. 119 §119.4.5 compares these stamps with the venue's.
+The wire format for a capture is **pcapng** (Ch. 109 §109.4.1): nanosecond timestamps with the resolution declared per interface, an *Interface Statistics Block* carrying the capture's own drop counts, and comments for the capture point and clock source. `pcap` has microsecond stamps unless the nanosecond-precision variant is used — a 2 µs burst gap is *two* µs ticks, and a replayer fed microsecond stamps reproduces a different open. Hardware stamps reach the file three ways: the NIC's `SOF_TIMESTAMPING_RX_HARDWARE` into the ring record (Ch. 75), a **timestamp trailer** appended to the frame by a switch or tap (Arista 7130/MetaWatch, Cisco Nexus ERSPAN headers) that the reader must strip and interpret, or the capture card's native format. Whatever the source, the file must record *which clock* stamped it and how it was disciplined (Ch. 78); the post-trade join in Ch. 120 §120.4.5 compares these stamps with the venue's.
 
 ### 110.2.4 Replay is a timing problem, not a copying problem
 
@@ -160,15 +160,15 @@ for (std::uint32_t i = 0; i < n; ++i) {
 
 ### 110.4.4 Validating replay fidelity with the tap
 
-The replay target's host sees the replayed stream the same way it sees the real one, so the same capture point validates both: tap the replay link, capture with hardware timestamps, and compare the replayed gaps with the original's as §110.3 does — per-packet error distribution, cumulative drift, and burst *shape* (the queue depth implied by consecutive gaps below the receiver's service time). A desk-grade replay rig is therefore a replayer on one host, a tap, and a capture card — the same three things the production capture uses, and often the same hardware on a weekend (Ch. 118 §118.4.6).
+The replay target's host sees the replayed stream the same way it sees the real one, so the same capture point validates both: tap the replay link, capture with hardware timestamps, and compare the replayed gaps with the original's as §110.3 does — per-packet error distribution, cumulative drift, and burst *shape* (the queue depth implied by consecutive gaps below the receiver's service time). A desk-grade replay rig is therefore a replayer on one host, a tap, and a capture card — the same three things the production capture uses, and often the same hardware on a weekend (Ch. 119 §119.4.6).
 
 ### 110.4.5 Passive wire measurement: what to compute from the tap
 
-With the tap on the feed link and another on the order link (or one appliance on both), the wire-level numbers are: **wire-to-wire tick-to-trade** (feed packet arrival → order packet departure, both from the appliance's PTP clock — the number Ch. 119 §119.3 decomposes and the one a venue's own timestamps can be checked against), **per-hop latency** through each switch (Ch. 80 §80.3), **gap and loss on the feed** independent of the host, and **order-path RTT to the venue** from the order's departure to the ack's arrival. Ch. 80 §80.4.4 gives the SPAN-vs-tap error measurement and the appliance landscape; Ch. 119 §119.4.5 joins the tap's stamps with the venue's to decide races. The rule for the trading host is that *its* numbers (Ch. 99) must agree with the tap's to within the tap's resolution — a drift between them is a clock problem (Ch. 78) or an instrumentation bug, and the tap is the one that is right.
+With the tap on the feed link and another on the order link (or one appliance on both), the wire-level numbers are: **wire-to-wire tick-to-trade** (feed packet arrival → order packet departure, both from the appliance's PTP clock — the number Ch. 120 §120.3 decomposes and the one a venue's own timestamps can be checked against), **per-hop latency** through each switch (Ch. 80 §80.3), **gap and loss on the feed** independent of the host, and **order-path RTT to the venue** from the order's departure to the ack's arrival. Ch. 80 §80.4.4 gives the SPAN-vs-tap error measurement and the appliance landscape; Ch. 120 §120.4.5 joins the tap's stamps with the venue's to decide races. The rule for the trading host is that *its* numbers (Ch. 99) must agree with the tap's to within the tap's resolution — a drift between them is a clock problem (Ch. 78) or an instrumentation bug, and the tap is the one that is right.
 
 ### 110.4.6 What this chapter takes from Ch. 109
 
-Ch. 109 keeps the journal formats, the off-hot-path writer, storage and indexing, the deterministic-core replay and the columnar research tier; its §109.4.1 is now a paragraph pointing here for the capture point and the host stack, and its §109.4.5 for replay *onto the wire*. Ch. 119 keeps the CI gate and the state-machine replay. The three exercises that asked for a replayed open (Ch. 65, 70, 80) are satisfied by §110.4.3's replayer and §110.4.4's validation.
+Ch. 109 keeps the journal formats, the off-hot-path writer, storage and indexing, the deterministic-core replay and the columnar research tier; its §109.4.1 is now a paragraph pointing here for the capture point and the host stack, and its §109.4.5 for replay *onto the wire*. Ch. 120 keeps the CI gate and the state-machine replay. The three exercises that asked for a replayed open (Ch. 65, 70, 80) are satisfied by §110.4.3's replayer and §110.4.4's validation.
 
 ## 110.5 Pitfalls & anti-patterns
 
@@ -205,12 +205,12 @@ Checklist:
 - `tcpreplay` documentation (`tcpreplay(1)`, `--timer`, `-p`, `-t`); MoonGen (Emmerich et al., IMC 2015) and TRex documentation — DPDK-based paced replay with hardware timestamps.
 - `tc-etf(8)` and `SO_TXTIME` (Ch. 79) — time-based transmission.
 - ntop PF_RING ZC and DPDK `rte_pdump`/`dpdk-pdump` documentation — bypass-side capture.
-- Ch. 80 §80.4.4 (taps vs SPAN), Ch. 109 (journals and storage), Ch. 115 (drop counters), Ch. 119 §119.4.5 (the post-trade join).
+- Ch. 80 §80.4.4 (taps vs SPAN), Ch. 109 (journals and storage), Ch. 115 (drop counters), Ch. 120 §120.4.5 (the post-trade join).
 
 ## 110.8 Additional Reading
 
 - Vendor documentation for capture cards and timestamped mirrors — Napatech, Endace (DAG), Cisco/Exablaze ExaNIC, Arista 7130 MetaWatch, and the Corvil-class latency-analytics appliances — for what "lossless at line rate" and "timestamp accuracy" mean in each product's terms.
-- Ch. 119 §119.3 and §119.4.5 — how the wire-to-wire number from the tap is decomposed and joined with order outcomes.
+- Ch. 120 §120.3 and §120.4.5 — how the wire-to-wire number from the tap is decomposed and joined with order outcomes.
 - ESMA RTS 25 (clock synchronisation and timestamp granularity for trading records) — why the tap's PTP discipline is a compliance matter as well as an engineering one.
 
 ---

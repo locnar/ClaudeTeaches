@@ -4,13 +4,13 @@
 
 > **Prerequisites:** Ch. 70 (the feed handler's decode — this chapter consumes its output), Ch. 72 (per-venue A/B arbitration and gap recovery — the state a venue's book is in when it feeds the consolidation), Ch. 33 (one `FastBook` per venue and the BBO line it publishes; §33.4.6 hands the merge to this chapter), Ch. 38 (symbol keys, dense ids and the perfect hash), Ch. 32 (flat tables), Ch. 10 (SoA per-instrument state), Ch. 78 (hardware RX timestamps — cross-venue alignment), Appendix J (NBBO, the SIP, the venue anatomy table in J.6).
 >
-> **Leads into:** Ch. 74 (membership and dark feeds — a venue that goes silent is backed out here), Ch. 79 (coordinated sends to several venues), Ch. 102 (hot-reloaded reference data — the symbology tables), Ch. 104 (the risk gate reads the consolidated top), Ch. 106 (the gateway's sessions — one per venue), Ch. 107 (quoting across venues), Ch. 119 (the capstone's tick-to-trade path, multi-venue).
+> **Leads into:** Ch. 74 (membership and dark feeds — a venue that goes silent is backed out here), Ch. 79 (coordinated sends to several venues), Ch. 102 (hot-reloaded reference data — the symbology tables), Ch. 104 (the risk gate reads the consolidated top), Ch. 106 (the gateway's sessions — one per venue), Ch. 107 (quoting across venues), Ch. 120 (the capstone's tick-to-trade path, multi-venue).
 
 ---
 
 ## 73.1 Why it matters: one instrument, N feeds, one decision
 
-A single-venue futures shop never meets this chapter: one feed, one book, one session. A US-equities shop meets it on every tick: the same instrument trades on sixteen lit venues and a dark pool count, each with its own feed (ITCH on MoldUDP64, PITCH, MDP-style — Appendix J.6), its own symbol for the instrument (`AAPL` on one, a `SecurityID` integer on another, an ISIN behind both), its own sequence space, its own hardware timestamps, and its own session for order entry. The strategy wants *one* answer — "what is the best price I can hit, where, and how much is there" — in the same ~100 ns budget a single-venue strategy spends on one book (Ch. 119 §119.3). Three pieces of engineering stand between the decoders and that answer, and each is a per-tick cost:
+A single-venue futures shop never meets this chapter: one feed, one book, one session. A US-equities shop meets it on every tick: the same instrument trades on sixteen lit venues and a dark pool count, each with its own feed (ITCH on MoldUDP64, PITCH, MDP-style — Appendix J.6), its own symbol for the instrument (`AAPL` on one, a `SecurityID` integer on another, an ISIN behind both), its own sequence space, its own hardware timestamps, and its own session for order entry. The strategy wants *one* answer — "what is the best price I can hit, where, and how much is there" — in the same ~100 ns budget a single-venue strategy spends on one book (Ch. 120 §120.3). Three pieces of engineering stand between the decoders and that answer, and each is a per-tick cost:
 
 - **Normalization** — turning sixteen message vocabularies into one internal event the book builder applies, *without copying* and without deciding anything twice (§73.2.1).
 - **Symbology** — turning sixteen venue keys into one dense internal instrument id, once, at the edge, so that everything downstream is an array index (§73.2.2; measured in §73.3: 4.3 ns for an 8-byte symbol through a flat table, 0.4 ns for a dense venue id, 16 ns for the `std::unordered_map<std::string>` you must not use).
@@ -170,7 +170,7 @@ inline int route(const Consolidated& c, const Nbbo& n, const VenueCost* vc, uint
 
 - **Price** is the venue's displayed top relative to the consolidated best (the attribution of §73.4.3).
 - **Fee/rebate** per venue per instrument class, from the reference-data snapshot (venue fee schedules are tiered and change monthly — a `constexpr`-shaped table, Ch. 21, published with the symbology).
-- **Fill probability** — the honest version of "expected fill": a per-venue estimate from your own fill history (Ch. 119 §119.4.5's post-trade analytics feed it back: hit rate vs latency, per venue, per time of day), because displayed size is not available size (hidden orders, other racers) and the venue whose quote you reach last will not fill you.
+- **Fill probability** — the honest version of "expected fill": a per-venue estimate from your own fill history (Ch. 120 §120.4.5's post-trade analytics feed it back: hit rate vs latency, per venue, per time of day), because displayed size is not available size (hidden orders, other racers) and the venue whose quote you reach last will not fill you.
 - **Latency** — the measured one-way (§73.4.4, Appendix K), as a live number: the venue 300 ns further away costs 300 ns of race, which on a fast-moving quote is the difference between a fill and a miss.
 
 Two consequences for the send path: when the score says *several* venues (the order is larger than any one venue's top, or the strategy sweeps), the sends go out as a **coordinated batch** with departure times chosen so they *arrive* together (Ch. 79 §79.4.3 — the venue 300 ns further away is sent 300 ns earlier), because a sequential send lets the first venue's fill print and move the others' quotes before your later orders arrive; and when the venue's session is throttled (Appendix K.4), the per-venue token bucket in the risk gate (Ch. 104 §104.4.3) is a term the router must read *before* scoring, or it will choose a venue it cannot send to. The regulatory overlay — Reg NMS order-protection, trade-through, the NBBO as the SIP defines it — is a constraint on the *decision*, not on these mechanics; Appendix K.8 maps it to the code paths.
@@ -196,7 +196,7 @@ Two consequences for the send path: when the score says *several* venues (the or
 2. **Shrink the line.** Measure `recompute` for 4, 8 and 16 venues with the per-venue tops in one, two and four cache lines, random instruments over an 8,000-instrument universe; confirm the cost is lines-touched, not loop length. Then add a `qty_at_best[V]` array and re-measure.
 3. **Back-out drill.** Drive the consolidation from two replayed captures with a gap injected on one venue (Ch. 72 ex. 3); measure the time from gap detection to the venue's disappearance from `Nbbo`, and confirm the other venue's top is unchanged throughout.
 4. **Alignment.** Capture the same instrument on two venues with hardware RX timestamps; plot `rx_ts − venue_ts` per venue over a session; find the path-change events and compare their lead over the first sequence gap or heartbeat miss.
-5. **Route and measure.** Implement §73.4.5 with your fee schedule and measured one-way latencies; replay a day and compute, per venue, the fill rate of routed orders vs the fill rate the displayed size predicted (Ch. 119 §119.4.5). Re-tune the latency weight and repeat.
+5. **Route and measure.** Implement §73.4.5 with your fee schedule and measured one-way latencies; replay a day and compute, per venue, the fill rate of routed orders vs the fill rate the displayed size predicted (Ch. 120 §120.4.5). Re-tune the latency weight and repeat.
 6. **Coordinated sweep.** Send a three-venue sweep sequentially and with Ch. 79's scheduled departures; capture at the venue-side taps (Ch. 109) and compare arrival spreads.
 
 **Checklist — multi-venue**
@@ -220,7 +220,7 @@ Two consequences for the send path: when the score says *several* venues (the or
 ## 73.8 Additional Reading
 
 - Appendix J (*Market-Structure Primer*), especially **J.6** (venue anatomy) and J.2 (NBBO); Appendix K (*Exchange Connectivity*) — per-venue latency, throttles and the regulatory overlay (K.8).
-- Ch. 33 (*LOB*) — the per-venue book; Ch. 38 (*Hashing*) — the symbol key and the perfect hash; Ch. 72/74 — the feed states that trigger back-out; Ch. 79 — coordinated sends; Ch. 102 — reference-data hot reload; Ch. 106 — one session per venue; Ch. 119 §119.4.5 — the fill-rate feedback that tunes the router.
+- Ch. 33 (*LOB*) — the per-venue book; Ch. 38 (*Hashing*) — the symbol key and the perfect hash; Ch. 72/74 — the feed states that trigger back-out; Ch. 79 — coordinated sends; Ch. 102 — reference-data hot reload; Ch. 106 — one session per venue; Ch. 120 §120.4.5 — the fill-rate feedback that tunes the router.
 
 ---
 

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 68 (sockets, multicast), Ch. 70 (SBE and message encoding — the payload these transports carry), Ch. 83 (RDMA — a transport some of these ride), Ch. 72 (reliable multicast — the recovery ideas generalize here), Ch. 69 (TCP internals — the baseline these improve on), Ch. 48 (the Disruptor / mechanical sympathy — Aeron's lineage).
 >
-> **Leads into:** Ch. 86 (the slow-by-mandate transports — TLS/WebSocket/JSON/REST venues — at the other end of Part X), Ch. 87 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 90 (MPI — collective messaging over the same fabrics), Ch. 103 (process topology — Aeron IPC as the data plane), Ch. 119 (the end-to-end path). Ties back to Ch. 77 (flow steering — getting these transports' packets to the right core) and Ch. 84 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
+> **Leads into:** Ch. 86 (the slow-by-mandate transports — TLS/WebSocket/JSON/REST venues — at the other end of Part X), Ch. 87 (PCIe — the boundary under every bypass/RDMA substrate these transports ride), Ch. 90 (MPI — collective messaging over the same fabrics), Ch. 103 (process topology — Aeron IPC as the data plane), Ch. 120 (the end-to-end path). Ties back to Ch. 77 (flow steering — getting these transports' packets to the right core) and Ch. 84 (the lossless fabric RDMA-based transports need). The transport deep-dive: purpose-built low-latency messaging that beats general-purpose TCP for the messages a trading system actually sends.
 
 ---
 

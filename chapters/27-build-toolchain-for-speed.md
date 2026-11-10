@@ -123,7 +123,7 @@ The highest tier: replace the compiler's *guesses* about hot/cold and branch dir
 
 ### 27.4.4 Debug info, frame pointers and unwind tables: what the production binary carries
 
-Ch. 2 and Ch. 5 told you to keep frame pointers and `-g` on the production build and called the cost "small". This section measures it and decides, flag by flag, what the shipped binary carries for the profiler (Ch. 2, 119), the crash handler (Ch. 108) and the post-mortem (Ch. 5). *Toolchain and machine: Appendix L.3; the numbers below are GCC 13.3, `-O2 -std=c++20 -march=native`, on a 4-vCPU Xeon VM (TSC 2.7 GHz) under Linux 6.18 — CPU-bound, and the same shape on the reference machine.*
+Ch. 2 and Ch. 5 told you to keep frame pointers and `-g` on the production build and called the cost "small". This section measures it and decides, flag by flag, what the shipped binary carries for the profiler (Ch. 2, 120), the crash handler (Ch. 108) and the post-mortem (Ch. 5). *Toolchain and machine: Appendix L.3; the numbers below are GCC 13.3, `-O2 -std=c++20 -march=native`, on a 4-vCPU Xeon VM (TSC 2.7 GHz) under Linux 6.18 — CPU-bound, and the same shape on the reference machine.*
 
 **1. `-fno-omit-frame-pointer` on the hot kernels.** A decode (`memcpy` + two `bswap`s) feeding a book update (one level, two fields), both `noinline` so the frame-pointer prologue has somewhere to land, one million messages, best of twenty:
 
@@ -147,7 +147,7 @@ Ch. 2 and Ch. 5 told you to keep frame pointers and `-g` on the production build
    glibc backtrace()              same + libgcc_s at runtime    ~200–235 cycles  3,056 cyc   7,308 cyc    984k cyc = 365 µs backtrace_symbols_fd, lazy dlopen
                                                                                                            (dlopen!)
    LBR (hardware)                 nothing                       0 (the CPU records 32 taken branches)      —                 perf --call-graph lbr: depth ≤ 32
-                                                                                                                             branches, no program cost (Ch. 119 §119.4.4)
+                                                                                                                             branches, no program cost (Ch. 120 §120.4.4)
    DWARF copy (perf dwarf)        .eh_frame + -g                copies 8 KiB of stack per SAMPLE into the ring (Ch. 2 §2.5),  perf --call-graph dwarf: unwinds offline,
                                                                 unwinds offline                                              costs the NMI path the copy
    SFrame (.sframe)               -Wa,--gsframe (binutils ≥     ~4–8 cycles/frame: a sorted table lookup per frame, no        the kernel's deferred user unwinder
@@ -183,7 +183,7 @@ The convention, in one build line: `-O2 -g -march=<colo uarch> -fno-omit-frame-p
 
 ### 27.4.5 Operating PGO/BOLT: the profile lifecycle
 
-§27.4.3 ends with "refresh profiles as the strategy/code changes"; this is the procedure, with the costs measured in Ch. 117 §117.3 on a decoder-style dispatch kernel (GCC 13.3 / Clang 18.1, the reference VM): PGO trained on the open's message mix bought −13 % (GCC) / −10 % (Clang) on the open and cost **+3 % / +6 %** on the midday mix — a *stale-workload* profile; a profile from the previous source revision, forced through after a one-function change, cost **+13–17 %** against a fresh one (GCC refuses by default with `-Werror=coverage-mismatch`; Clang 18 built silently). The instrumented GCC build (`-fprofile-update=atomic`) ran 3.5× slower, Clang's front-end instrumentation 3 % slower, which decides where training can run.
+§27.4.3 ends with "refresh profiles as the strategy/code changes"; this is the procedure, with the costs measured in Ch. 118 §118.3 on a decoder-style dispatch kernel (GCC 13.3 / Clang 18.1, the reference VM): PGO trained on the open's message mix bought −13 % (GCC) / −10 % (Clang) on the open and cost **+3 % / +6 %** on the midday mix — a *stale-workload* profile; a profile from the previous source revision, forced through after a one-function change, cost **+13–17 %** against a fresh one (GCC refuses by default with `-Werror=coverage-mismatch`; Clang 18 built silently). The instrumented GCC build (`-fprofile-update=atomic`) ran 3.5× slower, Clang's front-end instrumentation 3 % slower, which decides where training can run.
 
 ```
    TRAIN    on a named replayed capture (Ch. 109–110) containing the open and the day — never synthetic, never idle; at 0.3× speed into the instrumented build
@@ -191,14 +191,14 @@ The convention, in one build line: `-O2 -g -march=<colo uarch> -fno-omit-frame-p
             Clang: clang++ -O2 -fprofile-instr-generate …;  LLVM_PROFILE_FILE="prof/%m-%p.profraw" ./app_instr
    MERGE    llvm-profdata merge -output=rev.profdata prof/*.profraw   [-weighted-input=3,open.profdata -weighted-input=1,midday.profdata]
             gcov-tool merge -w 3,1 dirA dirB   (GCC; or let the runtime accumulate .gcda across runs)
-   STORE    the profile is a build input keyed by (source revision, capture id, date) and named in the release manifest (Ch. 118 §118.4.1); the hermetic build (Ch. 28) pins it
+   STORE    the profile is a build input keyed by (source revision, capture id, date) and named in the release manifest (Ch. 119 §119.4.1); the hermetic build (Ch. 28) pins it
    USE      -fprofile-use -fprofile-correction [-fprofile-partial-training]  /  -fprofile-instr-use=rev.profdata;  then LTO;  then BOLT from an LBR profile of the SAME replay, as the last build step, every time
    GATE     mismatch diagnostics fatal — GCC: -Werror=coverage-mismatch (default) -Werror=missing-profile;  Clang: -Werror=profile-instr-out-of-date -Werror=profile-instr-unprofiled;
-            capture age < D days;  the replay gate (Ch. 117 §117.4.4) runs the PGO'd binary on the open AND a midday window and fails if either is slower than plain -O2
+            capture age < D days;  the replay gate (Ch. 118 §118.4.4) runs the PGO'd binary on the open AND a midday window and fails if either is slower than plain -O2
    REFRESH  on every change to a hot-path TU, weekly, after any venue/feed change;  AutoFDO (perf record -b on production → create_llvm_prof / create_gcov → -fprofile-sample-use / -fauto-profile) refreshes between instrumented trainings at ~zero runtime cost
 ```
 
-The lifecycle's shape is Ch. 117's for a benchmark baseline — a measured artefact with provenance, a validity window and a gate — because a profile *is* a performance claim about the workload, and it decays like one. Appendix D.6 lists the flags; Appendix I.9 the one-liners.
+The lifecycle's shape is Ch. 118's for a benchmark baseline — a measured artefact with provenance, a validity window and a gate — because a profile *is* a performance claim about the workload, and it decays like one. Appendix D.6 lists the flags; Appendix I.9 the one-liners.
 
 ## 27.5 Pitfalls & anti-patterns: `-Ofast` hazards, portability loss
 

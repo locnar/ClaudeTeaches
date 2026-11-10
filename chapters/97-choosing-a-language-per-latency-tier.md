@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 1 §1.4.2 (the hot/warm/cold latency tiers, qualitative until now), Ch. 3 and Appendix L (the benchmarking discipline this chapter extends across languages), Ch. 21 §21.4.2 (the `constexpr` tick-size table rebuilt here in Rust and Zig), Ch. 93–96 (asm, Rust, the boundary and the managed runtimes — the evidence this chapter decides with), Ch. 109 (the capture every kernel here replays).
 >
-> **Leads into:** Part XIII (the operations Part, where the control-plane, telemetry and research components live in whatever language this chapter's table puts them in), Ch. 119 (the capstone's tick-to-trade budget, now with a language axis), Appendix B (the summary and tier table that point back here), Appendix L.5 (the cross-language protocol in checklist form).
+> **Leads into:** Part XIII (the operations Part, where the control-plane, telemetry and research components live in whatever language this chapter's table puts them in), Ch. 120 (the capstone's tick-to-trade budget, now with a language axis), Appendix B (the summary and tier table that point back here), Appendix L.5 (the cross-language protocol in checklist form).
 
 ---
 
@@ -135,7 +135,7 @@ The system that results has a C++ (or Rust) hot tier — one process per role (C
 
 ### 97.4.6 Parity testing across languages
 
-The digest in §97.3 is the cross-language regression test: every implementation of the kernel, in every language, must fold every message's result to the same 64 bits over the same capture, and a CI job runs them all (the research tier's Python included — through the waist and, for the pure-Python reference, in a nightly job). Ch. 119 §119.4.1's golden-capture gate extends naturally: the C++ core's golden output is also the golden output for the Java risk service's view of the book, and a divergence is a bug in one of them *or* a layout drift at the waist (Ch. 95 §95.4.1), found before the trade.
+The digest in §97.3 is the cross-language regression test: every implementation of the kernel, in every language, must fold every message's result to the same 64 bits over the same capture, and a CI job runs them all (the research tier's Python included — through the waist and, for the pure-Python reference, in a nightly job). Ch. 120 §120.4.1's golden-capture gate extends naturally: the C++ core's golden output is also the golden output for the Java risk service's view of the book, and a divergence is a bug in one of them *or* a layout drift at the waist (Ch. 95 §95.4.1), found before the trade.
 
 ### 97.4.7 Three worked placements
 
@@ -190,7 +190,7 @@ Checklist for a cross-language decision:
 - Appendix H — the C++23/26 features whose absence or presence appears in the scorecard's language-mechanics rows.
 - Carl Cook, *When a Microsecond Is an Eternity* (CppCon 2017) — a trading firm's hot-path C++ practice, the implicit standard §97.4.2's hot tier is measured against.
 - Jane Street, *Why OCaml?* and the OCaml performance posts on the Jane Street tech blog; LMAX, *The LMAX Architecture* (Fowler) — two firms' first-hand accounts of a non-C++ language at or near the hot tier.
-- Ch. 109 §109.4.6–§109.4.7 (the research seam and columnar storage: where the cold tier meets the hot one), Ch. 119 (the capstone budget).
+- Ch. 109 §109.4.6–§109.4.7 (the research seam and columnar storage: where the cold tier meets the hot one), Ch. 120 (the capstone budget).
 
 ---
 

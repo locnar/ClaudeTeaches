@@ -212,9 +212,9 @@ Everything above is C++; Ch. 97 §97.2.3 extends it to a cross-language comparis
 
 Report medians of *R* runs per row with the toolchain versions and flags in the header (Ch. 97 §97.3 is the worked example: nine toolchains, one kernel, one table), add the L.2 tail-latency variant for any row whose runtime can pause (Ch. 96), and state the box — numbers from a VM are not the reference machine's.
 
-## L.6 Benchmarks as tests: the CI skeleton (Ch. 117)
+## L.6 Benchmarks as tests: the CI skeleton (Ch. 118)
 
-The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline compares against a stored baseline with the statistics of Ch. 117 §117.4.2. The skeleton, for a CMake/CTest project:
+The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline compares against a stored baseline with the statistics of Ch. 118 §118.4.2. The skeleton, for a CMake/CTest project:
 
 ```
    # CMakeLists.txt — benchmarks are tests with a label; the per-PR job runs the label, the nightly runs everything on the tuned box
@@ -225,25 +225,25 @@ The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline
 
    # per-PR job (shared runner class R):
    ctest -L perpr --output-on-failure                                                     # produces bench/*.json
-   perf stat -e instructions:u,branches:u -r 10 -x, ./bench_book --benchmark_filter=Update --benchmark_min_time=0.1s 2> bench/book.counters   # deterministic proxy (Ch. 117 §117.4.3)
+   perf stat -e instructions:u,branches:u -r 10 -x, ./bench_book --benchmark_filter=Update --benchmark_min_time=0.1s 2> bench/book.counters   # deterministic proxy (Ch. 118 §118.4.3)
    python3 tools/compare.py benchmarks baseline/R/<last-green-rev>/book.json bench/book.json --no-color > bench/book.compare   # Mann–Whitney per benchmark (Ch. 3 §3.4.4)
    ./perfgate --aa baseline/R/aa.json --base baseline/R/<last-green-rev>/book.json --cand bench/book.json --stat p50,p99 \
-              --min-effect-from-aa 1.5 --alpha 0.001 > bench/book.gate.json                                             # bootstrap CI vs A/A tolerance + rank test → PASS/FAIL (Ch. 117 §117.4.2)
+              --min-effect-from-aa 1.5 --alpha 0.001 > bench/book.gate.json                                             # bootstrap CI vs A/A tolerance + rank test → PASS/FAIL (Ch. 118 §118.4.2)
 
    # artefact layout (keyed by revision AND runner class; a runner change starts a new series and a new A/A table):
-   baseline/<runner-class>/aa.json                  the A/A table: per-statistic spread of R runs of one binary (Ch. 117 §117.4.1); re-measured weekly
+   baseline/<runner-class>/aa.json                  the A/A table: per-statistic spread of R runs of one binary (Ch. 118 §118.4.1); re-measured weekly
    baseline/<runner-class>/<rev>/<bench>.json        Google Benchmark JSON (per-repetition samples, not just aggregates)
    baseline/<runner-class>/<rev>/<bench>.counters    perf stat -x, output
-   baseline/<runner-class>/<rev>/<bench>.gate.json   the verdict line Ch. 117 §117.4.2 emits; the trend view reads these
+   baseline/<runner-class>/<rev>/<bench>.gate.json   the verdict line Ch. 118 §118.4.2 emits; the trend view reads these
 
    # nightly (tuned box, Appendix C; reserved for the gate):
    cyclictest -q -D 60 -p 90 -m -h 100 | tail -3                                           # quiet-box precondition (Appendix C.7, Appendix M.3)
    ctest -L bench                                                                           # all benchmarks, the L.2 tail variant included
    ./replay --speed 1 --pacer spin --capture captures/open-<id>.pcapng --target <box>   # the open onto the wire (Ch. 110 §110.4.3)
-   ./perfgate --aa baseline/tuned/aa.json --base baseline/tuned/median-of-last-7/ --cand nightly/<rev>/ --stat p50,p99,p99.9 --per-stage   # per §119.3 stage
+   ./perfgate --aa baseline/tuned/aa.json --base baseline/tuned/median-of-last-7/ --cand nightly/<rev>/ --stat p50,p99,p99.9 --per-stage   # per §120.3 stage
 ```
 
-Two rules the skeleton encodes. **The sample, not the summary, is the artefact**: `--benchmark_report_aggregates_only=false` keeps every repetition so the bootstrap can resample them; aggregates alone cannot be gated honestly. **Tolerances come from `aa.json`, never from the YAML**: `--min-effect-from-aa 1.5` sets each statistic's minimum effect to 1.5× its A/A spread on that runner class, so the gate's promise ("catches +3 ns on the median, +6 ns on p99, nothing on p99.9 here") is a measured fact about the runner. The L.2 harness's two histograms feed the same gate for the tail variant, and the nightly's per-stage comparison is Ch. 119 §119.4.1's gate with Ch. 117 §117.4.4's operating procedure.
+Two rules the skeleton encodes. **The sample, not the summary, is the artefact**: `--benchmark_report_aggregates_only=false` keeps every repetition so the bootstrap can resample them; aggregates alone cannot be gated honestly. **Tolerances come from `aa.json`, never from the YAML**: `--min-effect-from-aa 1.5` sets each statistic's minimum effect to 1.5× its A/A spread on that runner class, so the gate's promise ("catches +3 ns on the median, +6 ns on p99, nothing on p99.9 here") is a measured fact about the runner. The L.2 harness's two histograms feed the same gate for the tail variant, and the nightly's per-stage comparison is Ch. 120 §120.4.1's gate with Ch. 118 §118.4.4's operating procedure.
 
 ## L.7 The core-to-core map: placement input for every pinned pair (Ch. 19)
 

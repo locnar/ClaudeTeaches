@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 89 (GPU — the other batch-tier accelerator; MPI scales across nodes/GPUs), Ch. 83 (RDMA/InfiniBand — MPI's fast transport), Ch. 18 (NUMA — rank placement), Ch. 42 (shared-nothing — MPI is shared-nothing across hosts), Ch. 1 (latency vs throughput — MPI is throughput/scale).
 >
-> **Leads into:** Ch. 91 (FPGA — the latency-tier accelerator, by contrast), Ch. 119 (large-scale backtesting/risk in the case study). Part XI's scale-out tier — for the *off-order-path* compute spread across a cluster, explicitly not the tick-to-trade path.
+> **Leads into:** Ch. 91 (FPGA — the latency-tier accelerator, by contrast), Ch. 120 (large-scale backtesting/risk in the case study). Part XI's scale-out tier — for the *off-order-path* compute spread across a cluster, explicitly not the tick-to-trade path.
 
 ---
 
@@ -191,7 +191,7 @@ Placing ranks so communicating ranks are close (ties Ch. 18, 56):
 
 - Talks/papers on large-scale Monte-Carlo risk and distributed backtesting in finance — the workloads of §90.1 at cluster scale.
 - The CUDA-aware MPI / GPUDirect documentation — multi-GPU distributed compute (ties Ch. 87–89).
-- Ch. 89 (*GPU/CUDA*) — the per-node accelerator MPI scales across; Ch. 83 (*RDMA*) — MPI's fast transport; Ch. 18 (*NUMA*) / Ch. 56 (*Pinning*) — rank placement; Ch. 42 (*Concurrency Foundations*) — shared-nothing/communication-cost at cluster scale; Ch. 87 (*PCIe*) — GPUDirect; Ch. 119 (*Case Study*) — large-scale backtesting/risk.
+- Ch. 89 (*GPU/CUDA*) — the per-node accelerator MPI scales across; Ch. 83 (*RDMA*) — MPI's fast transport; Ch. 18 (*NUMA*) / Ch. 56 (*Pinning*) — rank placement; Ch. 42 (*Concurrency Foundations*) — shared-nothing/communication-cost at cluster scale; Ch. 87 (*PCIe*) — GPUDirect; Ch. 120 (*Case Study*) — large-scale backtesting/risk.
 - **Appendix F** — MPI/rank/collective glossary.
 
 ---

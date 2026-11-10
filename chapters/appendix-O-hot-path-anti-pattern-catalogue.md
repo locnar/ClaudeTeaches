@@ -1,6 +1,6 @@
 # Appendix O — Hot-Path Anti-Pattern Catalogue
 
-> **Consolidates:** every chapter's *Pitfalls & anti-patterns* section (§N.5 or §N.6 of Ch. 1–119), read and re-sorted by **where the sin lives** rather than by chapter, with the one column no chapter provides in aggregate: **the counter, probe or signature that exposes it**. The probe invocations are Appendix I's; the fixes point at the section that develops them. Companion to Appendix C (tuning knobs), D (flags), E (latency numbers), I (commands) and M (the readiness gate); the pre-merge review checklist Ch. 119 §119.4.1 asks for.
+> **Consolidates:** every chapter's *Pitfalls & anti-patterns* section (§N.5 or §N.6 of Ch. 1–120), read and re-sorted by **where the sin lives** rather than by chapter, with the one column no chapter provides in aggregate: **the counter, probe or signature that exposes it**. The probe invocations are Appendix I's; the fixes point at the section that develops them. Companion to Appendix C (tuning knobs), D (flags), E (latency numbers), I (commands) and M (the readiness gate); the pre-merge review checklist Ch. 120 §120.4.1 asks for.
 
 **How to use this:** two ways. *As a reviewer*, read the left column of the sections that touch the change (a new queue → O.5; a new container → O.1 and O.8; a new thread → O.4 and O.6) and ask whether each row applies. *On call*, start from the **symptom** you have — a p99.9 spike every ~N minutes, a flat median with a long tail, throughput that fell when you added a core — find it in the second column, run the probe in the third, and follow the pointer. Each row is one line: **anti-pattern → how it shows up → what exposes it → the fix → where the book develops it**. The "exposes it" column names the cheapest *discriminating* evidence: a counter that moves for this pattern and not for its neighbours. Rows added by the design-pattern chapters (Ch. 49, 50, 55, 104, 105, 111) are marked ◆.
 
@@ -170,10 +170,10 @@
 | Reporting the mean; averaging percentiles; a `p99_9` gauge | the tail invisible until the incident | the histogram itself (HdrHistogram) vs the summary statistic | Full histograms, merged off-path; percentiles from enough samples | Ch. 1 §1.5, 3 §3.5, 83 §100.6 |
 | Coordinated omission; service time instead of response time | a closed-loop benchmark that cannot see the stall | compare paced-intended vs dequeue-time histograms (Appendix L.2) | Record against the intended time; paced load | Ch. 3 §3.5, 39 §50.7, Appendix L |
 | Unserialized `rdtsc` on a tiny region; converting to ns on the hot path; comparing TSC to the venue's clock | numbers off by the measurement's own cost or by a clock domain | the measured cost of the empty region; TSC↔PHC anchors | `rdtscp`/fenced pairs; convert off-path; anchor to PTP | Ch. 20 §20.5, 82 §99.6, 63 §78.5 |
-| Measuring kernel-only/component latency, not wire-to-wire; one run, no CI | optimizing a stage the tail does not live in | end-to-end HW-timestamped histogram vs the stage sum | Wire-to-wire with hardware stamps; the regression gate with confidence intervals | Ch. 119 §119.5, 72 §89.5, 75 §92.5 |
+| Measuring kernel-only/component latency, not wire-to-wire; one run, no CI | optimizing a stage the tail does not live in | end-to-end HW-timestamped histogram vs the stage sum | Wire-to-wire with hardware stamps; the regression gate with confidence intervals | Ch. 120 §120.5, 72 §89.5, 75 §92.5 |
 | Drops measured instead of age; lag without age ◆ | the strategy traded on stale data with zero drops | message age at point of use | Age histograms and budgets per consumer | Ch. 50 §50.5 |
 | Trusting `smp_affinity`, `scaling_cur_freq`, `/proc/net/igmp`, zero counters on a bypass box | the configuration says one thing, the hardware another | `effective_affinity_list`; `turbostat`; the querier; NIC vendor counters | Verify the effective state in the host fingerprint (Appendix M) | Ch. 61 §61.5, 59 §74.5, 93 §114.5, 94 §115.5 |
-| Profiling overhead / tracing everything on every CPU / `perf -C <isolated>` all day | the observer is the tail | `rtla osnoise` with and without the tool | Targeted-live tier only, armed from a housekeeping core | Ch. 2 §2.5, 49 §61.5, 92 §113.5, 95 §119.5 |
+| Profiling overhead / tracing everything on every CPU / `perf -C <isolated>` all day | the observer is the tail | `rtla osnoise` with and without the tool | Targeted-live tier only, armed from a housekeeping core | Ch. 2 §2.5, 49 §61.5, 92 §113.5, 95 §120.5 |
 | Benchmarking only the warm path; shadow traffic with side effects | the first real message is cold; a test order went to the venue | cold-vs-warm histograms; an order you did not mean to send | Measure cold; warm deliberately; shadow traffic that cannot leave the box | Ch. 62 §62.5 |
 
 ## O.12 Operational and architectural
@@ -188,7 +188,7 @@
 | Heartbeat that only catches exits; thresholds on invariants; a baseline nobody updates | a hung process trades stale; alerts that never fire or always fire | heartbeat *sequence* stalls while the process lives; invariant checks | Progress heartbeats; invariants as hard checks; baselines refreshed per release | Ch. 103 §103.5, 93 §114.5 |
 | Trusting the wire / the shared region / the operator | a malformed packet or a bad limit set takes the system down | fuzzing the decoders; validate-before-swap failures | Bounds-check at the gate; validate config off-path; four-eyes on limits | Ch. 70 §70.6, 84 §101.5, 85 §102.5, 87 §104.4.4 ◆ |
 | A mode nobody owns (shedding scattered across stages) ◆ | inconsistent behaviour under load, no record of it | the journal has no mode transitions | One owner, one word, journaled transitions | Ch. 50 §50.5 |
-| Drift between test and production; tuned once and walked away | the gate passes, production regresses | host fingerprint delta (Appendix M); the production always-on tier | Configuration as code; continuous monitoring; re-tune per kernel/firmware | Ch. 119 §119.5, 6 §6.5, 48 §59.5 |
+| Drift between test and production; tuned once and walked away | the gate passes, production regresses | host fingerprint delta (Appendix M); the production always-on tier | Configuration as code; continuous monitoring; re-tune per kernel/firmware | Ch. 120 §120.5, 6 §6.5, 48 §59.5 |
 | A `Type=simple` trading unit "started" cold; capabilities never dropped (or `CAP_SYS_RAWIO`/`SYS_ADMIN` granted); live-patching or `perf`-probing the kernel in-session; a microcode/BIOS update between trading days with no re-measurement | dependants start before warm-up; a hung warm-up nobody notices; `CAL` IPIs and a stalled transition on the hot core; gathers 2× slower "for no reason" | `systemctl show -p NotifyAccess,AmbientCapabilities`; `getpcaps`; `/proc/interrupts` `CAL`; the `vulnerabilities/*` dump vs the fingerprint | `Type=notify` + `READY=1` after the gate, `WatchdogSec`; named ambient caps then drop; kernel text immutable in-session; microcode pinned, early-loaded, re-measured | Ch. 103 §103.4.9, §103.5; Ch. 6 §6.4.5 |
 | A latency-budgeted guest on a shared host: unpinned vCPUs, `kvm-clock`, `virtio-net`, THP/KSM on the host, `HLT`-exiting idle | 11 µs wake-ups, 60–75 µs timer wakes, 6 µs `cpuid`s, ms of steal | guest `cyclictest`/`osnoise`; `/proc/stat` steal; `perf kvm stat` on the host | 1:1 pinned vCPUs on isolated host cores, 1 GiB pages on both levels, APICv + PLE off, `idle=poll`, TSC clock, an SR-IOV VF via VFIO — or the host | Appendix S §S.2–§S.5 |
 
@@ -211,7 +211,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 
 ## O.14 References
 
-- The §N.5/§N.6 sections of Ch. 1–119 of this book, from which every row is drawn; Appendix I for the probe invocations; Appendix M for the readiness checks that catch the operational rows before the open.
+- The §N.5/§N.6 sections of Ch. 1–120 of this book, from which every row is drawn; Appendix I for the probe invocations; Appendix M for the readiness checks that catch the operational rows before the open.
 - Gregg, B. *Systems Performance*, 2nd ed., Ch. 2 §"Methodologies" (the USE and RED methods — symptom-first diagnosis), and *BPF Performance Tools* — the uprobe/tracepoint one-liners.
 - Intel. *Optimization Reference Manual*, Appendix B (top-down analysis — the counter names in O.3/O.8).
 - Fog, A. *Optimizing software in C++* — the per-construct costs behind O.2/O.3/O.9.
@@ -225,7 +225,7 @@ If a reviewer has five minutes, these are the rows that have most often been the
 
 ---
 
-*This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 119) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
+*This completes Appendix O and the book. The chapters (Parts I–XIII) and Appendices A–O together form the full tutorial series — from the latency mindset (Ch. 1) through the end-to-end tick-to-trade case study (Ch. 120) — with the standing references (ARM port, alternative languages, system tuning, compiler flags, latency numbers, glossary, bibliography, feature matrix, tooling cookbook, market-structure primer, exchange connectivity, benchmark harness, readiness gate, incident bundle, and this anti-pattern catalogue) alongside.*
 
 ---
 

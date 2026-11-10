@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 41 (atomics / memory model — the release-store/acquire-load that makes a swap safe), Ch. 46 (seqlocks — single-writer publication of config snapshots), Ch. 47 (safe reclamation — RCU/hazard/epoch for freeing the old version), Ch. 34 (mmap/shared memory — config segments), Ch. 62 (keeping the hot path warm — warming a freshly loaded strategy), Ch. 101 (security — validate/sign config before swap).
 >
-> **Leads into:** Ch. 103 (process topology — config distribution across cooperating processes, single-writer-per-segment), Ch. 119 (case study — live reconfiguration in the end-to-end system). A Part XIII operations chapter: changing a running system *without* dropping a tick or tearing the hot path.
+> **Leads into:** Ch. 103 (process topology — config distribution across cooperating processes, single-writer-per-segment), Ch. 120 (case study — live reconfiguration in the end-to-end system). A Part XIII operations chapter: changing a running system *without* dropping a tick or tearing the hot path.
 
 ---
 
@@ -197,7 +197,7 @@ Two cutover styles, and the hardest case (reloading *code*):
 
 - Talks and write-ups on live reconfiguration and zero-downtime parameter updates in trading and other always-on systems — double-buffering and atomic-swap patterns in practice (§102.2).
 - The RCU and hazard-pointer usage guides (Ch. 47) applied to configuration and reference data, not just data structures (§102.4.2).
-- Ch. 103 (*Process Topology*) — config distribution across cooperating processes, single-writer-per-segment, and the admin/control process; Ch. 109 (*Capture*) — recording the config version that made each decision for deterministic replay; Ch. 62 (*Keeping the Hot Path Warm*) — warming a reloaded strategy; Ch. 119 (*Case Study*) — live reconfiguration end-to-end.
+- Ch. 103 (*Process Topology*) — config distribution across cooperating processes, single-writer-per-segment, and the admin/control process; Ch. 109 (*Capture*) — recording the config version that made each decision for deterministic replay; Ch. 62 (*Keeping the Hot Path Warm*) — warming a reloaded strategy; Ch. 120 (*Case Study*) — live reconfiguration end-to-end.
 - **Appendix F** — RCU/seqlock/release-acquire glossary; **Appendix E** — the cost of an atomic RMW (the `shared_ptr` refcount on the read side).
 
 ---

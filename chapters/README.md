@@ -2,7 +2,7 @@
 
 A book-length tutorial series on high-performance, low-latency software in **C++ on Linux**, framed around **HFT / electronic trading** (order books, market-data feeds, tick-to-trade). This file is the reader's map: each chapter expands into its standard sections (§*N*.1 *Why it matters* → §*N*.2 *Mental model* → §*N*.3 *Measure it* → §*N*.4 *Techniques* → §*N*.5 *Verify the codegen* → §*N*.6 *Pitfalls* → §*N*.7 *Exercises*; §*N*.5 *Verify the codegen* appears only in the chapters where the optimizer is the point — elsewhere Pitfalls and Exercises are §*N*.5 and §*N*.6), with the searchable sub-topics listed under **Mental model** and **Techniques**.
 
-> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 119 chapters are grouped into thirteen Parts; eighteen appendices (A–R) follow.
+> **Reading the index:** a **linked** chapter title points at its file (`NN-slug.md`). The 120 chapters are grouped into thirteen Parts; eighteen appendices (A–R) follow.
 
 ---
 
@@ -1732,54 +1732,72 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 116.5 Pitfalls & anti-patterns
 - 116.6 Exercises & checklist
 
-### [117. Performance Engineering in CI & the Profile Lifecycle](117-performance-engineering-ci-profile-lifecycle.md)
-- 117.1 Why it matters: a gate that flaps is a gate that gets turned off
+### [117. Case Study: The Exchange Simulator](117-case-study-exchange-simulator.md)
+- 117.1 Why it matters: every chapter that said "in a simulation harness" was pointing here
 - 117.2 Mental model
-  - 117.2.1 A benchmark is a test with a noisy oracle
-  - 117.2.2 Which statistic to gate, on which machine
-  - 117.2.3 The pipeline: fast gate, nightly gate, bisection
-  - 117.2.4 Profiles decay like benchmarks
-- 117.3 Measure it: the noise floor, the gate, and the stale profile
+  - 117.2.1 The matching engine is the book, run from the inside
+  - 117.2.2 Allocation rules, self-trade prevention, and auctions
+  - 117.2.3 The latency model: an empirical distribution with the tail intact
+  - 117.2.4 The queue-position model
+- 117.3 Measure it: millions of orders per second, the tails, the uncross, the latency model, the queue update
 - 117.4 Techniques
-  - 117.4.1 A/A calibration: measure the floor, derive the tolerance
-  - 117.4.2 The gate: bootstrap CI, rank test, minimum effect
-  - 117.4.3 Deterministic proxies for shared runners
-  - 117.4.4 The nightly replay gate and bisection by replay
-  - 117.4.5 Operating PGO/AutoFDO/BOLT: the profile lifecycle
-  - 117.4.6 Trend, alerting and the human loop
+  - 117.4.1 The matching core: Ch. 33's book with the rule inside
+  - 117.4.2 Pro-rata and self-trade prevention as modes
+  - 117.4.3 The auction cross
+  - 117.4.4 The latency model from captures: per-path empirical samplers on a simulated clock
+  - 117.4.5 Queue position: FIFO rank and pro-rata share from the same MBO stream
+  - 117.4.6 Fault schedules as inputs: gaps, A/B skew, microbursts, disconnects, slow acks
 - 117.5 Pitfalls & anti-patterns
 - 117.6 Exercises & checklist
 
-### [118. Release Engineering & Measuring Changes in Production](118-release-engineering-measuring-changes-in-production.md)
-- 118.1 Why it matters: the deploy is a latency event you schedule
+### [118. Performance Engineering in CI & the Profile Lifecycle](118-performance-engineering-ci-profile-lifecycle.md)
+- 118.1 Why it matters: a gate that flaps is a gate that gets turned off
 - 118.2 Mental model
-  - 118.2.1 The deploy calendar: what may change when
-  - 118.2.2 Compatibility windows: attaching a new version to live state
-  - 118.2.3 Trust in stages: shadow → canary → fleet
-  - 118.2.4 Why the CI gate is necessary and not sufficient
-- 118.3 Measure it: a blue/green cutover tick by tick, and paired comparison with its own A/A
+  - 118.2.1 A benchmark is a test with a noisy oracle
+  - 118.2.2 Which statistic to gate, on which machine
+  - 118.2.3 The pipeline: fast gate, nightly gate, bisection
+  - 118.2.4 Profiles decay like benchmarks
+- 118.3 Measure it: the noise floor, the gate, and the stale profile
 - 118.4 Techniques
-  - 118.4.1 The release manifest: what "a release" is
-  - 118.4.2 Compatibility windows in code
-  - 118.4.3 Blue/green cutover for process-per-role
-  - 118.4.4 Shadow runs and canary shards
-  - 118.4.5 Paired production comparison, with its A/A
-  - 118.4.6 Venue conformance and the weekend test
+  - 118.4.1 A/A calibration: measure the floor, derive the tolerance
+  - 118.4.2 The gate: bootstrap CI, rank test, minimum effect
+  - 118.4.3 Deterministic proxies for shared runners
+  - 118.4.4 The nightly replay gate and bisection by replay
+  - 118.4.5 Operating PGO/AutoFDO/BOLT: the profile lifecycle
+  - 118.4.6 Trend, alerting and the human loop
 - 118.5 Pitfalls & anti-patterns
 - 118.6 Exercises & checklist
 
-### [119. Production Profiling & End-to-End Case Study](119-production-profiling-end-to-end-case-study.md)
-- 119.1 Why it matters: tying the whole book together
-- 119.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
-- 119.3 Measure it: a full tick-to-trade walkthrough
+### [119. Release Engineering & Measuring Changes in Production](119-release-engineering-measuring-changes-in-production.md)
+- 119.1 Why it matters: the deploy is a latency event you schedule
+- 119.2 Mental model
+  - 119.2.1 The deploy calendar: what may change when
+  - 119.2.2 Compatibility windows: attaching a new version to live state
+  - 119.2.3 Trust in stages: shadow → canary → fleet
+  - 119.2.4 Why the CI gate is necessary and not sufficient
+- 119.3 Measure it: a blue/green cutover tick by tick, and paired comparison with its own A/A
 - 119.4 Techniques
-  - 119.4.1 Regression detection and latency-regression gates in CI
-  - 119.4.2 Deterministic replay of captured market data
-  - 119.4.3 Simulation harnesses
-  - 119.4.4 Profiling the live system safely
-  - 119.4.5 Closing the loop: from the latency ledger to fills, markouts and race outcomes
-- 119.5 Pitfalls & anti-patterns: drift between test and production
+  - 119.4.1 The release manifest: what "a release" is
+  - 119.4.2 Compatibility windows in code
+  - 119.4.3 Blue/green cutover for process-per-role
+  - 119.4.4 Shadow runs and canary shards
+  - 119.4.5 Paired production comparison, with its A/A
+  - 119.4.6 Venue conformance and the weekend test
+- 119.5 Pitfalls & anti-patterns
 - 119.6 Exercises & checklist
+
+### [120. Production Profiling & End-to-End Case Study](120-production-profiling-end-to-end-case-study.md)
+- 120.1 Why it matters: tying the whole book together
+- 120.2 Mental model: three tiers — always-on, targeted-live, offline-on-replay
+- 120.3 Measure it: a full tick-to-trade walkthrough
+- 120.4 Techniques
+  - 120.4.1 Regression detection and latency-regression gates in CI
+  - 120.4.2 Deterministic replay of captured market data
+  - 120.4.3 Simulation harnesses
+  - 120.4.4 Profiling the live system safely
+  - 120.4.5 Closing the loop: from the latency ledger to fills, markouts and race outcomes
+- 120.5 Pitfalls & anti-patterns: drift between test and production
+- 120.6 Exercises & checklist
 
 ## Appendices
 
@@ -1888,7 +1906,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - L.3 Making a run repeatable (environment & isolation)
 - L.4 The pre-trust checklist
 - L.5 Benchmarking across languages (the Ch. 97 protocol: same box/core/capture, digest parity, warm vs cold windows, each toolchain's sink and asm)
-- L.6 Benchmarks as tests: the CI skeleton (Ch. 117) — CTest labels, `--benchmark_out=json`, `compare.py`, the A/A table and the artefact layout keyed by revision and runner class
+- L.6 Benchmarks as tests: the CI skeleton (Ch. 118) — CTest labels, `--benchmark_out=json`, `compare.py`, the A/A table and the artefact layout keyed by revision and runner class
 - L.7 The core-to-core map: placement input for every pinned pair (Ch. 19) — run `c2c` once per box and firmware mode, store the matrix, quote the pair's one-way latency with every two-core result
 
 ### [Appendix M — Pre-Open Readiness Gate & Market-Open Playbook](appendix-M-readiness-gate-market-open.md)

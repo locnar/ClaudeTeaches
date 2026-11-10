@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 111 (the sequencer, replicas with identical state, hot/warm/cold standby and the *single-emitter rule* this chapter enforces across hosts; Appendix F already defines *fencing token*), Ch. 106 (the session layer the standby takes over — persisted sequence numbers, the resend store, cancel-on-disconnect as a venue setting, `TCP_USER_TIMEOUT`), Ch. 103 §103.3 and §103.4.3 (single-host restart time; the in-host heartbeat slot that is one of this chapter's two detection paths), Ch. 105 §105.4.4–§105.4.5 (recovery and reconciliation after a takeover), Ch. 104 §104.4.4 (the kill: cancel-all before anything else), Ch. 20 (monotonic clocks — a lease is a deadline on one), Ch. 55 (deadlines in the hot loop), Ch. 85 §85.4.1 (Aeron Cluster/Raft as the off-the-shelf alternative), Appendix K.4 and K.6 (venue session exclusivity, cancel-on-disconnect, redundant gateways).
 >
-> **Leads into:** Ch. 113 (a failover is a latency spike with a cause — the forensic timeline), Ch. 114–115 (the detector's two paths are host and network telemetry signals), Ch. 118 §118.4.3 (planned cutover reuses this chapter's token flip), Ch. 119 (the capstone's architecture gains a standby gateway and a lease), Appendix M (failover drill as a readiness item). Ch. 111 stood a replica up beside a dead primary *on one host, behind one sequencer*; this chapter is the cross-host case on the one path where being wrong is a position: two gateways that both believe they own the venue session. It defines the invariant, builds the detector, the lease and the fencing token, measures detect → promote on a VM, and shows the venue's own safety nets catching what the protocol misses.
+> **Leads into:** Ch. 113 (a failover is a latency spike with a cause — the forensic timeline), Ch. 114–115 (the detector's two paths are host and network telemetry signals), Ch. 119 §119.4.3 (planned cutover reuses this chapter's token flip), Ch. 120 (the capstone's architecture gains a standby gateway and a lease), Appendix M (failover drill as a readiness item). Ch. 111 stood a replica up beside a dead primary *on one host, behind one sequencer*; this chapter is the cross-host case on the one path where being wrong is a position: two gateways that both believe they own the venue session. It defines the invariant, builds the detector, the lease and the fencing token, measures detect → promote on a VM, and shows the venue's own safety nets catching what the protocol misses.
 
 ---
 
@@ -177,7 +177,7 @@ Raft (Ongaro & Ousterhout 2014) and Paxos (Lamport 1998) give leader election wi
 - **Leases on the wall clock.** NTP steps and leap smearing (Ch. 20, 78) change the lease's length under you. Monotonic clocks, with the skew subtracted.
 - **Lease sized to the RTO wish.** A 500 µs lease promotes in under a millisecond and steps a healthy primary down on its first 1 ms hiccup. Size it to the measured longest pause (Ch. 61) plus margin; accept the RTO that implies.
 - **Trading before cancelling.** The standby's in-flight table lags the venue by the orders in flight at the kill; its first message is cancel-all (or the venue's COD must be known to have fired), then reconciliation, then orders.
-- **Assuming the venue's behaviour.** Reject-vs-bump on a second Logon, COD delay and scope, mass-cancel availability are per-venue facts (Appendix K.4); the takeover sequence branches on them and the readiness gate (Appendix M) must have verified them in conformance (Ch. 118 §118.4.6).
+- **Assuming the venue's behaviour.** Reject-vs-bump on a second Logon, COD delay and scope, mass-cancel availability are per-venue facts (Appendix K.4); the takeover sequence branches on them and the readiness gate (Appendix M) must have verified them in conformance (Ch. 119 §119.4.6).
 - **Consensus on the hot path.** A quorum round trip per order is tens of µs; elect beside the path, read one word on it.
 
 ## 112.6 Exercises & checklist
@@ -194,7 +194,7 @@ Checklist:
 - [ ] Failure detection uses **two independent paths**; declarations are logged with both paths' last-seen times; the false-positive rate is known (§112.4.2).
 - [ ] The lease is on a **monotonic clock**, renewed at half-life, **checked before every send**, and sized from the measured longest healthy pause (§112.4.1, §112.4.4).
 - [ ] Every order, heartbeat and journal record carries the **epoch**; every receiver that can fence does (§112.4.5).
-- [ ] The takeover sequence is **Logon → resync → cancel-all → publish emitter → reconcile → warm → trade**, and it has been rehearsed with the venue's conformance environment (§112.4.3, Ch. 118).
+- [ ] The takeover sequence is **Logon → resync → cancel-all → publish emitter → reconcile → warm → trade**, and it has been rehearsed with the venue's conformance environment (§112.4.3, Ch. 119).
 - [ ] The venue's reject-vs-bump, cancel-on-disconnect scope/delay and mass-cancel support are **recorded per session** and the sequence branches on them (§112.2.4).
 - [ ] Detect → promote → first accepted order is a **measured distribution** (§112.3) in the readiness evidence (Appendix M), with the lease length and detector thresholds that produced it.
 
@@ -211,7 +211,7 @@ Checklist:
 
 ## 112.8 Additional Reading
 
-- Ch. 118 §118.4.3 — the *planned* version of this chapter's token flip: blue/green cutover between process versions with instant rollback.
+- Ch. 119 §119.4.3 — the *planned* version of this chapter's token flip: blue/green cutover between process versions with instant rollback.
 - Jepsen analyses (Kyle Kingsbury) of lock services and leader election — the catalogue of real split-brain bugs in systems that thought they had leases.
 - The Aeron Cluster documentation and Martin Thompson's talks on replicated state machines in trading — the production shape of Ch. 111 + this chapter with Raft underneath.
 
