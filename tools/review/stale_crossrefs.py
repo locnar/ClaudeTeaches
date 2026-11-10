@@ -68,6 +68,7 @@ STEPS = [
     ("insert", 67),  # Ch. 68 branch-free-parsing-formatting
     ("insert", 8),  # Ch. 9 dram-subsystem-below-l3
     ("insert", 83),  # Ch. 84 userspace-drivers-kernel-modules
+    ("insert", 35),  # Ch. 36 fast-transcendentals-approximate-math
     # INSERT_STEPS_END
 ]
 def old2new(n):

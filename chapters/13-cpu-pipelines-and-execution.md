@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 2 (top-down analysis — this chapter is the **Back-End → Core Bound** branch, the complement to the Memory-Bound branch of Ch. 8–12), Ch. 4 (reading asm — used heavily in §13.5), Ch. 3 (benchmarking). Ch. 12's prefetch works by overlapping misses with execution — this chapter is what that execution *is*.
 >
-> **Leads into:** Ch. 14 (the front-end that feeds this back-end), Ch. 15–16 (control hazards — branches and indirect calls — in depth), Ch. 36–37 (the instruction-level and SIMD throughput these ideas unlock). FP reassociation here ties to Ch. 35 (`-ffast-math` hazards).
+> **Leads into:** Ch. 14 (the front-end that feeds this back-end), Ch. 15–16 (control hazards — branches and indirect calls — in depth), Ch. 37–38 (the instruction-level and SIMD throughput these ideas unlock). FP reassociation here ties to Ch. 35 (`-ffast-math` hazards).
 
 ---
 
@@ -160,7 +160,7 @@ The general technique behind the specific trick: **find the longest dependency c
 - **Reassociate the computation** so independent sub-expressions can run in parallel. `((a+b) +c)+d` is a chain of 3; `(a+b)+(c+d)` is depth 2 with two independent adds — the tree form halves the critical path. (For FP this needs `-ffast-math` or manual rewriting — §13.5, Ch. 35.)
 - **Interleave independent work** — if two computations are independent, software-interleave their instructions so the core has something to chew on while each waits. (Batch processing several order-book updates / several chains at once, c.f. Ch. 12's batched prefetch.)
 - **Lift loop-carried dependencies out** — a value recomputed each iteration from the last (running index, pointer, accumulator) is a chain; where possible compute it from the loop counter (`base + i*stride`) so iterations are independent.
-- **Reduce per-link latency** — pick lower-latency instructions where the result feeds the next op (e.g. avoid a `div` in a chain — `divsd` ~13 cycles and `idiv r64` ~14–18 on Ice Lake, 40–95 cycles for a 64-bit integer divide on Skylake-era cores — by reciprocal-multiply; Ch. 36).
+- **Reduce per-link latency** — pick lower-latency instructions where the result feeds the next op (e.g. avoid a `div` in a chain — `divsd` ~13 cycles and `idiv r64` ~14–18 on Ice Lake, 40–95 cycles for a 64-bit integer divide on Skylake-era cores — by reciprocal-multiply; Ch. 37).
 
 The mental procedure: ask *"what is the longest chain of 'this needs that's result' on my hot path?"* — that's your critical path — then either shorten it or split it into independent chains the out-of-order engine can overlap.
 
@@ -185,7 +185,7 @@ double s = (s0+s1) + (s2+s3);        // combine at the end (tree-reduce the part
 
 How many accumulators? Roughly **latency × throughput** of the chained op (throughput in ops/cycle — equivalently latency ÷ *reciprocal* throughput in cycles/op) — for FP add on modern Intel, ~4-cycle latency × ~2 adds/cycle ⇒ **~8 accumulators** to fully saturate (4 is a good start and captures most of the win). More than that hits diminishing returns and register pressure (spills — Ch. 4, 11). For **integer** add (1-cycle latency) the chain is rarely the bottleneck, so splitting matters most for *higher-latency* ops: FP add/mul, and anything with multi-cycle latency in the loop-carried path.
 
-This is also exactly what auto-vectorization does *for* you when allowed (§13.5): packing 4 doubles into a `ymm` accumulator *is* four independent lanes. So accumulator splitting and SIMD (Ch. 37) are two faces of the same idea — and SoA layout (Ch. 10) is what makes both possible.
+This is also exactly what auto-vectorization does *for* you when allowed (§13.5): packing 4 doubles into a `ymm` accumulator *is* four independent lanes. So accumulator splitting and SIMD (Ch. 38) are two faces of the same idea — and SoA layout (Ch. 10) is what makes both possible.
 
 ---
 
@@ -244,7 +244,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 - **Optimizing a chain that isn't the bottleneck.** If you're memory-bound (Ch. 8) or mispredict-bound (Ch. 15), breaking dependency chains does nothing — top-down first (Ch. 2). Accumulator splitting is the cure for the *Core-Bound, latency* signature specifically.
 - **Counting instructions instead of finding the critical path.** "Fewer instructions" can be *slower* if they form a longer chain; "more instructions" (SIMD, split accumulators) can be faster (Ch. 4's warning, made precise). Reason about the dependency graph, then measure.
 - **Ignoring loop-carried dependencies you didn't notice.** A running pointer, a `prev` reference, a conditional that feeds the next iteration — hidden chains. Recompute from the index where possible to make iterations independent (§13.4.1).
-- **`div`/`sqrt` in a dependency chain.** A 13–18-cycle `div` (40–95 on Skylake-era cores) on the critical path dominates everything; hoist it, replace with reciprocal-multiply, or restructure so it's off the chain (Ch. 35–36).
+- **`div`/`sqrt` in a dependency chain.** A 13–18-cycle `div` (40–95 on Skylake-era cores) on the critical path dominates everything; hoist it, replace with reciprocal-multiply, or restructure so it's off the chain (Ch. 35–37).
 
 ---
 
@@ -265,7 +265,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 - [ ] Reductions use **multiple independent accumulators** (~latency × throughput of the chained op), combined at the end — not a single serial accumulator.
 - [ ] I verified in the **asm** (Ch. 4) that adds target **different registers** / `vaddpd`-style packed ops — not one chained `vaddsd`/register.
 - [ ] If I rely on the compiler to reassociate/vectorize FP, I **opted into `-ffast-math` knowingly** (Ch. 35) — or split manually for exact results.
-- [ ] I didn't **over-split** into register spills, and I kept high-latency ops (`div`/`sqrt`) **off** the critical path (Ch. 35–36).
+- [ ] I didn't **over-split** into register spills, and I kept high-latency ops (`div`/`sqrt`) **off** the critical path (Ch. 35–37).
 - [ ] I measured the **distribution/IPC** before and after, on a cache-resident working set so memory isn't a confound.
 
 ---
@@ -282,7 +282,7 @@ The lesson in three listings: **the dependency structure, not the instruction co
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical chapters on ILP, dependency chains, and using `llvm-mca`/`uiCA` to read a loop's critical path.
 - A. Fog, *Optimizing Software in C++*, the loop-carried-dependency-chain and multiple-accumulator sections — the canonical write-up of §13.4.2.
-- Ch. 14 (*Instruction Cache & Front-End*) — the front-end that must feed this back-end; Ch. 37 (*SIMD*) — accumulator splitting taken to its vector conclusion; Ch. 35 (*Fixed/Floating-Point*) — the `-ffast-math`/reassociation correctness trade-offs invoked in §13.5.
+- Ch. 14 (*Instruction Cache & Front-End*) — the front-end that must feed this back-end; Ch. 38 (*SIMD*) — accumulator splitting taken to its vector conclusion; Ch. 35 (*Fixed/Floating-Point*) — the `-ffast-math`/reassociation correctness trade-offs invoked in §13.5.
 - **Appendix E** — the cycle costs of FP/integer ops and the branch-mispredict penalty that frame "latency-bound."
 
 ---

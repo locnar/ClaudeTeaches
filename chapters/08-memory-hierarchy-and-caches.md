@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Part I (Ch. 1–7). You think in distributions (Ch. 1), can read PMU cache counters (Ch. 2 — `LLC-load-misses`, MPKI), benchmark honestly on a quiet, pinned, fixed-frequency box (Ch. 3, 6), and can read a hot loop in asm (Ch. 4). This chapter opens **Part II — CPU Microarchitecture** and is the foundation the rest of the part builds on.
 >
-> **Leads into:** Ch. 9 (the DRAM subsystem — what the "~80 ns" at the bottom of §8.2.1 actually is: bimodal, loaded, shared by channel), Ch. 10 (data-oriented layout — AoS vs SoA) and Ch. 11 (object layout, alignment, padding) apply this directly; Ch. 12 (software prefetch & non-temporal stores) extends it; Ch. 17 (TLB & huge pages) and Ch. 18 (NUMA) handle translation and multi-socket effects. The false-sharing flip side of coherence is Ch. 42. Reference costs are consolidated in **Appendix E**.
+> **Leads into:** Ch. 9 (the DRAM subsystem — what the "~80 ns" at the bottom of §8.2.1 actually is: bimodal, loaded, shared by channel), Ch. 10 (data-oriented layout — AoS vs SoA) and Ch. 11 (object layout, alignment, padding) apply this directly; Ch. 12 (software prefetch & non-temporal stores) extends it; Ch. 17 (TLB & huge pages) and Ch. 18 (NUMA) handle translation and multi-socket effects. The false-sharing flip side of coherence is Ch. 43. Reference costs are consolidated in **Appendix E**.
 
 ---
 
@@ -45,13 +45,13 @@ Memory is a **hierarchy** of progressively larger, slower, cheaper levels, each 
             │
             DRAM (local node ~80ns; remote NUMA node ~130ns+, Ch.18)
             │
-            (… and far below: NVMe/disk, Ch.104 — irrelevant to the hot path)
+            (… and far below: NVMe/disk, Ch.105 — irrelevant to the hot path)
 ```
 
 Two structural facts shape everything:
 
 - **Each level is roughly an order of magnitude larger and slower than the one above.** The hierarchy exists because fast memory is small and expensive; the design bet is that programs exhibit **locality**, so a small fast cache captures most accesses.
-- **L1 and L2 are private to a core; L3 is shared — across the socket on a monolithic die like the Ice Lake-SP reference machine, across one *L3 domain* (a CCD, a tile or an SNC node) on chiplet silicon (Ch. 19).** This sharing is what makes inter-core communication possible (Ch. 43–44) and also what makes coherence traffic and *false sharing* (Ch. 42) a thing. It also means another busy core on the socket can evict your data from L3 — a noisy-neighbor tail source that core pinning alone does not cure (Ch. 6, 18; partitioning the L3 with CAT is Ch. 56).
+- **L1 and L2 are private to a core; L3 is shared — across the socket on a monolithic die like the Ice Lake-SP reference machine, across one *L3 domain* (a CCD, a tile or an SNC node) on chiplet silicon (Ch. 19).** This sharing is what makes inter-core communication possible (Ch. 44–45) and also what makes coherence traffic and *false sharing* (Ch. 43) a thing. It also means another busy core on the socket can evict your data from L3 — a noisy-neighbor tail source that core pinning alone does not cure (Ch. 6, 18; partitioning the L3 with CAT is Ch. 57).
 
 The two forms of locality the hierarchy rewards:
 
@@ -65,7 +65,7 @@ Almost every technique in Ch. 8–12 is a way of manufacturing one of these two 
 The cache does not deal in bytes. Its unit of transfer and tracking is the **cache line** — **64 bytes** on all current x86-64 (and the value of `std::hardware_constructive_interference_size`; ARM may use 128, Appendix A). Three consequences you must internalize:
 
 1. **You always pay for 64 bytes.** Touch one `int`, and the hardware fetches the entire aligned 64-byte line containing it. If you'll use the other 60 bytes (sequential access), that fetch was an investment; if you won't (pointer-chasing, scattered access), it was 60 bytes of wasted bandwidth and a wasted cache slot. **Spatial locality is literally "use the rest of the line you already paid for."**
-2. **Alignment matters.** A 64-byte object straddling two lines costs two line fetches and two cache slots; the same object aligned to a line costs one. This is the lever behind Ch. 11 (alignment & padding) and Ch. 42 (false sharing).
+2. **Alignment matters.** A 64-byte object straddling two lines costs two line fetches and two cache slots; the same object aligned to a line costs one. This is the lever behind Ch. 11 (alignment & padding) and Ch. 43 (false sharing).
 3. **Bandwidth is counted in lines.** When you reason about whether the prefetcher or the memory bus can keep up, the currency is lines/second, not bytes or elements.
 
 **Associativity** governs *where* a line may live. A cache is divided into **sets**; a given memory address maps (by its middle address bits) to exactly one set, and within that set may occupy any of *N* **ways** (an *N-way set-associative* cache; e.g. L1 is often 8-way). The trap this creates is the **conflict miss**: if your access pattern repeatedly touches addresses that map to the *same set* — classically, striding by a large power of two (4 KiB, 2 MiB) — you can thrash a single set, evicting lines you still need, *even though the cache as a whole has plenty of free space elsewhere*. A power-of-two-strided loop or a power-of-two-sized 2D array can run far slower than a "+1" version for exactly this reason (§8.5; exercise 3 in §8.6). The defense is to avoid pathological power-of-two strides and alignments — sometimes deliberately *padding* an array to a non-power-of-two row width.
@@ -81,9 +81,9 @@ Because L1/L2 are private, the same cache line can sit in multiple cores' caches
 
 The rule that matters for latency: **a core that wants to *write* a line must first own it exclusively (M/E), which means *invalidating* every other core's copy.** When two cores repeatedly write the same line, they bounce ownership back and forth, each write forcing an invalidation and a cache-line transfer across the interconnect — a **HITM** ("hit-modified") event costing ~40–100+ ns (Appendix E). This is the mechanism behind:
 
-- **False sharing** (Ch. 42): two threads writing *different variables that happen to share one 64-byte line* suffer this ping-pong even though they share no data logically — one of the nastiest and most invisible scalability killers.
-- **Atomics and lock contention** (Ch. 39–43): every contended atomic is a coherence transaction; the cost of a spinlock or a CAS loop *is* coherence traffic.
-- The reason **single-writer designs** (Ch. 44, 99) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
+- **False sharing** (Ch. 43): two threads writing *different variables that happen to share one 64-byte line* suffer this ping-pong even though they share no data logically — one of the nastiest and most invisible scalability killers.
+- **Atomics and lock contention** (Ch. 40–44): every contended atomic is a coherence transaction; the cost of a spinlock or a CAS loop *is* coherence traffic.
+- The reason **single-writer designs** (Ch. 45, 100) and **per-core data** are so valued: no sharing, no coherence ping-pong, no HITM tail.
 
 For now the takeaway is conceptual: **shared writable data has a hardware cost measured in coherence traffic**, and a huge fraction of Part VI exists to minimize it.
 
@@ -173,8 +173,8 @@ Concretely, for the hot path:
 
 - **Count the bytes touched per event**, not the total data size. A 1 GiB order book is fine *if* a single update touches only a few cache-resident lines (the top-of-book and the affected level). What kills you is a working *set* — the lines touched per event — that exceeds a cache level.
 - **Shrink the per-event footprint.** Smaller structs (Ch. 11), hot/cold splitting so only hot fields are resident (Ch. 10), and removing pointer indirection (each pointer hop is a potential extra line and a prefetch-defeating dependency) all reduce the lines touched.
-- **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 85) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
-- **Mind L3 sharing.** L3 is shared across the socket (§8.2.1), so your *effective* L3 budget shrinks under noisy neighbors; core isolation (Ch. 6) does *not* protect it — partitioning the L3 with CAT/resctrl (Ch. 56) does.
+- **Block / tile** large sweeps so each block fits a cache level and is fully reused before moving on (the classic loop-blocking transform — turns a stream of capacity misses into cache hits). Relevant to batch/research code (Ch. 86) more than the tick path, but the principle — *reuse data while it's hot* (temporal locality) — is universal.
+- **Mind L3 sharing.** L3 is shared across the socket (§8.2.1), so your *effective* L3 budget shrinks under noisy neighbors; core isolation (Ch. 6) does *not* protect it — partitioning the L3 with CAT/resctrl (Ch. 57) does.
 
 The measurement loop: pick the data structure, measure its per-event footprint and its MPKI (Ch. 2), and if it's missing, shrink the footprint or improve locality until it fits.
 
@@ -196,7 +196,7 @@ The unifying idea: **make your access pattern predictable and contiguous**, and 
 - **Pointer chasing on the hot path.** The dominant anti-pattern. Linked lists, node-based maps/sets (`std::map`, `std::unordered_map`'s chains), trees of pointers — each hop is a data-dependent load that *defeats the prefetcher* and exposes full miss latency (§8.2.4, §8.3). Measured factors of 10–50× vs contiguous access are routine. Prefer flat, index-based, contiguous structures (Ch. 10, 32); this is the single biggest cache mistake in trading code.
 - **Conflict (associativity) misses.** A loop striding by a large power of two, or a 2D array with a power-of-two row width, maps repeatedly to the same cache set and thrashes it *despite the cache having free space* (§8.2.2). Symptom: a benchmark that's mysteriously slow at "nice round" sizes and fast at "+1" sizes. Fix: pad to a non-power-of-two stride; confirm with cache-miss counters that don't match the capacity-miss model.
 - **Ignoring the cache line / sub-line waste.** Touching one 4-byte field of a large struct in a tight loop fetches 64 bytes and uses 4 — 94% wasted bandwidth and cache. AoS where you needed SoA (Ch. 10). Symptom: high L1/L2 miss rate despite a "small" logical working set, because the *effective* footprint is 16× the useful data.
-- **False sharing.** Two threads writing different fields that share a cache line cause MESI ping-pong (§8.2.3) — invisible in the source, catastrophic in scaling. Full treatment and the `alignas(64)` fix in Ch. 42; flagged here so the coherence mechanism is on your radar.
+- **False sharing.** Two threads writing different fields that share a cache line cause MESI ping-pong (§8.2.3) — invisible in the source, catastrophic in scaling. Full treatment and the `alignas(64)` fix in Ch. 43; flagged here so the coherence mechanism is on your radar.
 - **Trusting the average, again.** A cache effect is a *tail* effect: most accesses hit, the misses spike. A mean hides it; the p99.9 and the `LLC-miss` MPKI reveal it (Ch. 1–2). "It's fast on average" usually means "it hits in the benchmark's warm L1" — the §8.3 and Ch. 3 trap.
 - **Benchmarking with an unrepresentative working set.** Measuring a hot loop over a 64-element array that lives in L1, when production touches 64 MiB — you measured the best case (Ch. 3 §3.2.1). Size the benchmark's working set to production, or you'll "optimize" a cache effect you never reproduced.
 
@@ -219,7 +219,7 @@ The unifying idea: **make your access pattern predictable and contiguous**, and 
 - [ ] My hot-path access is **sequential/contiguous and prefetcher-friendly**; I removed pointer chasing where I could (Ch. 32).
 - [ ] I **use the whole cache line** (SoA where the loop touches one field across objects — Ch. 10).
 - [ ] I avoided **power-of-two strides/alignments** that cause conflict misses.
-- [ ] I checked for **false sharing** on any line written by multiple threads (Ch. 42).
+- [ ] I checked for **false sharing** on any line written by multiple threads (Ch. 43).
 - [ ] I verified with **PMU cache counters** (L1/L2/LLC miss MPKI, Ch. 2) on a **production-sized working set** (Ch. 3) — and judged the **tail**, not the mean (Ch. 1).
 
 ---
@@ -236,7 +236,7 @@ The unifying idea: **make your access pattern predictable and contiguous**, and 
 
 - CppCon talks on data-oriented design and "mechanical sympathy" — Mike Acton, *"Data-Oriented Design and C++"* (CppCon 2014) and Stoyan Nikolov, *"OOP Is Dead, Long Live Data-oriented Design"* (CppCon 2018) — the practical mindset that Ch. 10 formalizes.
 - B. Gregg, *Systems Performance*, 2nd ed. — measuring memory/cache behavior with `perf` and PMU in production.
-- The `perf c2c` (cache-to-cache) tool documentation — pinpointing false sharing and HITM coherence traffic (Ch. 42).
+- The `perf c2c` (cache-to-cache) tool documentation — pinpointing false sharing and HITM coherence traffic (Ch. 43).
 - **Appendix E — Latency Numbers Every Trading Developer Should Know** — the consolidated, annotated cost table behind §8.1; and **Appendix A** for ARM/Graviton cache-line and hierarchy differences.
 
 ---
