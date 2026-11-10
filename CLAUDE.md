@@ -60,7 +60,7 @@ Code & content guidelines:
 > **Note:** this TOC is the *original, pre-reorganisation drafting order* (64 chapters + Appendices
 > A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
 > appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to 95 chapters in thirteen Parts and fifteen appendices (A–O), and then — with the modern-C++ depth chapters — to **98 chapters in thirteen Parts and sixteen appendices (A–P)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
-> *Status / Workflow* below), on 2026-11-10 (P3-6 batch B: the hardware/OS chapters) to 108 chapters in thirteen Parts and eighteen appendices (A–R), on 2026-11-10 (P3-6 batch C: the algorithms/data chapters) to 112 chapters in thirteen Parts and eighteen appendices (A–R), and on 2026-11-10 (P3-6 batch D1: the OS/hardware depth chapters) to **114 chapters in thirteen Parts and nineteen appendices (A–S)**. Do not renumber against this list. The **Appendices** entries (A–S)
+> *Status / Workflow* below), on 2026-11-10 (P3-6 batch B: the hardware/OS chapters) to 108 chapters in thirteen Parts and eighteen appendices (A–R), on 2026-11-10 (P3-6 batch C: the algorithms/data chapters) to 112 chapters in thirteen Parts and eighteen appendices (A–R), on 2026-11-10 (P3-6 batch D1: the OS/hardware depth chapters) to 114 chapters in thirteen Parts and nineteen appendices (A–S), and on 2026-11-10 (P3-6 batch D2: the trading-component, resilience, networking and numerics chapters) to **120 chapters in thirteen Parts and nineteen appendices (A–S)**. Do not renumber against this list. The **Appendices** entries (A–S)
 > at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
 > because the appendices themselves were written (or re-pointed) against that numbering.
 
@@ -476,7 +476,7 @@ Code & content guidelines:
   chapters and appendices A–S — see Phases 2–3, the six 2026-11-09 insertions and the three 2026-11-10 insertions below).
 - Phase 2 (done): all chapters drafted into `chapters/NN-slug.md` (appendices into
   `chapters/appendix-X-slug.md`), following the authoring conventions.
-  **STATUS: COMPLETE — front matter (`00-preface.md`) + 114 chapters + 19 appendices (A–S);
+  **STATUS: COMPLETE — front matter (`00-preface.md`) + 120 chapters + 19 appendices (A–S);
   Appendices A–G were drafted with the chapters, H–L were added afterwards (next bullet), M
   with the 2026-11-09 monitoring chapters, N with the 2026-11-09 debugging chapters, O with
   the 2026-11-09 design-pattern chapters, P with the 2026-11-09 modern-C++ depth chapters, Q–R with the
@@ -484,7 +484,7 @@ Code & content guidelines:
   **Appendices H–L added and fully drafted to the authoring conventions: H (C++23/26 feature
   matrix), I (tooling command cookbook), J (HFT market-structure primer), K (exchange
   connectivity / physical layer), L (reproducible benchmark & measurement harness). Total
-  now: front matter + 114 chapters + 19 appendices (A–S). Appendix H's version numbers (and the kernel
+  now: front matter + 120 chapters + 19 appendices (A–S). Appendix H's version numbers (and the kernel
   version table in H.7) and
   Appendix L's code should be verified against current toolchains as part of the Phase-4
   revision pass.**
@@ -506,26 +506,26 @@ Code & content guidelines:
   - **IV — Memory Management** (30–34): fundamentals, custom allocators, hot-path-hostile STL & cache-friendly
     containers (with §31.4.6 small-array search, P3-6C), limit order book engineering (Ch. 32, added 2026-11-10
     P3-6C), memory mapping.
-  - **V — Numerics & Data Parallelism** (35–38): fixed/floating point, bit tricks, SIMD, and streaming statistics &
+  - **V — Numerics & Data Parallelism** (35–40): fixed/floating point, bit tricks, SIMD, and streaming statistics &
     incremental signal computation (Ch. 37, added 2026-11-10 P3-6C).
-  - **VI — Concurrency** (39–51): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
+  - **VI — Concurrency** (41–53): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
     2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 42, P3-4), coroutines, `std::execution`,
     correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (52–60): context switching, timers & deadlines without jitter
+  - **VII — OS, Scheduling & Isolation** (54–62): context switching, timers & deadlines without jitter
     (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
     residual noise (Ch. 52, added 2026-11-09 P3-1), warming. Power management & frequency determinism is Ch. 54 (added 2026-11-10 P3-6B).
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (61–67): native I/O, io_uring, zero-copy fast path,
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (63–69): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP. The datapath anatomy chapter is Ch. 58 (added 2026-11-10 P3-6B).
-  - **IX — Market Data, NIC & Fabric** (68–77): decoding, text protocols on the hot path — branch-free parsing &
+  - **IX — Market Data, NIC & Fabric** (70–80): decoding, text protocols on the hot path — branch-free parsing &
     formatting (Ch. 68, added 2026-11-10 P3-6C), reliable multicast, multicast membership & dark-feed detection
     (Ch. 70), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (78–82): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (81–86): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (83–88): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
-  - **XII — Beyond C++: Languages at the Latency Floor** (89–93, added 2026-11-09 P3-3): hand-written
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (87–92): PCIe, userspace drivers & kernel modules (Ch. 84, added 2026-11-10 P3-6 D1), GPU, MPI, FPGA, SmartNICs.
+  - **XII — Beyond C++: Languages at the Latency Floor** (93–97, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (94–114): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (98–120): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
     topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
     kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
@@ -735,6 +735,39 @@ Code & content guidelines:
   74 → 99; 75 → 104; 76 → 114 (`stale_crossrefs.py`'s STEPS chain is extended by the two insertions). Also:
   `sweep.py`'s reference-machine checks re-pointed (Part II = 8–20, NUMA = 18); Appendix F/G/I/O entries; Ch. 8,
   17, 42, 43, 52, 68, 73, 79, 83 pointers.
+- **2026-11-10 trading/networking/numerics insertion (work-queue item P3-6 batch D2 — the last batch of item 19):**
+  six chapters were added with `insert_chapter.py` (six ascending insertions, one commit each — no new Part), all
+  measured on the 4-vCPU KVM guest with GCC 13.3 / Clang 18.1: **36** Fast Transcendentals & Approximate Math for
+  Pricing and Signals (G87, Part V after fixed/floating point), **38** Fast Hashing, Checksums & Key Design for the
+  Hot Path (G88, Part V after bit tricks — the brief preferred sections; the queue and the full measured shootout
+  plus the compile-time CHD perfect hash justified the chapter), **73** Multi-Venue Book Building, Normalization,
+  Symbology & Smart Order Routing (G54, Part IX after reliable multicast; the venue anatomy went to a new
+  **Appendix J.6** with J.6–J.9 → J.7–J.10), **86** Encrypted & Web-Protocol Venues and Trading in the Cloud (G57,
+  Part X after transport beyond TCP — closes Part X, whose upper bound was fixed by hand in the preface and the
+  Part-range line below; the cloud half is §86.4.6 pointing at Appendix S rather than the brief's separate
+  appendix), **107** The Quoting Engine & Market-Making Mechanics (G53, Part XIII after the gateway; a quote-pull
+  row was added to the capstone ledger §120.3) and **117** Case Study: The Exchange Simulator (G55, Part XIII
+  after the testing chapter, before CI — "beside the testing chapter" per the queue, "between capture and the
+  capstone" per the brief: both hold). Sections, following the briefs: Ch. 35 §35.4.4 + the §35.3 fill-update
+  block (G91); Ch. 67 §67.4.4 + Ch. 70 §70.2.5 (G64); Ch. 116 §116.4.7 + the Ch. 103 §103.3 hook + Appendix I.8
+  one-liners (G65 — sections, in the *testing* chapter rather than the brief's capstone §76.4.4 because the harness
+  and the CI gates moved out of the capstone in batches A/C); Ch. 68 §68.4.3 and Ch. 80 §80.4.5 + Ch. 62 bullet +
+  Appendix C.3 line (G84 — sections per the brief, not the queue's chapter); Ch. 80 §80.2 FEC/PAM4 table with the
+  "uniform and high" correction and §80.4.3 layer-1/FPGA switch uses, Ch. 75 §75.3 baseline recipe + §75.4.4–§75.4.5
+  (G85); Appendix K.3 RF-link expansion + Ch. 70 §70.4.3 bullet + Ch. 85 §85.4.4 pointer (G86); Ch. 109 §109.4.8 +
+  Appendix L.8 (G92 — RNG as **L.8** with L.8–L.9 → L.9–L.10, not the brief's L.5, to avoid re-pointing three
+  later sections); **Appendix K.8** regulation map and **K.9** site redundancy & DR (G58, G68 — K.8–K.9 References
+  → K.10–K.11; DR as K.9 after the trade-offs rather than the brief's K.7 so the K.8 regulation references already
+  written held) with Appendix F/E/C entries. Renumber map from the post-batch-D1 numbering: 1–35 unchanged; old
+  36 → 37; old 37–70 → 39–72; old 71–82 → 74–85; old 83–102 → 87–106; old 103–111 → 108–116; old 112–114 →
+  118–120. Composite from the Phase-3 numbering: 1–6 unchanged; 7 → 8; 8–16 → 10–18; 17–19 → 20–22; 20 → 24;
+  21 → 26; 22 → 27; 23–25 → 30–32; 26 → 34; 27 → 35; 28 → 37; 29 → 39; 30–37 → 41–48; 38–41 → 51–54; 42–45 →
+  56–59; 46 → 61; 47 → 63; 48–53 → 65–70; 54 → 72; 55 → 75; 56–65 → 76–85; 66 → 87; 67–70 → 89–92; 71 → 98;
+  72 → 101; 73 → 102; 74 → 103; 75 → 109; 76 → 120 (`stale_crossrefs.py`'s STEPS chain is extended by the six
+  insertions). Also: Appendix F/G/I/O/E entries, the Ch. 35/32/21/33/62/72/74/78/101/102/104/106/109/116/119/120
+  pointers. **Item P3-6 (work-queue item 19) is complete with this batch**: batches A, B, C, D1 and D2 delivered
+  every row of §10.6–§10.12 that was scheduled; the remaining work on the new chapters is the Phase-4 backfill of
+  reference-machine runs (every §N.3 in this batch is measured on the guest and labelled so).
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to

@@ -29,7 +29,7 @@ The minimal, correct micro-benchmark — defeating dead-code elimination (Ch. 3)
      std::size_t i = 0;
 
      for (auto _ : state) {                       // <-- only THIS loop is timed
-       auto& m = msgs[i++ & (msgs.size() - 1)];   // pow2 mask, no modulo (Ch. 36)
+       auto& m = msgs[i++ & (msgs.size() - 1)];   // pow2 mask, no modulo (Ch. 37)
        auto bbo = book.apply(m);                  // the operation under measurement
        benchmark::DoNotOptimize(bbo);             // force the result to be "used"
        benchmark::ClobberMemory();                // force pending writes to memory
@@ -81,7 +81,7 @@ Google Benchmark reports the *loop's* mean; a trading system lives or dies on th
                  (long long)hdr_max(h));
    }
 
-   // `warm` is applied untimed first (Ch. 60). `msgs` is the timed capture, applied ONCE — a
+   // `warm` is applied untimed first (Ch. 62). `msgs` is the timed capture, applied ONCE — a
    // bounded add/cancel sequence so book depth stays representative, not a cyclic replay of
    // adds that grows the book without end. `interval_ns` is the real feed's inter-arrival
    // time: the SCHEDULE the response-time question is asked against.
@@ -106,7 +106,7 @@ Google Benchmark reports the *loop's* mean; a trading system lives or dies on th
      // be — each recording its own, progressively shorter, wait. Nothing is synthesized.
      int64_t intended = now_ns();
      for (const auto& m : msgs) {
-       while (now_ns() < intended) _mm_pause();   // pace: spin, don't sleep (Ch. 41)
+       while (now_ns() < intended) _mm_pause();   // pace: spin, don't sleep (Ch. 43)
        const int64_t start = now_ns();
        benchmark::DoNotOptimize(book.apply(m));
        const int64_t end = now_ns();
@@ -135,7 +135,7 @@ Google Benchmark reports the *loop's* mean; a trading system lives or dies on th
 
 Doing both — pacing *and* back-filling — counts every queued event twice (once as its own late sample, once synthesized from the stall that delayed it); and recording `end − start` *and* a corrected value into one histogram mixes service time, response time and synthetic samples into percentiles that mean nothing. (An earlier draft of this listing did exactly that: after one op the histogram held two samples. The pre-trust checklist in L.4 now asks you to check `total_count` for that reason.)
 
-**Reading the result.** With no stall the two histograms nearly coincide: `response` ≈ `service` plus the pacing spin's overshoot, a few tens of nanoseconds of `clock_gettime` granularity. After a stall of *S*, `service` shows one sample of *S* at the max and a p99.9 that barely moves; `response` shows roughly *S* / `interval_ns` samples spread from *S* down toward zero, and its p99.9 jumps — the tail the real feed experiences. If `service` p50 exceeds `interval_ns`, the loop can never catch up and `response` grows without bound: the harness is telling you the handler cannot sustain that feed rate, which is the "can we keep up at 09:30" answer (Ch. 3), not a measurement error. Better than a constant interval is the capture's own arrival timestamps as the schedule (Ch. 104), which reproduces the feed's bursts. Timestamp with `rdtscp` (Ch. 20) if `clock_gettime` overhead or resolution is significant relative to the op or to the interval.
+**Reading the result.** With no stall the two histograms nearly coincide: `response` ≈ `service` plus the pacing spin's overshoot, a few tens of nanoseconds of `clock_gettime` granularity. After a stall of *S*, `service` shows one sample of *S* at the max and a p99.9 that barely moves; `response` shows roughly *S* / `interval_ns` samples spread from *S* down toward zero, and its p99.9 jumps — the tail the real feed experiences. If `service` p50 exceeds `interval_ns`, the loop can never catch up and `response` grows without bound: the harness is telling you the handler cannot sustain that feed rate, which is the "can we keep up at 09:30" answer (Ch. 3), not a measurement error. Better than a constant interval is the capture's own arrival timestamps as the schedule (Ch. 109), which reproduces the feed's bursts. Timestamp with `rdtscp` (Ch. 20) if `clock_gettime` overhead or resolution is significant relative to the op or to the interval.
 
 **Self-test the bookkeeping before trusting it.** Stand a stub in for `book.apply` that sleeps for 2 ms once every 100,000th call, run 1,000,000 events at `interval_ns = 1000`, and check the arithmetic, not the hardware: both `n` must equal 1000000 and `dropped` must be 0; `service` must show the stall only at `max` (≈ 2 ms) with p99 and p99.9 at the no-stall level; `response` must show it in the tail — ten stalls × (2 ms / 1 µs) = 20,000 late samples, 2% of all events, spread evenly from 2 ms down to zero, so p99 lands near 1 ms and p99.9 near 2 ms. Run against HdrHistogram_c on a 4-vCPU Intel Xeon VM (not the reference machine — only the bookkeeping is being checked), g++ 13.3 `-std=c++23 -O2 -march=native`, kernel 6.18, pinned with `taskset -c 2`:
 
@@ -154,8 +154,8 @@ A benchmark is only reproducible if the *machine state* is controlled — otherw
 **Reference toolchain and machine.** Every representative number in this book is stated for one box and one toolchain unless its results block says otherwise, and every "Measure it" section either names these facts or cites this paragraph ("Appendix L.3"):
 
 - **CPU:** Intel **Xeon Gold 6326** (Ice Lake-SP, Sunny Cove cores) — 16 cores / 32 threads, 2.90 GHz base, 3.50 GHz max turbo; 48 KiB L1d + 32 KiB L1i and 1.25 MiB L2 per core; 24 MiB L3 shared across the socket (16 × 1.5 MiB slices, 12-way); L1d load-to-use 5 cycles, L2 ~14 cycles, L3 ~45–70 cycles depending on slice distance, local DRAM ~80–100 ns; 8× DDR4-3200 per socket; PCIe 4.0. **Single socket** everywhere except the NUMA chapter (Ch. 18), which uses a **dual-socket 2× 6326** (32C/64T, two NUMA nodes).
-- **SMT numbering:** Linux enumerates the single-socket box as CPUs 0–31 with the sibling of CPU *n* at *n*+16 (`0,16`, `2,18`); the dual-socket box puts it at *n*+32 (`2,34`). Always read `thread_siblings_list` rather than assuming `+N` (Ch. 55).
-- **Frequency and idle policy:** `performance` governor, turbo **off** (`/sys/devices/system/cpu/intel_pstate/no_turbo = 1`), C-states capped at C1, so a pinned core runs at the 2.9 GHz base. The two experiments that need turbo say so in their block (Ch. 20's `cycles` vs `ref-cycles` run, Ch. 37's AVX-512 downclock table).
+- **SMT numbering:** Linux enumerates the single-socket box as CPUs 0–31 with the sibling of CPU *n* at *n*+16 (`0,16`, `2,18`); the dual-socket box puts it at *n*+32 (`2,34`). Always read `thread_siblings_list` rather than assuming `+N` (Ch. 57).
+- **Frequency and idle policy:** `performance` governor, turbo **off** (`/sys/devices/system/cpu/intel_pstate/no_turbo = 1`), C-states capped at C1, so a pinned core runs at the 2.9 GHz base. The two experiments that need turbo say so in their block (Ch. 20's `cycles` vs `ref-cycles` run, Ch. 39's AVX-512 downclock table).
 - **ns ↔ cycles:** at 2.9 GHz, **1 cycle = 0.345 ns and cycles ≈ ns × 2.9** — the conversion basis for every table in the book, Appendix E included.
 - **Kernel:** **Linux 6.18 (LTS)**, `mitigations=auto` (KPTI on) unless a block says `mitigations=off`, THP `madvise`, `isolcpus`/`nohz_full`/`rcu_nocbs` per Appendix C wherever a chapter pins to an isolated core; `perf` is the kernel's own.
 - **Compilers and library:** **GCC 14.2** (libstdc++ 14, glibc 2.39) and **Clang 18.1** (libc++ 18); `-std=c++20` by default and `-std=c++23` where a chapter uses a C++23 library feature (Appendix H); `-O2 -march=native` (`-march=icelake-server` on this box) unless the listing's `// Build:` line says otherwise. Results blocks that name GCC 13 / 13.3 record the release their listing was last rebuilt and checked with during the 2026-11 revision pass; the Phase-4 measurement pass re-runs everything under the versions above. The `§N.5 Verify the codegen` snippets are Clang 18.1 output unless labelled GCC.
@@ -164,7 +164,7 @@ The Preface carries the one-paragraph version of this statement; this is the one
 
 ```
    # 1. Pin to an isolated core (Appendix C) and raise priority, off the SMT sibling:
-   taskset -c 3 chrt -f 80 ./bench ...          # one core, RT prio, sibling left idle (Ch. 54-55)
+   taskset -c 3 chrt -f 80 ./bench ...          # one core, RT prio, sibling left idle (Ch. 56-57)
 
    # 2. Freeze frequency so the clock doesn't ramp/throttle mid-run (Ch. 6):
    sudo cpupower frequency-set -g performance
@@ -181,14 +181,14 @@ The Preface carries the one-paragraph version of this statement; this is the one
    #    CPU (lscpu), kernel (uname -r), compiler (g++ --version), flags, date.
 ```
 
-**What each buys** (Ch. 3, 6): pinning stops the scheduler migrating the thread mid-measurement (a migration is a cold cache and a new tail); `performance` governor + no-turbo stops the clock changing under you (a benchmark that warms up into turbo then thermally throttles is unrepeatable); NUMA binding stops a stray remote-DRAM allocation adding a fixed penalty (Ch. 18); and `perf stat` alongside gives you *why* — an IPC or cache-miss change explains a latency change (Appendix I.2). an **explicit** Google Benchmark warm-up — `--benchmark_min_warmup_time=1` or `->MinWarmUpTime(1.0)` (v1.7+; the default is 0 s, so by default *nothing* is discarded beyond the short calibration runs that size the iteration count, which is not a controlled warm-up) — plus an explicit cache/branch-predictor warm of your data structure (Ch. 60) put you in steady state before the first recorded sample. Always emit the **metadata block** — a number without its CPU/kernel/compiler/flags is not reproducible and, per the authoring conventions, not publishable.
+**What each buys** (Ch. 3, 6): pinning stops the scheduler migrating the thread mid-measurement (a migration is a cold cache and a new tail); `performance` governor + no-turbo stops the clock changing under you (a benchmark that warms up into turbo then thermally throttles is unrepeatable); NUMA binding stops a stray remote-DRAM allocation adding a fixed penalty (Ch. 18); and `perf stat` alongside gives you *why* — an IPC or cache-miss change explains a latency change (Appendix I.2). an **explicit** Google Benchmark warm-up — `--benchmark_min_warmup_time=1` or `->MinWarmUpTime(1.0)` (v1.7+; the default is 0 s, so by default *nothing* is discarded beyond the short calibration runs that size the iteration count, which is not a controlled warm-up) — plus an explicit cache/branch-predictor warm of your data structure (Ch. 62) put you in steady state before the first recorded sample. Always emit the **metadata block** — a number without its CPU/kernel/compiler/flags is not reproducible and, per the authoring conventions, not publishable.
 
 ## L.4 The pre-trust checklist
 
 Before believing a benchmark number — the questions Ch. 3 says to ask, in order:
 
 - [ ] **Is dead-code elimination defeated?** `DoNotOptimize`/`ClobberMemory` present; a suspiciously-fast result (sub-nanosecond, zero-cost) means the loop was optimized away (L.1, Ch. 3).
-- [ ] **Was it warmed up?** An explicit warm-up phase (`MinWarmUpTime` — Google Benchmark discards nothing by default), caches/TLB/branch predictor in steady state (Ch. 60). A cold first sample is a different measurement (Ch. 60 — warm vs. cold tail).
+- [ ] **Was it warmed up?** An explicit warm-up phase (`MinWarmUpTime` — Google Benchmark discards nothing by default), caches/TLB/branch predictor in steady state (Ch. 62). A cold first sample is a different measurement (Ch. 62 — warm vs. cold tail).
 - [ ] **Is frequency pinned?** `performance` governor, turbo decision made and documented (L.3, Ch. 6) — otherwise variance is clock, not code.
 - [ ] **Enough samples for the tail you claim?** p99.9 needs ≫1000 samples to be stable; don't quote a percentile the sample count can't support (Ch. 3).
 - [ ] **Measured against a baseline?** Report *relative* to a control, not an absolute you can't reproduce elsewhere (Ch. 3) — "1.8× faster than the `std::map` version on this box" beats "42 ns."
@@ -201,20 +201,20 @@ Before believing a benchmark number — the questions Ch. 3 says to ask, in orde
 
 Passing this checklist is what turns "this is faster" into *evidence* — the standard every performance claim in this book is held to.
 
-## L.5 Benchmarking across languages (the Ch. 93 protocol)
+## L.5 Benchmarking across languages (the Ch. 97 protocol)
 
-Everything above is C++; Ch. 93 §93.2.3 extends it to a cross-language comparison, and the extension is four rules on top of L.1–L.4:
+Everything above is C++; Ch. 97 §97.2.3 extends it to a cross-language comparison, and the extension is four rules on top of L.1–L.4:
 
 1. **Same box, same core, same frequency state, nothing else running** — including the previous language's build daemon (`dotnet build-server shutdown`); the Appendix C quiet box, `taskset -c N`, governor and turbo fixed.
-2. **Same replayed capture, same work, same digest** — every implementation reads the same capture (Ch. 104) and folds every result into a 64-bit digest it prints; unequal digests void the row (Ch. 93 §93.4.6).
-3. **Warm and cold in separate windows** — pass 1 split at 1 k / 10 k / 100 k / 1 M messages, passes 2–3 whole; report the cold window and the steady state side by side and never compare one language's steady state with another's warm-up (a JIT's first hundred calls are 350× its steady state — Ch. 92 §92.3).
-4. **Each toolchain's sink and its asm** — `benchmark::DoNotOptimize`/`asm volatile("" : "+r"(x))` (C++, Ch. 89 §89.2.3), `std::hint::black_box` (Rust), `std.mem.doNotOptimizeAway` (Zig), JMH `Blackhole.consume` (Java), BenchmarkDotNet `Consumer`/`GC.KeepAlive` (.NET), a package-level sink (Go), `Sys.opaque_identity` (OCaml); and the per-toolchain "verify the codegen" step of Appendix I.11, so a deleted, hoisted or differently-inlined loop is caught before the number is believed.
+2. **Same replayed capture, same work, same digest** — every implementation reads the same capture (Ch. 109) and folds every result into a 64-bit digest it prints; unequal digests void the row (Ch. 97 §97.4.6).
+3. **Warm and cold in separate windows** — pass 1 split at 1 k / 10 k / 100 k / 1 M messages, passes 2–3 whole; report the cold window and the steady state side by side and never compare one language's steady state with another's warm-up (a JIT's first hundred calls are 350× its steady state — Ch. 96 §96.3).
+4. **Each toolchain's sink and its asm** — `benchmark::DoNotOptimize`/`asm volatile("" : "+r"(x))` (C++, Ch. 93 §93.2.3), `std::hint::black_box` (Rust), `std.mem.doNotOptimizeAway` (Zig), JMH `Blackhole.consume` (Java), BenchmarkDotNet `Consumer`/`GC.KeepAlive` (.NET), a package-level sink (Go), `Sys.opaque_identity` (OCaml); and the per-toolchain "verify the codegen" step of Appendix I.11, so a deleted, hoisted or differently-inlined loop is caught before the number is believed.
 
-Report medians of *R* runs per row with the toolchain versions and flags in the header (Ch. 93 §93.3 is the worked example: nine toolchains, one kernel, one table), add the L.2 tail-latency variant for any row whose runtime can pause (Ch. 92), and state the box — numbers from a VM are not the reference machine's.
+Report medians of *R* runs per row with the toolchain versions and flags in the header (Ch. 97 §97.3 is the worked example: nine toolchains, one kernel, one table), add the L.2 tail-latency variant for any row whose runtime can pause (Ch. 96), and state the box — numbers from a VM are not the reference machine's.
 
-## L.6 Benchmarks as tests: the CI skeleton (Ch. 112)
+## L.6 Benchmarks as tests: the CI skeleton (Ch. 118)
 
-The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline compares against a stored baseline with the statistics of Ch. 112 §112.4.2. The skeleton, for a CMake/CTest project:
+The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline compares against a stored baseline with the statistics of Ch. 118 §118.4.2. The skeleton, for a CMake/CTest project:
 
 ```
    # CMakeLists.txt — benchmarks are tests with a label; the per-PR job runs the label, the nightly runs everything on the tuned box
@@ -225,29 +225,29 @@ The L.1–L.4 harness becomes a *gate* when its output is an artefact a pipeline
 
    # per-PR job (shared runner class R):
    ctest -L perpr --output-on-failure                                                     # produces bench/*.json
-   perf stat -e instructions:u,branches:u -r 10 -x, ./bench_book --benchmark_filter=Update --benchmark_min_time=0.1s 2> bench/book.counters   # deterministic proxy (Ch. 112 §112.4.3)
+   perf stat -e instructions:u,branches:u -r 10 -x, ./bench_book --benchmark_filter=Update --benchmark_min_time=0.1s 2> bench/book.counters   # deterministic proxy (Ch. 118 §118.4.3)
    python3 tools/compare.py benchmarks baseline/R/<last-green-rev>/book.json bench/book.json --no-color > bench/book.compare   # Mann–Whitney per benchmark (Ch. 3 §3.4.4)
    ./perfgate --aa baseline/R/aa.json --base baseline/R/<last-green-rev>/book.json --cand bench/book.json --stat p50,p99 \
-              --min-effect-from-aa 1.5 --alpha 0.001 > bench/book.gate.json                                             # bootstrap CI vs A/A tolerance + rank test → PASS/FAIL (Ch. 112 §112.4.2)
+              --min-effect-from-aa 1.5 --alpha 0.001 > bench/book.gate.json                                             # bootstrap CI vs A/A tolerance + rank test → PASS/FAIL (Ch. 118 §118.4.2)
 
    # artefact layout (keyed by revision AND runner class; a runner change starts a new series and a new A/A table):
-   baseline/<runner-class>/aa.json                  the A/A table: per-statistic spread of R runs of one binary (Ch. 112 §112.4.1); re-measured weekly
+   baseline/<runner-class>/aa.json                  the A/A table: per-statistic spread of R runs of one binary (Ch. 118 §118.4.1); re-measured weekly
    baseline/<runner-class>/<rev>/<bench>.json        Google Benchmark JSON (per-repetition samples, not just aggregates)
    baseline/<runner-class>/<rev>/<bench>.counters    perf stat -x, output
-   baseline/<runner-class>/<rev>/<bench>.gate.json   the verdict line Ch. 112 §112.4.2 emits; the trend view reads these
+   baseline/<runner-class>/<rev>/<bench>.gate.json   the verdict line Ch. 118 §118.4.2 emits; the trend view reads these
 
    # nightly (tuned box, Appendix C; reserved for the gate):
    cyclictest -q -D 60 -p 90 -m -h 100 | tail -3                                           # quiet-box precondition (Appendix C.7, Appendix M.3)
    ctest -L bench                                                                           # all benchmarks, the L.2 tail variant included
-   ./replay --speed 1 --pacer spin --capture captures/open-<id>.pcapng --target <box>   # the open onto the wire (Ch. 105 §105.4.3)
-   ./perfgate --aa baseline/tuned/aa.json --base baseline/tuned/median-of-last-7/ --cand nightly/<rev>/ --stat p50,p99,p99.9 --per-stage   # per §114.3 stage
+   ./replay --speed 1 --pacer spin --capture captures/open-<id>.pcapng --target <box>   # the open onto the wire (Ch. 110 §110.4.3)
+   ./perfgate --aa baseline/tuned/aa.json --base baseline/tuned/median-of-last-7/ --cand nightly/<rev>/ --stat p50,p99,p99.9 --per-stage   # per §120.3 stage
 ```
 
-Two rules the skeleton encodes. **The sample, not the summary, is the artefact**: `--benchmark_report_aggregates_only=false` keeps every repetition so the bootstrap can resample them; aggregates alone cannot be gated honestly. **Tolerances come from `aa.json`, never from the YAML**: `--min-effect-from-aa 1.5` sets each statistic's minimum effect to 1.5× its A/A spread on that runner class, so the gate's promise ("catches +3 ns on the median, +6 ns on p99, nothing on p99.9 here") is a measured fact about the runner. The L.2 harness's two histograms feed the same gate for the tail variant, and the nightly's per-stage comparison is Ch. 114 §114.4.1's gate with Ch. 112 §112.4.4's operating procedure.
+Two rules the skeleton encodes. **The sample, not the summary, is the artefact**: `--benchmark_report_aggregates_only=false` keeps every repetition so the bootstrap can resample them; aggregates alone cannot be gated honestly. **Tolerances come from `aa.json`, never from the YAML**: `--min-effect-from-aa 1.5` sets each statistic's minimum effect to 1.5× its A/A spread on that runner class, so the gate's promise ("catches +3 ns on the median, +6 ns on p99, nothing on p99.9 here") is a measured fact about the runner. The L.2 harness's two histograms feed the same gate for the tail variant, and the nightly's per-stage comparison is Ch. 120 §120.4.1's gate with Ch. 118 §118.4.4's operating procedure.
 
 ## L.7 The core-to-core map: placement input for every pinned pair (Ch. 19)
 
-Every two-thread measurement in the book — the SPSC and MPMC queues (Ch. 43), the seqlock (Ch. 44), the Disruptor (Ch. 46), the shared-memory rings (Ch. 65), the futex and signal round-trips (Ch. 52) — is pinned to "two cores," and on chiplet or multi-tile silicon *which* two changes the answer by 4–5× (Ch. 19 §19.2.3). The harness below is Ch. 19 §19.3's `c2c.cpp` in the form the kit keeps it: run it **once per box and firmware mode** (NPS/SNC setting, SMT on/off, clock pinned per §L.3) before any pair measurement, store the matrix next to the metadata block, and quote the pair's one-way latency with every two-core result ("cores 4/5, same CCD, 19 ns one-way").
+Every two-thread measurement in the book — the SPSC and MPMC queues (Ch. 45), the seqlock (Ch. 46), the Disruptor (Ch. 48), the shared-memory rings (Ch. 67), the futex and signal round-trips (Ch. 54) — is pinned to "two cores," and on chiplet or multi-tile silicon *which* two changes the answer by 4–5× (Ch. 19 §19.2.3). The harness below is Ch. 19 §19.3's `c2c.cpp` in the form the kit keeps it: run it **once per box and firmware mode** (NPS/SNC setting, SMT on/off, clock pinned per §L.3) before any pair measurement, store the matrix next to the metadata block, and quote the pair's one-way latency with every two-core result ("cores 4/5, same CCD, 19 ns one-way").
 
 ```
    # 1. Pin the clock and quiet the box exactly as for any benchmark (§L.3), then map every CPU pair:
@@ -257,21 +257,44 @@ Every two-thread measurement in the book — the SPSC and MPMC queues (Ch. 43), 
    # 3. Pick the pair for the measurement FROM the map (same block, not SMT siblings), and record it:
    taskset -c 4,5 ./spsc_bench ...        # "cores 4/5: same CCD, 19.1 ns one-way (c2c 2026-11-10)"
    # 4. For a pre-trust check of a chiplet box: the map's block structure must match the recorded one;
-   #    a ±15 % level shift is a clock/firmware change (Ch. 59), a changed block structure is a NPS/SNC change.
+   #    a ±15 % level shift is a clock/firmware change (Ch. 61), a changed block structure is a NPS/SNC change.
 ```
 
 The protocol (Ch. 19 §19.3): two threads, one fresh cache line per pair, strict alternation (A writes 2*k*+1 and spins for 2*k*+2, B the reverse), 16 chunks of *N*/16 round trips, the **median** chunk reported as one-way = round-trip ÷ 2. A pair's number is only comparable to another box's at the same core clock, because the spin loop and the L2 lookup are core-clocked while the fabric is not — the §L.3 pinning applies. The ASCII heat-map the harness prints is relative to the run's own min/max; read the `min … max` header line before the picture, and note that on a VM the map is the *only* topology information you can trust (the virtual `lscpu` is whatever the hypervisor claims — Ch. 19 §19.3's guest run shows four vCPUs in one ~62 ns block).
 
 What goes in the results block alongside §L.3's metadata: the two CPUs, their L3 domain (from step 2), the one-way latency from the map, and the map file's name. A two-core number without its pair is a number without a machine.
 
-## L.8 References
+## L.8 Generating inputs: PRNG choice, seeding, and keeping the generator out of the timed region
+
+Every harness in the book draws random inputs — keys, prices, indices, delays — and most of them use `std::mt19937` without comment. Three rules, with the numbers that justify them (`rng.cpp`, the 4-vCPU KVM guest, GCC 13.3, `-O2 -march=native`):
+
+```
+generator                        cycles/draw    state       notes
+std::mt19937_64                     3.8        2,504 B     fine, but 2.5 KB of state evicts the thing you are measuring
+std::mt19937 (32-bit)               3.5        5,000 B
+splitmix64                          1.0            8 B     the seeder; also a fine generator for inputs
+xoshiro256**                        2.7           32 B     the default: fast, tiny, passes BigCrush
+PCG64 (XSL-RR 128/64)               4.6           32 B     128-bit multiply per draw
+wyrand                              1.5            8 B
+Philox4x32-10 (per 128-bit block)  23.9            8 B     counter-based: reproducible parallel streams (Ch. 89 §89.4.3)
+rdrand64                          120              0       hardware entropy: seeds only, never per draw
+rdseed64                        2,920              0
+bounded integer in [0, 1000):   x % n  3.7   Lemire multiply-shift 2.9   nearly-divisionless 3.0   uniform_int_distribution 3.0
+doubles:  (x >> 11) * 2^-53  3.6     std::normal_distribution 20.3     sum of 12 uniforms 36.1
+```
+
+1. **Pre-generate outside the timed region.** The generator's cost (1–5 cycles) and, worse, its *state* (2.5 KB for `mt19937_64` — 40 cache lines competing with the data structure under test) belong outside the measurement: fill an input array before the loop (the L.1 skeleton's fixture), size it so it is L1-resident or deliberately not (whichever the experiment is about), and read it with a stride the prefetcher does not predict if the point is random access. A `% n` *inside* the loop is a 20–40-cycle `div`; use Lemire's multiply-shift (`(uint64_t)(((__uint128_t)x * n) >> 64)`, biased by 2⁻⁶⁴ — fine for inputs) or the nearly-divisionless rejection variant when exactness matters.
+2. **Seed deterministically and record the seed.** A fixed seed per run (`splitmix64(seed)` to expand one 64-bit seed into any generator's state) makes a benchmark reproducible and a failing property test (Ch. 116) shareable; `rdseed`/`getrandom` are for *choosing* the seed once (and for keyed hashes — Ch. 38 §38.4.6), never for draws. Record the seed, the generator and its version in the run's manifest (L.4): `std::normal_distribution`'s algorithm is not specified by the standard and differs between libstdc++ and libc++ (Ch. 1 §1.3's caveat), so a harness that must agree across toolchains uses its own transform (a Ziggurat or an inverse-CDF table — Ch. 117 §117.4.4's sampler is 3.7 cycles and bit-exact everywhere).
+3. **Reproducible parallel streams.** For Monte-Carlo on many threads or a GPU (Ch. 89), do not split one sequential stream: use a **counter-based** generator (Philox, Threefry — `curand`'s and Random123's) where output *k* of stream *s* is a pure function `f(key = s, counter = k)`, so path *k* is the same number on every machine, thread count and run — or jump-ahead functions (`xoshiro256**::jump()`) for a fixed number of streams. The engine's own randomness (backoff jitter — Ch. 43 §43.4.2; order randomization; a venue's randomized uncross) is *input* to the deterministic core (Ch. 103 §103.2.2): drawn by the shell from a seeded generator, journaled, replayed.
+
+## L.9 References
 
 - **Google Benchmark** documentation and User Guide — `benchmark::State`, `DoNotOptimize`/`ClobberMemory`, arguments/ranges, reporters and JSON output (L.1).
 - **Gil Tene** on **coordinated omission** ("How NOT to Measure Latency" talk) and **HdrHistogram** (the `HdrHistogram` and `HdrHistogram_c` libraries) — the basis of L.2; `hdr_histogram.h` documents the record-and-back-fill semantics of `hdr_record_corrected_value` and the false-return-on-out-of-range behaviour of `hdr_record_value` that L.2 relies on.
-- Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 20 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 60 (warming) — the warm-vs-cold discipline in L.3.
+- Ch. 3 (*Micro-benchmarking Done Right*) — the method this scaffold implements; Ch. 20 (TSC/`rdtscp`) — the timestamp source for L.2; Ch. 62 (warming) — the warm-vs-cold discipline in L.3.
 - The `perf`, `taskset`, `chrt`, `cpupower`, `numactl` man pages (Appendix I) — the environment controls of L.3.
 
-## L.9 Additional Reading
+## L.10 Additional Reading
 
 - **Appendix I** (Tooling Command Cookbook) — the `perf stat`/pinning/`objdump` commands to run *alongside* a benchmark so the counters explain the timing.
 - **Appendix C** (System Tuning Checklist) — the box-level setup (isolation, governor, C-states) that makes a benchmark host quiet enough to trust.

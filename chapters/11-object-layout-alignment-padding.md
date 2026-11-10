@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (cache lines are 64 bytes; you pay per line) and Ch. 10 (layout decides the miss rate; hot/cold splitting). This chapter zooms from the *collection* to the *individual struct*: how big it really is, why, and how to control it. Ch. 4 (reading asm) is used directly in §11.5.
 >
-> **Leads into:** Ch. 12 (prefetch/non-temporal stores) and the order-book case study (Ch. 32) consume these sizing decisions; the cache-line-alignment idea here becomes the *false-sharing* fix in Ch. 42 (`alignas(64)`, `hardware_destructive_interference_size`). Atomics alignment ties to Ch. 39. ARM's different cache-line size is Appendix A.
+> **Leads into:** Ch. 12 (prefetch/non-temporal stores) and the order-book case study (Ch. 32) consume these sizing decisions; the cache-line-alignment idea here becomes the *false-sharing* fix in Ch. 44 (`alignas(64)`, `hardware_destructive_interference_size`). Atomics alignment ties to Ch. 41. ARM's different cache-line size is Appendix A.
 
 ---
 
@@ -14,7 +14,7 @@ Ch. 10 taught you to put only the hot fields in the hot struct. This chapter is 
 
 The mechanism is **alignment** (§11.2). Each scalar type has an alignment requirement, the compiler must place each member at a properly-aligned offset, and it inserts *padding* bytes to make that happen — plus tail padding so arrays of the struct keep every element aligned. The amount of padding depends on **the order you declared the members**. The exact same fields, reordered, can shrink a struct from 24 bytes to 16 — a free 33% cut to the hot-path footprint, no logic changed, just declaration order.
 
-Why this matters at HFT scale: layout (Ch. 10) and sizing (this chapter) compound. If your order-book `LevelHot` is 24 bytes, two-and-a-fraction fit per 64-byte line; squeeze it to 16 and four fit per line — *halving* the lines touched by the book-update sweep, halving the effective footprint, doubling how much of the book stays in L1. The same reasoning, inverted, is why **over**-alignment matters too: a value that must not share a cache line with another thread's writes (Ch. 42) needs `alignas(64)`, deliberately *adding* padding to buy isolation. Padding is a tool — silent padding is a bug; deliberate padding is a technique. This chapter teaches you to *see* it (§11.3), eliminate the wasteful kind (§11.4.1), and add the useful kind (§11.4.2).
+Why this matters at HFT scale: layout (Ch. 10) and sizing (this chapter) compound. If your order-book `LevelHot` is 24 bytes, two-and-a-fraction fit per 64-byte line; squeeze it to 16 and four fit per line — *halving* the lines touched by the book-update sweep, halving the effective footprint, doubling how much of the book stays in L1. The same reasoning, inverted, is why **over**-alignment matters too: a value that must not share a cache line with another thread's writes (Ch. 44) needs `alignas(64)`, deliberately *adding* padding to buy isolation. Padding is a tool — silent padding is a bug; deliberate padding is a technique. This chapter teaches you to *see* it (§11.3), eliminate the wasteful kind (§11.4.1), and add the useful kind (§11.4.2).
 
 The discipline: **never assume `sizeof` — measure it, and know why it is what it is.**
 
@@ -52,9 +52,9 @@ Good (16B):  [b b b b b b b b][a][c][pad x6]
 ### 11.2.2 `alignof`/`alignas`; natural vs over-alignment (SIMD, cache-line)
 
 - **`alignof(T)`** queries a type's alignment; **`alignas(N)`** *raises* it (you can't lower alignment below natural with `alignas`). **Natural alignment** is the type's default (matches its size for scalars); **over-alignment** is asking for more than natural, for two hot-path reasons:
-  - **SIMD:** AVX wants 32-byte-aligned, AVX-512 64-byte-aligned loads/stores for the aligned (`vmovdqa`) path and to avoid cache-line-split penalties (Ch. 37). `alignas(32)` / `alignas(64)` on a buffer or struct guarantees it.
-  - **Cache-line isolation (false sharing):** `alignas(64)` (or `alignas(std::hardware_destructive_interference_size)`) forces a value onto its own cache line so a *different* thread writing a neighboring value doesn't trigger MESI ping-pong (Ch. 8 §8.2.3, Ch. 42). Here padding is the *point*.
-- **`std::hardware_destructive_interference_size`** (C++17, `<new>`) — the recommended minimum offset to avoid false sharing (64 on x86); its twin `hardware_constructive_interference_size` is the line size to *pack within*. (GCC warns, `-Winterference-size`, that the value is ABI-unstable; many shops pin a literal 64 — but see Ch. 42 on why 128 may be the right padding on Intel, with its adjacent-line prefetcher, and on ARM.)
+  - **SIMD:** AVX wants 32-byte-aligned, AVX-512 64-byte-aligned loads/stores for the aligned (`vmovdqa`) path and to avoid cache-line-split penalties (Ch. 39). `alignas(32)` / `alignas(64)` on a buffer or struct guarantees it.
+  - **Cache-line isolation (false sharing):** `alignas(64)` (or `alignas(std::hardware_destructive_interference_size)`) forces a value onto its own cache line so a *different* thread writing a neighboring value doesn't trigger MESI ping-pong (Ch. 8 §8.2.3, Ch. 44). Here padding is the *point*.
+- **`std::hardware_destructive_interference_size`** (C++17, `<new>`) — the recommended minimum offset to avoid false sharing (64 on x86); its twin `hardware_constructive_interference_size` is the line size to *pack within*. (GCC warns, `-Winterference-size`, that the value is ABI-unstable; many shops pin a literal 64 — but see Ch. 44 on why 128 may be the right padding on Intel, with its adjacent-line prefetcher, and on ARM.)
 - **`alignas` adds padding too.** Over-aligning a struct member or the struct itself inserts padding to honor the request — deliberate, not silent. Know the size cost you're buying.
 
 ### 11.2.3 `[[no_unique_address]]` and empty-base optimization
@@ -90,7 +90,7 @@ struct OrderFlags {
 };                                  // 4 bytes instead of 4 separate fields
 ```
 
-This shrinks the struct (good for footprint), but the trade-off is **codegen**: reading or writing a bit-field is not a plain load/store — it's a load + **mask + shift** (and read-modify-write for stores), which is more instructions and, crucially, makes the field a **non-atomic** sub-word (you cannot `std::atomic` a bit-field; concurrent writes to *different* bit-fields in the same unit race — Ch. 39, 42). Bit-field layout (bit order within the unit, straddling) is also **implementation-defined**, so they're risky for wire/overlay formats (Ch. 68 prefers explicit shifts/masks for protocol parsing). Use them to shrink *internal* hot structs where the mask/shift cost is below the cache-footprint win — and measure both (§11.5, Ch. 36 covers the bit-manipulation codegen in depth).
+This shrinks the struct (good for footprint), but the trade-off is **codegen**: reading or writing a bit-field is not a plain load/store — it's a load + **mask + shift** (and read-modify-write for stores), which is more instructions and, crucially, makes the field a **non-atomic** sub-word (you cannot `std::atomic` a bit-field; concurrent writes to *different* bit-fields in the same unit race — Ch. 41, 44). Bit-field layout (bit order within the unit, straddling) is also **implementation-defined**, so they're risky for wire/overlay formats (Ch. 70 prefers explicit shifts/masks for protocol parsing). Use them to shrink *internal* hot structs where the mask/shift cost is below the cache-footprint win — and measure both (§11.5, Ch. 37 covers the bit-manipulation codegen in depth).
 
 ---
 
@@ -132,7 +132,7 @@ struct LevelHot {
 
 The free win from §11.2.1: **order members from largest/most-aligned to smallest.** Doubles and longs and pointers (8) first, then ints (4), then shorts (2), then chars/bools (1), then bit-fields. This packs the small members into what would otherwise be tail/inter-member padding, usually achieving the minimum size automatically. Re-run `pahole` to confirm; lock with `static_assert`.
 
-Caveats: declaration order is also **readability and API**, so don't obfuscate a cold struct to save bytes nobody pays for (Ch. 1 tiering — this matters on hot structs in hot arrays, not on a config object instantiated once). And for **wire/overlay** formats (Ch. 68) you *can't* reorder freely — the layout is dictated by the protocol; there you use explicit field offsets and packing, accepting the constraints. The reorder technique is for your *internal* hot data types, where you own the layout.
+Caveats: declaration order is also **readability and API**, so don't obfuscate a cold struct to save bytes nobody pays for (Ch. 1 tiering — this matters on hot structs in hot arrays, not on a config object instantiated once). And for **wire/overlay** formats (Ch. 70) you *can't* reorder freely — the layout is dictated by the protocol; there you use explicit field offsets and packing, accepting the constraints. The reorder technique is for your *internal* hot data types, where you own the layout.
 
 ### 11.4.2 Sizing a struct to a cache line
 
@@ -141,7 +141,7 @@ The goal for a hot array element: **make `sizeof` a clean divisor of 64** (or a 
 - **Shrink to fit:** reorder (§11.4.1), hot/cold split (Ch. 10), use smaller types (a scaled-integer price in `int32` instead of `double`? — Ch. 35), bit-fields (§11.2.4) — get the hot element to 16 or 32 bytes.
 - **Pad up to a power-of-two-friendly size** when shrinking isn't possible and you want guaranteed no-straddle: `alignas` the element and let tail padding round it to 32, so it never crosses a line. You spend bytes to buy alignment determinism.
 
-And the **deliberate over-align** case (§11.2.2): a per-thread counter or queue head written by one thread and read/written near another's data gets `alignas(64)` to claim its own line and dodge false sharing (Ch. 42) — here you *want* the padding. Sizing is two-directional: shrink the silent bloat, add the intentional isolation.
+And the **deliberate over-align** case (§11.2.2): a per-thread counter or queue head written by one thread and read/written near another's data gets `alignas(64)` to claim its own line and dodge false sharing (Ch. 44) — here you *want* the padding. Sizing is two-directional: shrink the silent bloat, add the intentional isolation.
 
 ### 11.4.3 Packing trade-offs (`#pragma pack`) vs misaligned-access cost
 
@@ -152,7 +152,7 @@ And the **deliberate over-align** case (§11.2.2): a per-thread counter or queue
 - **Atomics on a packed (misaligned) member are undefined / a "split lock"** — catastrophic (§11.6).
 - On **AArch64** (Appendix A) ordinary misaligned scalar loads/stores to normal memory are handled in hardware (with a split-access penalty, as on x86), but load/store-exclusive, `LDAR`/`STLR` and the atomic instructions *fault* (`SIGBUS`) on a misaligned address — a packed struct containing an atomic is fatal there, not merely slow. Older ARM cores and other RISC targets may trap or emulate.
 
-So `pack` is the right tool for **wire/overlay structs you parse off the network** (Ch. 68), where the layout is fixed by the protocol and you typically copy fields out rather than vectorize over them — and the wrong tool for **internal hot compute structs**, where you want alignment for SIMD and atomics. Don't reach for `pack` to save footprint on a hot array; reorder and hot/cold-split instead.
+So `pack` is the right tool for **wire/overlay structs you parse off the network** (Ch. 70), where the layout is fixed by the protocol and you typically copy fields out rather than vectorize over them — and the wrong tool for **internal hot compute structs**, where you want alignment for SIMD and atomics. Don't reach for `pack` to save footprint on a hot array; reorder and hot/cold-split instead.
 
 ---
 
@@ -211,14 +211,14 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 
 ## 11.6 Pitfalls & anti-patterns: misaligned atomics, false economy of packing
 
-- **Misaligned atomics / split locks.** A `std::atomic` or `LOCK`-prefixed operation on a misaligned address (e.g. an atomic field inside a `packed` struct, or straddling a cache line) triggers a **split lock** — the CPU locks the *bus*/whole cache subsystem instead of one line, costing *hundreds to thousands* of cycles and stalling **other** cores. Modern kernels can even SIGBUS or rate-limit split-lock-detection. Atomics **must** be naturally aligned (and you want them cache-line-isolated anyway — Ch. 39, 42). Never `pack` a struct containing an atomic.
+- **Misaligned atomics / split locks.** A `std::atomic` or `LOCK`-prefixed operation on a misaligned address (e.g. an atomic field inside a `packed` struct, or straddling a cache line) triggers a **split lock** — the CPU locks the *bus*/whole cache subsystem instead of one line, costing *hundreds to thousands* of cycles and stalling **other** cores. Modern kernels can even SIGBUS or rate-limit split-lock-detection. Atomics **must** be naturally aligned (and you want them cache-line-isolated anyway — Ch. 41, 44). Never `pack` a struct containing an atomic.
 - **False economy of packing.** Using `#pragma pack` to shave a few bytes off an internal hot struct, then losing auto-vectorization (§11.5) and eating cache-line-split penalties — a net *loss*. Reorder and hot/cold-split for size instead; reserve packing for wire formats.
 - **Silent padding bloat.** Adding a field (or declaring in a careless order) that pushes a hot array element across a cache-line size boundary — quietly raising the miss rate of the sweep that walks it. Defense: `-Wpadded` on the hot header and a `static_assert(sizeof)` that fails the build on regression (§11.3).
 - **Assuming `sizeof` = sum of fields.** It almost never is. Always measure with `pahole`; don't compute footprint by adding field sizes.
 - **Over-aligning everything.** `alignas(64)` on every struct "to be safe" wastes huge amounts of memory and cache (a 16-byte struct padded to 64 = 4× footprint, *worse* miss rate). Over-align *only* what needs SIMD alignment or false-sharing isolation, and measure the size cost.
 - **`[[no_unique_address]]` assumptions / empty-member bloat.** Forgetting that a stateless policy stored as a plain member costs a byte + padding (defeating a "zero-cost" abstraction); or assuming `[[no_unique_address]]` *always* collapses to zero (it's "may" — two `[[no_unique_address]]` members of the *same* empty type can't both overlap the same address). Verify with `static_assert(sizeof)`.
-- **Bit-field hazards.** Treating bit-fields as atomic or as a stable wire layout — both wrong (§11.2.4): concurrent writes to sibling bit-fields race (Ch. 42), and bit ordering is implementation-defined (use explicit masks/shifts for protocols — Ch. 36, 68).
-- **Wire structs without `static_assert(offsetof/sizeof)`.** An overlay struct for a market-data message whose layout silently shifted across compilers/flags → you parse garbage. Pin every offset and the total size (Ch. 68).
+- **Bit-field hazards.** Treating bit-fields as atomic or as a stable wire layout — both wrong (§11.2.4): concurrent writes to sibling bit-fields race (Ch. 44), and bit ordering is implementation-defined (use explicit masks/shifts for protocols — Ch. 37, 70).
+- **Wire structs without `static_assert(offsetof/sizeof)`.** An overlay struct for a market-data message whose layout silently shifted across compilers/flags → you parse garbage. Pin every offset and the total size (Ch. 70).
 
 ---
 
@@ -237,9 +237,9 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 - [ ] I **measured** `sizeof`/`alignof`/layout with `pahole` (and `-Wpadded` on the hot header) — never assumed.
 - [ ] Hot array elements are **ordered largest-to-smallest** to minimize padding, and sized to **pack cleanly into a cache line** (no straddling).
 - [ ] I **`static_assert`** the size/alignment (and `offsetof` for overlay types) so regressions fail the build.
-- [ ] I **over-align (`alignas(64)`) only** where needed — SIMD or false-sharing isolation (Ch. 37, 42) — and accounted for the size cost.
-- [ ] No `#pragma pack`/`packed` on **internal hot** structs (it kills vectorization, §11.5, and risks split-lock atomics); packing reserved for **wire/overlay** formats (Ch. 68).
-- [ ] Every **atomic** is naturally aligned and ideally cache-line-isolated (no split locks — §11.6, Ch. 39).
+- [ ] I **over-align (`alignas(64)`) only** where needed — SIMD or false-sharing isolation (Ch. 39, 44) — and accounted for the size cost.
+- [ ] No `#pragma pack`/`packed` on **internal hot** structs (it kills vectorization, §11.5, and risks split-lock atomics); packing reserved for **wire/overlay** formats (Ch. 70).
+- [ ] Every **atomic** is naturally aligned and ideally cache-line-isolated (no split locks — §11.6, Ch. 41).
 - [ ] Empty policies use **`[[no_unique_address]]`/EBO** so abstractions are zero-cost in `sizeof` (verified).
 - [ ] Bit-fields used only to shrink **internal** structs where the mask/shift cost < the footprint win — never for atomicity or wire layout.
 
@@ -257,7 +257,7 @@ There it is: the same reduction, **SIMD vs scalar**, decided purely by whether t
 
 - E. S. Raymond, *"The Lost Art of Structure Packing"* (catb.org/esr/structure-packing) and similar write-ups — a practical tour of padding and reordering with `pahole`.
 - CppCon talks on `[[no_unique_address]]` and EBO in the standard library (`std::vector`/`std::tuple` layout) — §11.2.3 in real library code.
-- Ch. 42 (*False Sharing*) — the over-alignment side of this chapter, with `hardware_destructive_interference_size` and `perf c2c`; Ch. 68 (*Zero-Copy Wire Handling*) — packed overlay structs done safely; Ch. 36 (*Bit Manipulation*) — bit-field and mask/shift codegen.
+- Ch. 44 (*False Sharing*) — the over-alignment side of this chapter, with `hardware_destructive_interference_size` and `perf c2c`; Ch. 70 (*Zero-Copy Wire Handling*) — packed overlay structs done safely; Ch. 37 (*Bit Manipulation*) — bit-field and mask/shift codegen.
 - **Appendix A** — ARM/Graviton alignment and 128-byte cache-line differences and their effect on the sizing decisions here.
 
 ---
