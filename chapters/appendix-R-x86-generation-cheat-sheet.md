@@ -1,10 +1,10 @@
 # Appendix R — x86 Generation Cheat Sheet
 
-> **Relates to:** Appendix E (the latency table this appendix restates per generation), Appendix L.3 (the reference machine), Ch. 7 (the silicon decision the tables inform), Ch. 18 (chiplets and tiles — the topology column), Ch. 54 (C-state exits and licences per generation), Ch. 8, 12–14, 16 (the microarchitectural quantities tabulated), Appendix Q (AMD specifics), Appendix D.2 (`-march=` per generation). The book's numbers are calibrated to a 2021 Ice Lake-SP; a reader on 2023–2026 silicon needs to know what moved and by how much. **Every figure here is from vendor specification sheets and architecture documents or from published independent measurements, marked (m); none was measured for this book** — reproduce the ones that matter with Ch. 8's sweep, Ch. 12's chains and Ch. 18's map.
+> **Relates to:** Appendix E (the latency table this appendix restates per generation), Appendix L.3 (the reference machine), Ch. 7 (the silicon decision the tables inform), Ch. 18 (chiplets and tiles — the topology column), Ch. 57 (C-state exits and licences per generation), Ch. 8, 12–14, 16 (the microarchitectural quantities tabulated), Appendix Q (AMD specifics), Appendix D.2 (`-march=` per generation). The book's numbers are calibrated to a 2021 Ice Lake-SP; a reader on 2023–2026 silicon needs to know what moved and by how much. **Every figure here is from vendor specification sheets and architecture documents or from published independent measurements, marked (m); none was measured for this book** — reproduce the ones that matter with Ch. 8's sweep, Ch. 12's chains and Ch. 18's map.
 
 ## R.1 How to read this appendix
 
-Three tables and a note. **R.2** is the Intel server line from the reference generation forward (Ice Lake-SP → Sapphire Rapids → Emerald Rapids → Granite Rapids) with the client parts Ch. 7 discusses; **R.3** is AMD Zen 3 → 4 → 5 (EPYC and Ryzen). Both list the quantities the book's chapters depend on: core counts and clocks (Ch. 7), cache sizes and the L3 topology (Ch. 8, 18), ROB and dispatch width (Ch. 12), µop-cache size (Ch. 13), TLB reach (Ch. 16), memory channels and PCIe lanes (Ch. 7, 78), the deep C-state exit (Ch. 54), AVX-512 behaviour (Ch. 34) and DDIO (Ch. 68). **R.4** restates Appendix E.1's latency rows per generation, in nanoseconds *and* cycles at each part's typical pinned clock, because a cycle is a different length on each. **R.5** is the accelerator inventory — AMX, DSA, IAA, QAT, DLB, AVX10, APX — and why each belongs beside the hot path rather than on it. Where a cell says "~", it is a range across SKUs; where it says (m), an independent measurement; otherwise, the vendor's specification.
+Three tables and a note. **R.2** is the Intel server line from the reference generation forward (Ice Lake-SP → Sapphire Rapids → Emerald Rapids → Granite Rapids) with the client parts Ch. 7 discusses; **R.3** is AMD Zen 3 → 4 → 5 (EPYC and Ryzen). Both list the quantities the book's chapters depend on: core counts and clocks (Ch. 7), cache sizes and the L3 topology (Ch. 8, 18), ROB and dispatch width (Ch. 12), µop-cache size (Ch. 13), TLB reach (Ch. 16), memory channels and PCIe lanes (Ch. 7, 82), the deep C-state exit (Ch. 57), AVX-512 behaviour (Ch. 36) and DDIO (Ch. 72). **R.4** restates Appendix E.1's latency rows per generation, in nanoseconds *and* cycles at each part's typical pinned clock, because a cycle is a different length on each. **R.5** is the accelerator inventory — AMX, DSA, IAA, QAT, DLB, AVX10, APX — and why each belongs beside the hot path rather than on it. Where a cell says "~", it is a range across SKUs; where it says (m), an independent measurement; otherwise, the vendor's specification.
 
 ## R.2 Intel: Ice Lake-SP → Sapphire → Emerald → Granite Rapids (and the client parts)
 
@@ -33,7 +33,7 @@ Three tables and a note. **R.2** is the Intel server line from the reference gen
    core-to-core (m)      45–65 ns (mesh)      55–65 same tile, 60–75 cross-tile  similar   50–70 / +EMIB            P↔P ~25–35 ns; E-cluster pairs ~30–40
 ```
 
-Reading it for the book: the **L3 got bigger and slower** at every server generation (Ice Lake's ~21 ns became ~30–40 ns on the tiled meshes), so Ch. 8's "L3 hit" row and Ch. 30's "fit the book in L3" budget both move the wrong way — and Ch. 7's client ring at ~10 ns is the outlier that makes desktop silicon attractive. **L2 doubled** to 2 MiB from Sapphire Rapids, which is the level to design for. **C6 exit grew** to 290 µs on Sapphire/Emerald Rapids (Ch. 54 §54.2.1). **Memory latency rose** with DDR5 and bigger fabrics; channel count and bandwidth rose more. SNC went from two to three (Granite Rapids) and tiles made Ch. 18's map matter on Intel too. The client parts lost AVX-512 and gained E-cores (Ch. 7 §7.2.4); Arrow Lake dropped SMT.
+Reading it for the book: the **L3 got bigger and slower** at every server generation (Ice Lake's ~21 ns became ~30–40 ns on the tiled meshes), so Ch. 8's "L3 hit" row and Ch. 31's "fit the book in L3" budget both move the wrong way — and Ch. 7's client ring at ~10 ns is the outlier that makes desktop silicon attractive. **L2 doubled** to 2 MiB from Sapphire Rapids, which is the level to design for. **C6 exit grew** to 290 µs on Sapphire/Emerald Rapids (Ch. 57 §57.2.1). **Memory latency rose** with DDR5 and bigger fabrics; channel count and bandwidth rose more. SNC went from two to three (Granite Rapids) and tiles made Ch. 18's map matter on Intel too. The client parts lost AVX-512 and gained E-cores (Ch. 7 §7.2.4); Arrow Lake dropped SMT.
 
 ## R.3 AMD: Zen 3 → Zen 4 → Zen 5 (EPYC and Ryzen)
 
@@ -56,7 +56,7 @@ Reading it for the book: the **L3 got bigger and slower** at every server genera
    DRAM latency (m)      ~100–110 ns (NPS1 EPYC)    ~105–115 NPS1 / ~95 NPS4 ; ~75 Ryzen   ~100 NPS1 / ~90 NPS4 ; ~75 Ryzen
    PCIe (CPU lanes)      128 × Gen4 (EPYC) / 24 Gen4 (Ryzen)   128 × Gen5 + CXL 1.1 / 28 Gen5   128 × Gen5 + CXL 2.0 / 28 Gen5
    AVX-512               no                         yes, 256-bit datapath, no licence     yes, 512-bit datapath (Zen 5), no licence
-   deep C-state exit     ACPI C2 (CC6): table ~18 µs, measured 100+ µs (Ch. 54)  same      same
+   deep C-state exit     ACPI C2 (CC6): table ~18 µs, measured 100+ µs (Ch. 57)  same      same
    core-to-core (m)      ~20 same CCD / ~100 cross  ~19 / ~85–100                         ~18–20 / ~80–90
    DDIO                  no (no equivalent)         no                                    no
 ```
@@ -65,7 +65,7 @@ Reading it: the CCD stayed 8 cores + 32 MiB for three generations (Ch. 18's bloc
 
 ## R.4 Appendix E restated per generation
 
-Appendix E.1's rows at each part's *typical pinned* clock (the clock named in the header; cycles = ns × GHz). Representative; vendor documents and (m) published measurements; Ch. 8/18 reproduce the cache, DRAM and core-to-core rows, Ch. 14 the mispredict, Ch. 54 the C-state rows. Rows that do not depend on the core (syscall with a given mitigation set, kernel RX, bypass RX, PCIe round trip, FPGA) are unchanged from Appendix E and omitted.
+Appendix E.1's rows at each part's *typical pinned* clock (the clock named in the header; cycles = ns × GHz). Representative; vendor documents and (m) published measurements; Ch. 8/18 reproduce the cache, DRAM and core-to-core rows, Ch. 14 the mispredict, Ch. 57 the C-state rows. Rows that do not depend on the core (syscall with a given mitigation set, kernel RX, bypass RX, PCIe round trip, FPGA) are unchanged from Appendix E and omitted.
 
 ```
    operation                     Ice Lake-SP @ 2.9   Sapphire Rapids @ 3.5   Granite Rapids @ 3.2   Zen 3 EPYC @ 3.5   Zen 4 EPYC @ 3.7   Zen 5 EPYC @ 4.0   client ring @ 5.7 (RPL)
@@ -85,39 +85,39 @@ Appendix E.1's rows at each part's *typical pinned* clock (the clock named in th
    imul r64 (Ch. 7 probe)        3 cyc               3                       3                      3                  3                  3                  3
 ```
 
-(\* `pause` moved between ~10 and ~140 cycles across Intel generations — Skylake raised it to ~140, Ice Lake brought it back to ~40, and the Golden/Redwood Cove figures are published measurements on client parts; measure it on the server part with Ch. 37's loop before trusting a backoff constant.) The pattern across the row set: **core-bound rows scale with the clock** (Ch. 7 §7.2.1 — the client column wins them all), **the L3 row got worse on every tiled Intel server part and is 2–3× better on any AMD CCD**, **DRAM got slower in nanoseconds everywhere except the client parts**, and **the cross-domain core-to-core row is the one Appendix E could not have — it exists only on chiplet silicon** (Ch. 18).
+(\* `pause` moved between ~10 and ~140 cycles across Intel generations — Skylake raised it to ~140, Ice Lake brought it back to ~40, and the Golden/Redwood Cove figures are published measurements on client parts; measure it on the server part with Ch. 40's loop before trusting a backoff constant.) The pattern across the row set: **core-bound rows scale with the clock** (Ch. 7 §7.2.1 — the client column wins them all), **the L3 row got worse on every tiled Intel server part and is 2–3× better on any AMD CCD**, **DRAM got slower in nanoseconds everywhere except the client parts**, and **the cross-domain core-to-core row is the one Appendix E could not have — it exists only on chiplet silicon** (Ch. 18).
 
 ## R.5 On-die accelerators: beside the hot path, not on it
 
-Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-function and matrix hardware. None of it is on the tick-to-trade path, because each is reached either through a device-style submission/completion interface with a PCIe-class round trip (Ch. 78) or through a mode switch with a warm-up cost; several are useful *beside* it.
+Sapphire Rapids and its successors (and, differently, Zen 4/5) added fixed-function and matrix hardware. None of it is on the tick-to-trade path, because each is reached either through a device-style submission/completion interface with a PCIe-class round trip (Ch. 82) or through a mode switch with a warm-up cost; several are useful *beside* it.
 
 ```
    accelerator   what it is                                         interface                    trading use (and why not the hot path)
    ───────────── ────────────────────────────────────────────────── ──────────────────────────── ─────────────────────────────────────────────────
-   AMX           tile-matrix units: INT8/BF16 (FP16 on GNR) GEMM    instructions (TMUL), tile     ML inference beside the strategy (Ch. 79's GPU
+   AMX           tile-matrix units: INT8/BF16 (FP16 on GNR) GEMM    instructions (TMUL), tile     ML inference beside the strategy (Ch. 83's GPU
                  in 8 1 KiB tile registers                          state is XSAVE-managed        alternative on the host); first use after idle
                                                                                                   pays a tile-config + licence-class power ramp
    DSA           Data Streaming Accelerator: memcpy/memmove/fill,   work queues via ENQCMD/       capture-writer and replay copies, journal
-                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 98) — bulk copies off the core; a
+                 CRC, compare, dualcast, DMA between address        MOVDIR64B, completion by      flushes (Ch. 102) — bulk copies off the core; a
                  spaces                                             polling or interrupt           submission is ~µs round trip: never a per-message op
-   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 85 §85.4.7),
+   IAA           In-Memory Analytics Accelerator: compression/      same work-queue model          compressing tick storage (Ch. 89 §89.4.7),
                  decompression (Deflate), filter/scan                                              never on the order path
-   QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 77), VPN; a ~10 µs
+   QAT           QuickAssist: crypto (TLS record processing,        work queues / kernel crypto    TLS to cloud/web venues (Ch. 81), VPN; a ~10 µs
                  asymmetric), compression                           API, OpenSSL engine             round trip, so only for throughput paths
    DLB           Dynamic Load Balancer: hardware queue manager       memory-mapped producer/        a hardware MPMC queue with ordering/atomic
-                 (enqueue/dequeue, ordering, load balance across    consumer ports (DPDK eventdev)  scheduling across cores — Ch. 43's shard fan-out in
+                 (enqueue/dequeue, ordering, load balance across    consumer ports (DPDK eventdev)  scheduling across cores — Ch. 46's shard fan-out in
                  cores) — the one that looks like it belongs                                        silicon; ~400–800 ns enqueue→dequeue (m), i.e. slower
-                                                                                                  than an in-L3 SPSC ring (Ch. 39) for a point-to-point hop
+                                                                                                  than an in-L3 SPSC ring (Ch. 42) for a point-to-point hop
    AVX10         the converged vector ISA: AVX-512 features at       -march=/-mavx10.1 (GCC 14 /    lets one binary vectorise for P- and E-cores; a
                  256- or 512-bit width, including on E-cores         Clang 18+), AVX10.2 later      compile-target question (Appendix D.2), not a runtime one
    APX           Advanced Performance Extensions: 32 GPRs (R16–R31), -mapxf (GCC 14 / Clang 19;     fewer spills and shorter dependency chains on the
-                 3-operand integer ops, conditional load/store/cmp   Diamond Rapids / Panther Lake  decode and book kernels (Ch. 12, 64); verify with Ch. 4's
+                 3-operand integer ops, conditional load/store/cmp   Diamond Rapids / Panther Lake  decode and book kernels (Ch. 12, 67); verify with Ch. 4's
                                                                      and later)                      asm reading when the hardware ships
-   (AMD)         no AMX/DSA/IAA/QAT equivalents on the CPU; AMD's      —                            Pensando DPUs and Xilinx FPGAs (Ch. 82, 81) are the
+   (AMD)         no AMX/DSA/IAA/QAT equivalents on the CPU; AMD's      —                            Pensando DPUs and Xilinx FPGAs (Ch. 86, 85) are the
                  acceleration story is off-socket                                                    accelerator line
 ```
 
-The rule Ch. 7 and Ch. 78 share: **a round trip to anything that is not the core's own execution units is ≥ 1 µs**, which is the whole tick-to-trade budget on a good day; accelerators earn their place on capture, replay, storage, encryption and research, and DLB is the one to benchmark against Ch. 39's queues before believing its brochure. AVX10 and APX are compiler flags whose codegen effect is read with Ch. 4 and Appendix D, and whose *frequency* effect is checked with Ch. 54.
+The rule Ch. 7 and Ch. 82 share: **a round trip to anything that is not the core's own execution units is ≥ 1 µs**, which is the whole tick-to-trade budget on a good day; accelerators earn their place on capture, replay, storage, encryption and research, and DLB is the one to benchmark against Ch. 42's queues before believing its brochure. AVX10 and APX are compiler flags whose codegen effect is read with Ch. 4 and Appendix D, and whose *frequency* effect is checked with Ch. 57.
 
 ## R.6 References
 
@@ -128,6 +128,6 @@ The rule Ch. 7 and Ch. 78 share: **a round trip to anything that is not the core
 
 ## R.7 Additional Reading
 
-- Ch. 7 (*Choosing & Clocking the Hot-Path CPU*) — how to turn these tables into a purchase; Ch. 18 (*Chiplets, Tiles & NUMA Within the Socket*) — the topology column measured; Ch. 54 (*Power Management & Frequency Determinism*) — the C-state and licence columns measured; Appendix E — the reference-machine table this appendix fans out; Appendix Q — the AMD-specific method notes.
+- Ch. 7 (*Choosing & Clocking the Hot-Path CPU*) — how to turn these tables into a purchase; Ch. 18 (*Chiplets, Tiles & NUMA Within the Socket*) — the topology column measured; Ch. 57 (*Power Management & Frequency Determinism*) — the C-state and licence columns measured; Appendix E — the reference-machine table this appendix fans out; Appendix Q — the AMD-specific method notes.
 - Agner Fog, *The microarchitecture of Intel, AMD and VIA CPUs* — the per-generation core descriptions behind the ROB/dispatch/µop-cache rows, updated with each new part.
 - Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* (6th ed.), ch. 2 and Appendix B — why the L3 row moves the way it does as caches grow and fabrics lengthen.

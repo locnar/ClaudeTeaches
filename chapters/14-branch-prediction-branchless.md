@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 12 (the out-of-order back-end — a mispredict throws away the speculative work that engine had in flight), Ch. 13 (the front-end the predictor *steers* — a mispredict is a front-end resteer plus a back-end flush), Ch. 2 (top-down — this is the **Bad Speculation** quadrant), Ch. 3–4 (benchmarking and reading asm — used in §14.3, §14.5).
 >
-> **Leads into:** Ch. 15 (indirect branches — virtual calls and function pointers, the harder *target* prediction problem this chapter's *direction* prediction sets up), Ch. 33 (bit tricks — branchless min/max/abs/sign and masking, the toolkit §14.4.3 draws on), Ch. 34 (SIMD — vectorized code is branchless by construction). The `[[likely]]`/`[[unlikely]]` *layout* hints of Ch. 13 are the complement to the *prediction* this chapter is about.
+> **Leads into:** Ch. 15 (indirect branches — virtual calls and function pointers, the harder *target* prediction problem this chapter's *direction* prediction sets up), Ch. 35 (bit tricks — branchless min/max/abs/sign and masking, the toolkit §14.4.3 draws on), Ch. 36 (SIMD — vectorized code is branchless by construction). The `[[likely]]`/`[[unlikely]]` *layout* hints of Ch. 13 are the complement to the *prediction* this chapter is about.
 
 ---
 
@@ -35,7 +35,7 @@ The branch predictor's job, every cycle the front-end fetches, is to answer two 
 
 - **Finite capacity and aliasing.** History tables and the BTB (branch target buffer) are finite. A hot path with *thousands* of distinct branches (over-inlined, sprawling code — Ch. 13) can **alias** in the tables: two branches collide on an entry and destructively interfere, degrading prediction even for individually-predictable branches. Smaller, denser hot code (Ch. 13) helps the predictor too — another reason the front-end and prediction chapters are siblings.
 
-- **Cold predictors.** After a quiet spell the history tables are stale/evicted; the first pass through a rarely-run path mispredicts more (a cold-start tail — Ch. 56). Steady-state hot loops warm the predictor; the rare-but-latency-critical path may not be warm when it matters.
+- **Cold predictors.** After a quiet spell the history tables are stale/evicted; the first pass through a rarely-run path mispredicts more (a cold-start tail — Ch. 59). Steady-state hot loops warm the predictor; the rare-but-latency-critical path may not be warm when it matters.
 
 The actionable model: **a branch is cheap if the predictor can learn its pattern, and expensive in proportion to its *entropy given history*.** Your lever is to lower that entropy (make it predictable or biased), eliminate the branch, or move it off the hot path.
 
@@ -139,7 +139,7 @@ int r = (a > b) ? a : b;          // may compile to a branch OR a cmov (§14.5)
 // Branchless idioms the compiler recognizes (and you can write explicitly):
 int r = (a > b) ? a : b;          // max — std::max; compilers emit cmov/maxss readily
 int s = x & -(int)cond;           // select 0 or x with a mask (cond is 0/1)
-int sel = b ^ ((a ^ b) & -(int)(a > b));   // branchless select a:b  (Ch. 33)
+int sel = b ^ ((a ^ b) & -(int)(a > b));   // branchless select a:b  (Ch. 35)
 ```
 
 The critical trade-off, and the whole reason `cmov` is not a free win: **`cmov` replaces a *control* dependency with a *data* dependency** (Ch. 12). The branch version, *when predicted correctly*, breaks the dependency — the core speculates past it and overlaps work, so a well-predicted branch can be *faster* than a `cmov` because the `cmov` forces the result to wait for the condition's inputs (and lengthens the dependency chain). `cmov` wins precisely when the branch is **unpredictable**: you trade a ~15–20-cycle mispredict (sometimes) for a ~1–2-cycle `cmov` (always). The rule:
@@ -172,15 +172,15 @@ This is the workhorse for **message-type dispatch** in a feed handler: rather th
 
 - **The table is a *data* cache access** (Ch. 8) — keep it small and hot. A 256-byte table stays in L1d; a large sparse table trades branch mispredicts for cache misses, which can be worse. Size and measure.
 - **Precompute at compile time.** Build the table with `constexpr`/`consteval` (Ch. 20) so it costs nothing at runtime and lives in read-only memory.
-- **Branchless arithmetic is a "table" too.** Sometimes the mapping is a formula (`base + scale*x`), avoiding even the load — the limit case of this technique (Ch. 33).
+- **Branchless arithmetic is a "table" too.** Sometimes the mapping is a formula (`base + scale*x`), avoiding even the load — the limit case of this technique (Ch. 35).
 - **A jump table is the control-flow cousin** — a `switch` the compiler lowers to an indexed *indirect jump*. That's still an indirect branch with its own (BTB) prediction problem — Ch. 15 — so a *data* lookup that avoids the indirect jump is often preferable on the hot path.
 
 ### 14.4.3 Removing branches from the hot path
 
 Beyond `cmov` and tables, a kit of transforms that delete or relocate branches:
 
-- **Branchless min/max/abs/sign/clamp via masks and bit tricks** (Ch. 33). `abs`, `sign`, `clamp`, saturating arithmetic, and "select" can all be written with shifts and masks that emit no branch — the standard library's `std::min`/`std::max`/`std::clamp` and `std::abs` already do this where profitable.
-- **Predication via masking.** Instead of `if (cond) acc += x;`, compute `acc += x & -(mask)` (or multiply by a 0/1 predicate). The work is always done; the *result* is masked. This is the scalar shadow of SIMD predication (Ch. 34) and the natural way to vectorize a conditional accumulate.
+- **Branchless min/max/abs/sign/clamp via masks and bit tricks** (Ch. 35). `abs`, `sign`, `clamp`, saturating arithmetic, and "select" can all be written with shifts and masks that emit no branch — the standard library's `std::min`/`std::max`/`std::clamp` and `std::abs` already do this where profitable.
+- **Predication via masking.** Instead of `if (cond) acc += x;`, compute `acc += x & -(mask)` (or multiply by a 0/1 predicate). The work is always done; the *result* is masked. This is the scalar shadow of SIMD predication (Ch. 36) and the natural way to vectorize a conditional accumulate.
 - **Hoist loop-invariant branches out of the loop.** A branch whose condition doesn't change across iterations belongs *outside* the loop (or specialize the loop into two versions, one per branch direction). The compiler does this (loop unswitching) when it can prove invariance; help it by making invariance obvious (a `const` flag, a template parameter — Ch. 20–21).
 - **Sort/partition to make branches predictable** (§14.3's lesson, used deliberately). If you control data order, grouping like cases together turns a high-entropy branch into long predictable runs — often cheaper than going branchless, and it improves locality too. (In a feed handler: process a batch grouped by message type.)
 - **Pre-classify off the hot path.** Decide the unpredictable thing *once*, early, and store the outcome (a tag, a function pointer, a pre-split bucket), so the hot loop branches on something predictable or not at all. Moving the entropy upstream (setup, Ch. 1's hot/cold split) is often better than fighting it in the inner loop.
@@ -242,7 +242,7 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 - **Branch on cache-missing data.** A branch whose condition depends on a just-loaded, cache-missing value is the worst case (§14.2.2): it can't resolve for hundreds of cycles while the core speculates deep down a possibly-wrong path. Prefetch (Ch. 11) or restructure so the condition's data is resident before the branch.
 - **Optimizing branches when you're not Bad-Speculation-bound.** If top-down (Ch. 2) says Memory-Bound (Ch. 8) or Core-Bound (Ch. 12), removing branches does nothing. Confirm elevated `branch-misses` / Bad-Speculation *first*.
 - **Predictor aliasing from code bloat.** Thousands of branches in over-inlined hot code (Ch. 13) can alias in the history tables and degrade otherwise-predictable branches. Lean hot code (Ch. 13) helps the predictor — the two chapters reinforce each other.
-- **Forgetting the cold predictor (Ch. 56).** A rarely-run but latency-critical branch may be *cold* when it finally matters, mispredicting on the message you most need fast. Branchless code (no prediction needed) can be a deliberate choice for cold-but-critical paths even when it'd lose in steady state.
+- **Forgetting the cold predictor (Ch. 59).** A rarely-run but latency-critical branch may be *cold* when it finally matters, mispredicting on the message you most need fast. Branchless code (no prediction needed) can be a deliberate choice for cold-but-critical paths even when it'd lose in steady state.
 
 ---
 
@@ -280,8 +280,8 @@ The verification habit: **for any hot-path select on data you believe is unpredi
 ## 14.9 Additional Reading
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — practical Bad-Speculation analysis and branchless transformation case studies with `perf`.
-- H. Warren, *Hacker's Delight* — the bit-twiddling foundation for branchless min/max/abs/sign/select and masking idioms (developed in Ch. 33).
-- Ch. 15 (*Indirect Calls & Virtual Dispatch*) — *target* prediction (BTB) for indirect branches, the harder cousin of this chapter's *direction* prediction; Ch. 33 (*Bit Manipulation*) — the branchless toolkit; Ch. 34 (*SIMD*) — predication/masking taken to the vector level; Ch. 56 (*Keeping the Hot Path Warm*) — warming the predictor for cold-but-critical branches.
+- H. Warren, *Hacker's Delight* — the bit-twiddling foundation for branchless min/max/abs/sign/select and masking idioms (developed in Ch. 35).
+- Ch. 15 (*Indirect Calls & Virtual Dispatch*) — *target* prediction (BTB) for indirect branches, the harder cousin of this chapter's *direction* prediction; Ch. 35 (*Bit Manipulation*) — the branchless toolkit; Ch. 36 (*SIMD*) — predication/masking taken to the vector level; Ch. 59 (*Keeping the Hot Path Warm*) — warming the predictor for cold-but-critical branches.
 - **Appendix E** — the branch-mispredict penalty in cycles/ns that frames "Bad Speculation."
 
 ---
