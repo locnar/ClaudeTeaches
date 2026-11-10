@@ -23,7 +23,9 @@ or directly:
 1. **Pandoc 2.10+** — `brew install pandoc` (macOS) / `apt-get install pandoc` (Linux).
 2. **A Unicode-capable LaTeX engine.** Pick one:
    - **Tectonic** (lightest; a single binary that auto-downloads what it needs):
-     `brew install tectonic`
+     `brew install tectonic`, or on Linux the static binary from the project's GitHub releases
+     (`tectonic-<version>-x86_64-unknown-linux-musl.tar.gz`; put `tectonic` on `PATH` and run
+     `ENGINE=tectonic ./build.sh`)
    - **XeLaTeX** via MacTeX/BasicTeX:
      `brew install --cask basictex` then
      `sudo tlmgr update --self && sudo tlmgr install fvextra fancyhdr emptypage microtype seqsplit etoolbox booktabs newunicodechar`
@@ -70,8 +72,10 @@ chapters/*.md ──► preprocess.py ──► build/book.md ──► pandoc (
   inside table cells only, so slash-compounds like `Spectre/retpoline` wrap instead of
   overflowing the column.
 - **`filters/wrap-code.lua`** renders code/diagrams through fvextra's `Verbatim` with
-  `breaklines` and a small font, so long lines wrap and **Unicode box-drawing renders
-  correctly** (which `listings`/plain `verbatim` do not).
+  `breaklines` and a small font, so long lines wrap at a space and **Unicode box-drawing
+  renders correctly** (which `listings`/plain `verbatim` do not). A block that contains a run
+  with no space in it wider than the line (a long rule in a diagram, a long path) also gets
+  `breakanywhere`; it is not a global default because of its memory cost (see Notes).
 - **`filters/break-inline-code.lua`** re-emits inline `code` as breakable `\texttt`, so a
   long identifier or flag in running text can wrap at the line end instead of sticking out
   into the margin.
@@ -98,5 +102,15 @@ make book.md            # writes build/book.md
   monochrome code — appropriate for print. Remove `wrap-code.lua` (and, if you want inline
   code unbroken too, `break-inline-code.lua`) from `build.sh` to get Pandoc's default
   highlighting back (at the cost of Unicode-diagram robustness).
-- A full build produces a long PDF (500+ pages); the first Tectonic run downloads
-  packages and is slower.
+- A full build produces a very long PDF: **2,188 pages** at 7 × 10 in for the 120 chapters and
+  19 appendices (measured 2026-11-10, Tectonic 0.15.0, DejaVu Sans Mono; ~7 MB). It takes under
+  two minutes on a 4-core machine; the first Tectonic run also downloads its packages and fonts.
+- **TeX's main memory is the limit to watch.** XeTeX (and therefore Tectonic, where it cannot be
+  raised) has a fixed 5,000,000-word main memory. With `breakanywhere` enabled on every code
+  block the book ran out four fifths of the way through (`TeX capacity exceeded, sorry [main
+  memory size=5000000]`); `wrap-code.lua` therefore enables it only for the few dozen blocks
+  that have an unbreakable run wider than the page. If the error returns as the book grows,
+  look for a new construct that is applied to every block or every paragraph.
+- A glyph the body font lacks is dropped silently from the PDF; the build log says
+  `could not represent character`. `grep -o 'could not represent character "[^"]*"' <log> | sort | uniq -c`
+  must print nothing — add a `\newunicodechar` line to `assets/header.tex` for anything it lists.

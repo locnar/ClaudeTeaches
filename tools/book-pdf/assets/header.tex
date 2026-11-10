@@ -4,7 +4,9 @@
 
 % --- Code blocks / ASCII diagrams (wrap-code.lua emits fvextra Verbatim) -----------
 \usepackage{fvextra}            % loads fancyvrb; adds breaklines/breakanywhere
-\fvset{fontsize=\footnotesize,breaklines=true,breakanywhere=true,breaksymbolleft={}}
+% breakanywhere is NOT a default: wrap-code.lua adds it per block, only where a line has an
+% unbreakable run wider than the page (it exhausts TeX's main memory if used on every block).
+\fvset{fontsize=\footnotesize,breaklines=true,breaksymbolleft={}}
 
 % --- Tables ------------------------------------------------------------------------
 \usepackage{etoolbox}
@@ -78,6 +80,20 @@
 \newunicodechar{⁸}{\textsuperscript{8}}
 \newunicodechar{⁻}{\textsuperscript{\ensuremath{-}}}
 \newunicodechar{₂}{\textsubscript{2}}
+% glyphs the chapters added in the 2026-11 insertion rounds use and Latin Modern lacks
+\newunicodechar{⁷}{\textsuperscript{7}}
+\newunicodechar{⁹}{\textsuperscript{9}}
+\newunicodechar{ⁿ}{\textsuperscript{n}}
+\newunicodechar{ᵇ}{\textsuperscript{b}}
+\newunicodechar{₀}{\textsubscript{0}}
+\newunicodechar{₁}{\textsubscript{1}}
+\newunicodechar{φ}{\ensuremath{\varphi}}
+\newunicodechar{λ}{\ensuremath{\lambda}}
+\newunicodechar{σ}{\ensuremath{\sigma}}
+\newunicodechar{τ}{\ensuremath{\tau}}
+\newunicodechar{∪}{\ensuremath{\cup}}
+\newunicodechar{⊇}{\ensuremath{\supseteq}}
+\newunicodechar{◆}{\ding{117}}
 
 % --- Running heads -----------------------------------------------------------------
 \usepackage{fancyhdr}
@@ -98,6 +114,15 @@
   \fancyfoot[LE,RO]{\small\thepage}%
   \renewcommand{\headrulewidth}{0pt}%
 }
+
+% --- Table of contents: room for three-digit chapter numbers ---------------------------
+% The book class sets a chapter number in a 1.5em box and a section number in 2.3em: enough
+% for "99" and "9.9", not for "100" and "100.4" (the number ran into the title once the book
+% passed 99 chapters). Widen both.
+\makeatletter
+\patchcmd{\l@chapter}{\setlength\@tempdima{1.5em}}{\setlength\@tempdima{2.4em}}{}{}
+\renewcommand*\l@section{\@dottedtocline{1}{2.4em}{3.1em}}
+\makeatother
 
 % --- Tighten Pandoc lists a touch --------------------------------------------------
 \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
