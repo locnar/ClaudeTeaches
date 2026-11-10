@@ -61,6 +61,7 @@ STEPS = [
     ("insert", 6),  # Ch. 7 choosing-clocking-hot-path-cpu
     ("insert", 17),  # Ch. 18 chiplets-tiles-numa-within-socket
     ("insert", 53),  # Ch. 54 power-management-frequency-determinism
+    ("insert", 57),  # Ch. 58 anatomy-linux-network-datapath
     # INSERT_STEPS_END
 ]
 def old2new(n):

@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 8 (cache hierarchy, lines, and especially the **hardware prefetcher** of §8.2.4 — what it can and can't predict), Ch. 9 (layout), Ch. 10 (sizing). Ch. 2–3 for measuring, Ch. 4 for the asm in §11.5. This chapter is the **fallback** for when good layout and the hardware prefetcher *still* leave miss latency exposed.
 >
-> **Leads into:** Ch. 12 (pipelines/ILP — prefetch works by overlapping misses with compute) and Ch. 30 (the order book, where prefetching the next node/level is a real technique). Non-temporal stores tie to the write path of capture/logging (Ch. 87, 97). SIMD streaming stores connect to Ch. 34.
+> **Leads into:** Ch. 12 (pipelines/ILP — prefetch works by overlapping misses with compute) and Ch. 30 (the order book, where prefetching the next node/level is a real technique). Non-temporal stores tie to the write path of capture/logging (Ch. 88, 98). SIMD streaming stores connect to Ch. 34.
 
 ---
 
@@ -75,7 +75,7 @@ The write-path tool. A normal store to a not-yet-cached line triggers a **read-f
 
 **Non-temporal / streaming stores** (`movnti` for scalars, `vmovntps`/`vmovntdq` for SIMD — verified in §11.5) write directly toward memory through a **write-combining** buffer, **bypassing the cache hierarchy** (no RFO, no cache pollution). The trade-offs you must respect:
 
-- They are **weakly ordered** on x86 (unlike normal stores' total store order) — you **must fence** (`_mm_sfence()`) before another thread, a DMA engine, or a dependent reader can rely on the data being visible. Note the trap for a Ch. 35 reader: x86-TSO's ordering guarantee — and therefore a C++ release fence or release store, which compile to nothing / a plain `mov` — does **not** cover `movnt*` stores; only `sfence`, `mfence` or a `lock`-prefixed RMW (a `seq_cst` store or `fetch_add`) orders them. Publishing a streamed buffer through a release-store flag is exactly the bug. (Ch. 77 §77.4.1 meets the same rule for write-combining MMIO.) Forgetting the fence is a correctness bug.
+- They are **weakly ordered** on x86 (unlike normal stores' total store order) — you **must fence** (`_mm_sfence()`) before another thread, a DMA engine, or a dependent reader can rely on the data being visible. Note the trap for a Ch. 35 reader: x86-TSO's ordering guarantee — and therefore a C++ release fence or release store, which compile to nothing / a plain `mov` — does **not** cover `movnt*` stores; only `sfence`, `mfence` or a `lock`-prefixed RMW (a `seq_cst` store or `fetch_add`) orders them. Publishing a streamed buffer through a release-store flag is exactly the bug. (Ch. 78 §78.4.1 meets the same rule for write-combining MMIO.) Forgetting the fence is a correctness bug.
 - They pay off only for **large, write-only, cache-line-granular** regions written sequentially (to fill write-combining buffers fully). For small or read-back-soon data they're a pessimization (you'd want the data *in* cache).
 - They're most effective writing **full cache lines**; partial-line non-temporal stores are inefficient.
 
@@ -166,7 +166,7 @@ Guidance: prefetch the **line** (64-byte granularity — prefetching two address
 
 Where streaming stores earn their keep — bulk, write-only, cache-line-granular output:
 
-- **Capture / journaling / logging buffers** (Ch. 87, 97): you write packets or log records to a large ring you won't read back on the hot path. Stream them so they don't evict the hot order-book/strategy state from L1/L2.
+- **Capture / journaling / logging buffers** (Ch. 88, 98): you write packets or log records to a large ring you won't read back on the hot path. Stream them so they don't evict the hot order-book/strategy state from L1/L2.
 - **Large `memcpy`/`memset` of write-only data** (zeroing a big arena you'll fault in lazily, staging a DMA buffer). `glibc`'s `memcpy`/`memset` already switch to non-temporal stores above a size threshold; your hand-rolled bulk copies should too.
 - **Producer→consumer hand-off where the producer won't re-read** — though here weigh whether the consumer wants it *in* L3 (then a normal store is better). Streaming wins only when the writer truly won't reuse the cache line and protecting the hot set matters.
 
@@ -262,7 +262,7 @@ The check here is that your streaming store **didn't get lowered back to a norma
 
 - M. Kulukundis, *"Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step"* (CppCon 2017) — group prefetching in Swiss tables; S. Chen, P. Gibbons, T. Mowry, *"Improving Index Performance through Prefetching"* (SIGMOD 2001) — prefetching B-trees: the practical §11.4.1 patterns.
 - The `glibc` `memcpy`/`memset` source and its non-temporal-store size thresholds — a production example of §11.4.2.
-- Ch. 12 (*CPU Pipelines & Execution*) — instruction-level and memory-level parallelism, the mechanism prefetch exploits; Ch. 30 (*…Building the Limit Order Book*) — prefetching real book structures; Ch. 34 (*SIMD*) — the vector registers and `<immintrin.h>` intrinsics the streaming stores here operate on; Ch. 77 §77.4.1 — the same weak-ordering-plus-`sfence` discipline for write-combining MMIO.
+- Ch. 12 (*CPU Pipelines & Execution*) — instruction-level and memory-level parallelism, the mechanism prefetch exploits; Ch. 30 (*…Building the Limit Order Book*) — prefetching real book structures; Ch. 34 (*SIMD*) — the vector registers and `<immintrin.h>` intrinsics the streaming stores here operate on; Ch. 78 §78.4.1 — the same weak-ordering-plus-`sfence` discipline for write-combining MMIO.
 - **Appendix A** — the ARM port: a tuned distance and hint must be re-measured there (the ISA spellings are `PRFM` and the non-temporal `LDNP`/`STNP` pair, with a weaker memory model that changes the fencing story).
 
 ---

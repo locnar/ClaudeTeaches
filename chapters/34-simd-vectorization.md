@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Ch. 12 (accumulator splitting — SIMD is its vector conclusion; ILP), Ch. 25 (aliasing/`restrict` — the #1 vectorization blocker), Ch. 9–10 (SoA layout & alignment — what vectorization needs), Ch. 26 (`-march`/`-O3` — enabling SIMD), Ch. 32 (FP reassociation — vectorized reductions need it), Ch. 4 (reading asm — §34.5).
 >
-> **Leads into:** Ch. 63 (vectorized parsing/validation of market data), Ch. 30 (SIMD-probed hash maps), Ch. 33 (SIMD bit ops). Closes **Part V**. The downclocking caveat ties to Ch. 6 (frequency) and Ch. 51 (SMT). Appendix A covers NEON/SVE on ARM.
+> **Leads into:** Ch. 64 (vectorized parsing/validation of market data), Ch. 30 (SIMD-probed hash maps), Ch. 33 (SIMD bit ops). Closes **Part V**. The downclocking caveat ties to Ch. 6 (frequency) and Ch. 51 (SMT). Appendix A covers NEON/SVE on ARM.
 
 ---
 
@@ -12,7 +12,7 @@
 
 SIMD — Single Instruction, Multiple Data — does the *same* operation on a whole vector of values at once: one AVX2 instruction adds eight 32-bit integers (or four doubles) in the time of one scalar add; AVX-512 doubles that to sixteen. For **batch** work — operations applied uniformly across an array — that's a 4-16× throughput multiplier on the arithmetic itself, the largest per-instruction speedup available short of a different algorithm. It's the vector generalization of the accumulator-splitting ILP from Ch. 12: instead of keeping several independent scalar chains in flight, you pack the lanes into one register and the hardware runs them in genuine parallel.
 
-In a trading system SIMD pays off in the **batch-shaped** parts: scanning and validating a buffer of market-data messages (Ch. 63 — comparing many bytes, finding delimiters, validating ranges in parallel), computing a vector of signals or P&L across many instruments, risk and pricing math over portfolios (Greeks, Monte Carlo — Ch. 78 contrasts GPU), parsing (SIMD `from_chars`, SWAR delimiter search), and the probing of SwissTable-style hash maps (Ch. 30). The common thread: a *loop over an array doing uniform work* is a vectorization candidate, and turning it from scalar into SIMD is often the single biggest win on that kernel.
+In a trading system SIMD pays off in the **batch-shaped** parts: scanning and validating a buffer of market-data messages (Ch. 64 — comparing many bytes, finding delimiters, validating ranges in parallel), computing a vector of signals or P&L across many instruments, risk and pricing math over portfolios (Greeks, Monte Carlo — Ch. 79 contrasts GPU), parsing (SIMD `from_chars`, SWAR delimiter search), and the probing of SwissTable-style hash maps (Ch. 30). The common thread: a *loop over an array doing uniform work* is a vectorization candidate, and turning it from scalar into SIMD is often the single biggest win on that kernel.
 
 But SIMD comes with caveats sharp enough that naive use can *lose*, and this chapter is as much about *when not to* as *how to*. It needs the right **data layout** (SoA, Ch. 9 — AoS defeats it) and **alignment** (Ch. 10); it's blocked by **aliasing** (Ch. 25 — the most common reason a loop won't vectorize) and **FP non-associativity** (Ch. 32 — a reduction won't vectorize without reassociation permission); and — the signature SIMD trap — heavy **AVX-512 downclocking**: wide vector instructions can be power-hungry enough that the CPU *lowers its clock frequency* while (and after) they run, so a kernel that's faster in isolation can slow down *everything else on the core*, including the latency-critical scalar hot path — a net loss for a tick-to-trade box that does a little SIMD amid lots of scalar work. The latency-vs-throughput tension of Ch. 1 is acute here: SIMD is a *throughput* win, and the tick-to-trade path is *latency*-bound, so SIMD belongs on the **batch/parallel** parts (feed scanning, risk) and is often *wrong* on the single-message critical path. This chapter measures the win and the downclocking (§34.3), shows the layout/intrinsics/width techniques (§34.4), and verifies the vector codegen (§34.5) — with the discipline to use SIMD where batch throughput matters and keep it off the core when it would tax the latency path.
 
@@ -124,7 +124,7 @@ When auto-vectorization fails or is suboptimal on a kernel that matters, drop to
 
 - **When to reach for intrinsics.** The compiler won't vectorize (a blocker you can't remove, a pattern it doesn't recognize — horizontal ops, shuffles, saturating arithmetic, byte-wise compares for parsing), or it vectorizes *poorly*. Confirm the failure first (`-fopt-info-vec-missed`/asm — §34.5); often fixing layout/aliasing (§34.4.1) lets the compiler do it for free, which is preferable.
 - **Prefer a portable wrapper over raw intrinsics.** `std::simd` (C++26 `<simd>`; today `std::experimental::simd` — §34.4.4 measures it), Google **Highway**, **xsimd**, **Eve** give readable, portable SIMD that compiles to the best ISA available and falls back gracefully — far more maintainable than `_mm512_*` intrinsics hand-written per ISA. Use raw intrinsics only for the last few percent or an op the wrappers lack.
-- **The common SIMD idioms.** Load (`loadu`/`load`), arithmetic (`add`/`mul`/`fmadd`), compare-to-mask + blend (predication — the SIMD form of branchless select, Ch. 14/33), horizontal reduce (sum/min/max across lanes — needed at the end of a reduction), shuffle/permute, gather/scatter (use sparingly). Market-data scanning uses byte compares + mask + `popcount`/`tzcnt` (Ch. 33) to find delimiters/matches across 32-64 bytes at once (Ch. 63). The canonical kernel, in raw intrinsics:
+- **The common SIMD idioms.** Load (`loadu`/`load`), arithmetic (`add`/`mul`/`fmadd`), compare-to-mask + blend (predication — the SIMD form of branchless select, Ch. 14/33), horizontal reduce (sum/min/max across lanes — needed at the end of a reduction), shuffle/permute, gather/scatter (use sparingly). Market-data scanning uses byte compares + mask + `popcount`/`tzcnt` (Ch. 33) to find delimiters/matches across 32-64 bytes at once (Ch. 64). The canonical kernel, in raw intrinsics:
 
 ```cpp
 // scan.cpp — first '|' in a 32-byte block: AVX2 compare + movemask + tzcnt vs a scalar loop.
@@ -147,7 +147,7 @@ int find_delim_avx2(const char* buf, char delim) {
 }
 ```
 
-  GCC 13.3 compiles `find_delim_avx2` to `vpbroadcastb` / `vpcmpeqb` / `vpmovmskb` / `tzcnt` / `cmove` (verified) — a flat ~6-cycle answer regardless of where the delimiter sits, where the scalar loop costs 1 iteration per byte plus a mispredict at exit. Ch. 63 builds the full field tokenizer on this; the same kernel in Highway or `std::simd` is portable to NEON/SVE (Appendix A).
+  GCC 13.3 compiles `find_delim_avx2` to `vpbroadcastb` / `vpcmpeqb` / `vpmovmskb` / `tzcnt` / `cmove` (verified) — a flat ~6-cycle answer regardless of where the delimiter sits, where the scalar loop costs 1 iteration per byte plus a mispredict at exit. Ch. 64 builds the full field tokenizer on this; the same kernel in Highway or `std::simd` is portable to NEON/SVE (Appendix A).
 - **Masking (AVX-512).** `k`-mask registers do per-lane predication natively — conditional vector ops without branches or blends, the clean way to vectorize data-dependent work. Powerful, but AVX-512-only (downclock/portability — §34.6).
 - **Keep a scalar fallback and runtime-dispatch.** For portability across CPUs (and the AMD/ISA-availability reality — Ch. 26, 33), compile multiple ISA versions and dispatch at runtime on CPU features (`__builtin_cpu_supports`, function multiversioning, or the wrapper's dispatch). Never ship an AVX-512 binary that SIGILLs on a non-AVX-512 box (Ch. 26).
 
@@ -259,7 +259,7 @@ Eight-lane `ymm` arithmetic and a one-time horizontal reduction after the loop �
 2. **Why it didn't vectorize.** Build *without* `-ffast-math` and *without* `restrict`; use `-fopt-info-vec-missed`/`-Rpass-missed=loop-vectorize` to see the reasons. Add `restrict` (Ch. 25), then FP-reassoc (Ch. 32), and watch each unblock vectorization (§34.4.1).
 3. **Measure downclocking.** Run a heavy AVX-512 loop on a core while timing a scalar latency task on the *same* core; record the scalar task's latency and the core frequency (`turbostat`) with/without the SIMD load. Quantify the downclock tax (§34.3). Repeat capped at AVX2 — is the *overall* result better?
 4. **SoA vs AoS.** Vectorize a computation over `Order{price,qty}[]` (AoS) vs `prices[]`,`qtys[]` (SoA). Confirm (asm + `-fopt-info`) the AoS version gathers/doesn't vectorize and SoA does; measure (§34.4.1, Ch. 9).
-5. **SIMD market-data scan (preview Ch. 63).** Use byte-compare + mask + `tzcnt` (Ch. 33) to find a delimiter across 32 bytes at once vs a scalar byte loop. Measure; confirm the vector compare in the asm.
+5. **SIMD market-data scan (preview Ch. 64).** Use byte-compare + mask + `tzcnt` (Ch. 33) to find a delimiter across 32 bytes at once vs a scalar byte loop. Measure; confirm the vector compare in the asm.
 
 **Checklist — SIMD & vectorization**
 
@@ -275,7 +275,7 @@ Eight-lane `ymm` arithmetic and a one-time horizontal reduction after the loop �
 ## 34.8 References
 
 - Intel *Intrinsics Guide* and *Optimization Reference Manual*, and Agner Fog's *Instruction Tables* — SSE/AVX/AVX-512 instruction semantics, latency/throughput, and the **AVX frequency-license/downclocking** behavior central to §34.2-§34.3.
-- D. Lemire et al., *simdjson* and related papers — production SIMD parsing/scanning (byte-compare + mask + bit ops), directly relevant to §34.4.2 and Ch. 63.
+- D. Lemire et al., *simdjson* and related papers — production SIMD parsing/scanning (byte-compare + mask + bit ops), directly relevant to §34.4.2 and Ch. 64.
 - The Google **Highway**, **xsimd**, **Eve**, and `std::experimental::simd` documentation — portable SIMD wrappers and runtime dispatch (§34.4.2).
 - The GCC/Clang vectorization documentation — `-O3`/`-march`, `-fopt-info-vec`/`-Rpass=loop-vectorize`, alignment and `restrict` requirements (§34.4.1, §34.5; ties Ch. 25–26).
 - T. Mattson / CppCon SIMD talks and the Intel "AVX-512 downclocking" analyses (Vlad Krasnov / Cloudflare blog) — the frequency-effect measurements behind §34.3.
@@ -284,7 +284,7 @@ Eight-lane `ymm` arithmetic and a one-time horizontal reduction after the loop �
 
 - D. Bakhvalov, *Performance Analysis and Tuning on Modern CPUs* — vectorization analysis, downclocking, and reading vectorization reports.
 - Matt Pharr / ISPC and the "SPMD on SIMD" model — an alternative way to write portable data-parallel kernels.
-- Ch. 9–10 (*Layout/Alignment*) — the SoA/alignment prerequisites; Ch. 25 (*Aliasing*) — the #1 blocker; Ch. 32 (*FP*) — reassociation/determinism; Ch. 12 (*Pipelines*) — ILP/accumulators; Ch. 33 (*Bit Tricks*) — SIMD bit/byte ops; Ch. 51 (*SMT*) — downclock/sibling effects; Ch. 63 (*Wire Decoding*) — SIMD parsing; Ch. 78 (*GPU*) — when data-parallel work outgrows SIMD.
+- Ch. 9–10 (*Layout/Alignment*) — the SoA/alignment prerequisites; Ch. 25 (*Aliasing*) — the #1 blocker; Ch. 32 (*FP*) — reassociation/determinism; Ch. 12 (*Pipelines*) — ILP/accumulators; Ch. 33 (*Bit Tricks*) — SIMD bit/byte ops; Ch. 51 (*SMT*) — downclock/sibling effects; Ch. 64 (*Wire Decoding*) — SIMD parsing; Ch. 79 (*GPU*) — when data-parallel work outgrows SIMD.
 - **Appendix A** — NEON/SVE/SVE2 on ARM/Graviton; Agner Fog's *Instruction Tables* / uops.info and the Intel *Optimization Reference Manual* (§34.8) — SIMD op throughput and AVX frequency-license numbers (Appendix E's table has no SIMD rows); **Appendix D** — `-march`/SIMD flags.
 
 ---

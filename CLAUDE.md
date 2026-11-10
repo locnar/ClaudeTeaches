@@ -485,17 +485,17 @@ Code & content guidelines:
   - **VII — OS, Scheduling & Isolation** (48–56): context switching, timers & deadlines without jitter
     (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
     residual noise (Ch. 52, added 2026-11-09 P3-1), warming.
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (57–62): native I/O, io_uring, zero-copy fast path,
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (57–63): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
-  - **IX — Market Data, NIC & Fabric** (63–71): decoding, reliable multicast, multicast membership &
+  - **IX — Market Data, NIC & Fabric** (64–72): decoding, reliable multicast, multicast membership &
     dark-feed detection (Ch. 59, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (72–76): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (73–77): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (77–81): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (78–82): PCIe, GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (76–80, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (87–107): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (88–108): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
     topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
     kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
