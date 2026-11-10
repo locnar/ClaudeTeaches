@@ -10,7 +10,7 @@
 
 ## 13.1 Why it matters: the core is doing more than one thing at once
 
-So far Part II has treated the CPU as something that *waits* — for caches (Ch. 8–12). This chapter is about what it does when the data is *there*: execute. And the surprising truth, if your mental model is "one instruction at a time," is that **a modern core executes many instructions simultaneously, out of program order, and the order you wrote them in is mostly a fiction the hardware reconstructs.** An Ice Lake core can *issue* up to ~5 µops per cycle, has ~10 execution ports, keeps ~350 instructions in flight in its reorder buffer, and will happily run instruction #50 before instruction #20 if #20 is stalled and #50's inputs are ready.
+So far Part II has treated the CPU as something that *waits* — for caches (Ch. 8–12). This chapter is about what it does when the data is *there*: execute. And the surprising truth, if your mental model is "one instruction at a time," is that **a modern core executes many instructions simultaneously, out of program order, and the order you wrote them in is mostly a fiction the hardware reconstructs.** An Ice Lake core can *issue* up to ~5 µops per cycle, has ~10 execution ports, keeps ~350 instructions in flight in its reorder buffer (the ROB), and will happily run instruction #50 before instruction #20 if #20 is stalled and #50's inputs are ready.
 
 This changes how you reason about hot-path cost. Instruction *count* is a weak predictor of time (Ch. 4 warned you), because the core overlaps independent instructions for free. What actually bounds a hot loop, once its data is cache-resident, is one of two things:
 

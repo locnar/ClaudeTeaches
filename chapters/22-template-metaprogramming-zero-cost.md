@@ -380,9 +380,7 @@ No wrapper, no load/store through a stack slot, no extra `mov`: a trivially-copy
 
 The choice of mechanism is a *diagnostics and design* decision; the optimizer sees the same function four times. Concept checks, `enable_if` and tag parameters leave no instructions — the empty tag argument is passed in no register and the constraint is evaluated before codegen begins.
 
-### Build-time/size caveat
-
-Zero runtime cost is *not* zero cost (Ch. 21): each instantiation is build time + binary size. For the four dispatch mechanisms of §22.4.6 that cost is the same — 400 instantiations compiled in 471/471/478/484 ms (tag/`if constexpr`/SFINAE/concepts, GCC 13.3) and 322/320/344/326 ms (Clang 18.1) — so concepts are not a build-time tax; what differs is the *length and quality* of the error when a constraint fails (0 lines and wrong code for tag dispatch, 7–8 for `if constexpr`+`static_assert`, 10–19 for SFINAE, 25–29 with a named reason for concepts). Verify the *other* axis too — `size`/`bloaty` on the binary, `-ftime-trace` on the build — so a runtime win doesn't hide an I-cache (Ch. 14) or build-time regression (§22.6).
+**Build-time/size caveat.** Zero runtime cost is *not* zero cost (Ch. 21): each instantiation is build time + binary size. For the four dispatch mechanisms of §22.4.6 that cost is the same — 400 instantiations compiled in 471/471/478/484 ms (tag/`if constexpr`/SFINAE/concepts, GCC 13.3) and 322/320/344/326 ms (Clang 18.1) — so concepts are not a build-time tax; what differs is the *length and quality* of the error when a constraint fails (0 lines and wrong code for tag dispatch, 7–8 for `if constexpr`+`static_assert`, 10–19 for SFINAE, 25–29 with a named reason for concepts). Verify the *other* axis too — `size`/`bloaty` on the binary, `-ftime-trace` on the build — so a runtime win doesn't hide an I-cache (Ch. 14) or build-time regression (§22.6).
 
 ---
 
