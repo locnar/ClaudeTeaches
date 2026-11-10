@@ -1,7 +1,5 @@
 # Reviewed rows of tools/review/check_hints.py (file<TAB>reference<TAB>hint). Regenerate with --write-baseline
 # ONLY after reading every new MISMATCH row; a row here means "read by a person: the target is right".
-CLAUDE.md	§N.2	Mental model
-CLAUDE.md	§N.4	Techniques
 chapters/00-preface.md	Chapters 2	will be taught to measure first
 chapters/01-the-latency-mindset.md	Ch. 30	this book apply
 chapters/02-measure-first-profiling-pmu.md	Ch. 3	whole subject

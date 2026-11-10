@@ -243,6 +243,8 @@ def collect(root, ix, vocab):
                     continue
                 if r.kind not in ("ch", "sec", "app", "appsec") or "weak" in r.flags:
                     continue
+                if r.kind == "appsec" and "bare" in r.flags and r.a in ("N", "M", "X", "Y") and own != r.a:
+                    continue          # "§N.3", "§M.x": the book's placeholder spelling for "section 3 of any chapter"
                 if r.kind == "ch" and "cont" in r.flags:
                     continue          # a list member: the list is judged once, from its first reference
                 if r.kind in ("sec", "appsec") and any(f.startswith("ctxch") for f in r.flags):

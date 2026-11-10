@@ -16,7 +16,7 @@ The HFT relevance is concrete and recurring. An order book (Ch. 32) tracks which
 
 The discipline, as with everything in Part V, is *measure and verify*: these intrinsics have their own latency/throughput (Ch. 13) — `popcnt`/`lzcnt`/`tzcnt` are cheap (~3 cycles), but `pdep`/`pext` are **fast (~3 cycles) on Intel and on AMD Zen 3+, yet microcoded on AMD Zen 1/Zen 2** (~18 to hundreds of cycles, mask-dependent — a trap on legacy or mixed fleets, §37.6) — and the compiler doesn't always emit the instruction you expect from your C++. So this chapter maps the toolkit (§37.2), measures the intrinsics (§37.3), applies them to order-book bitmaps, branchless idioms, power-of-two tricks, and field packing (§37.4), and verifies the single-instruction emission in the asm (§37.5) — with a clear-eyed warning about the `pdep`/`pext` Zen 1/Zen 2 cliff. Prefer the **standard `<bit>` library** (C++20: `std::popcount`, `std::countr_zero`, `std::bit_width`, etc. — libstdc++ 9+/libc++ 9+, `__cpp_lib_bitops`; `std::byteswap` is C++23, libstdc++ 12+/libc++ 14+, `__cpp_lib_byteswap`; the pre-C++20 fallbacks are `__builtin_popcountll`/`__builtin_ctzll`/`__builtin_bswap64` — Appendix H) which compiles to these instructions portably and falls back gracefully — intrinsics only where the standard doesn't reach.
 
-## 37.2 Mental model: BMI/BMI2 (`popcnt`, `lzcnt`/`tzcnt`, `pdep`/`pext`, `blsr`)
+## 37.2 Mental model: POPCNT, LZCNT and BMI1/BMI2 (`popcnt`, `lzcnt`/`tzcnt`, `pdep`/`pext`, `blsr`)
 
 The bit-manipulation instruction families on x86-64, and the standard C++20 `<bit>` wrappers that emit them:
 

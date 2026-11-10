@@ -611,12 +611,18 @@ def validate(ix, root):
             if n1 == n2 and (k1, j1 or 0) >= (k2, j2 or 0):
                 add("ERROR", "range-order", label, i, inf, f"section range '{r.text}' is not ascending", line, r)
         elif r.kind == "app":
+            if r.a in ("X", "Y") and r.a not in ix.appendices:
+                counts["placeholder"] += 1      # the conventions' own "Appendix X.n" / "appendix-X-slug.md"
+                continue
             if r.a not in ix.appendices:
                 add("ERROR", "app-missing", label, i, inf, f"Appendix {r.a} does not exist (A..{ix.lastapp})", line, r)
         elif r.kind == "apprange":
             if r.a not in ix.appendices or r.b not in ix.appendices or r.a >= r.b:
                 add("ERROR", "app-missing", label, i, inf, f"appendix range {r.a}–{r.b} is not within A..{ix.lastapp}", line, r)
         elif r.kind == "appsec":
+            if r.a in ("X", "Y") and r.a not in ix.appendices:
+                counts["placeholder"] += 1
+                continue
             if "bare" in r.flags:
                 # a bare §X.n: §N.k / §M.k are also the book's placeholder spelling ("§N.3", "Ch. N §M.x")
                 if r.a in ("N", "M", "X", "Y") and own != r.a and not ix.has_appsec(r.a, r.b, r.c):

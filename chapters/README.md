@@ -562,7 +562,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ### [37. Bit Manipulation & Integer Tricks](37-bit-manipulation-integer-tricks.md)
 - 37.1 Why it matters: one instruction instead of a loop
-- 37.2 Mental model: BMI/BMI2 (`popcnt`, `lzcnt`/`tzcnt`, `pdep`/`pext`, `blsr`)
+- 37.2 Mental model: POPCNT, LZCNT and BMI1/BMI2 (`popcnt`, `lzcnt`/`tzcnt`, `pdep`/`pext`, `blsr`)
 - 37.3 Measure it: intrinsic latency/throughput
 - 37.4 Techniques
   - 37.4.1 Bitsets/bitmaps for order-book occupancy and free-lists

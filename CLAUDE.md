@@ -40,6 +40,21 @@ Each chapter SHOULD follow this structure:
 8. **References** - any source material that provides background on the topic.
 9. **Additional Reading** - other resources, websites, books that contain more information on the topic.
 
+A chapter has exactly one of two shapes, and `tools/review/sweep.py` enforces them: the **nine sections above**, or
+**eight** — the same without *Verify the codegen*, for a chapter where the optimizer is not the subject. The sections are
+numbered without gaps, so in an 8-section chapter Pitfalls is §N.5, Exercises §N.6, References §N.7 and Additional
+Reading §N.8 (89 chapters have this shape, 31 have nine). Only `### N.2.x` and `### N.4.x` subsections are numbered.
+
+**How references are written** (checked by `tools/review/check_refs.py`):
+- a chapter is `Ch. N`; a section is `§N.k` or `§N.k.j` (alone or as `Ch. N §N.k`), never `Ch. N.k`; an appendix section is
+  `Appendix X.n`;
+- in a list every item the reader cannot see a `Ch.` in front of must still be one the tools can parse: `Ch. 41, 45 and 57`
+  and `Ch. 42 §42.5, 43 §43.5` are fine; after a parenthesis repeat the `Ch.` (`Ch. 42 (threading), Ch. 43 (spinlocks)`);
+  a table column or diagram that holds chapter numbers writes `Ch.` in every cell;
+- **somebody else's book is cited in lower case** — `ch. 9`, `sec. 7.17` — never `Ch. 9` / `§7.17`: the insertion tool
+  renumbers anything spelled like one of our own references (it had silently renumbered more than twenty such citations by 2026-11-10);
+- a "Part X (Ch. a–b)" range is the Part's whole range; for a subset say so in words ("Part II's memory chapters (Ch. 8–12)").
+
 Code & content guidelines:
 - Every performance claim is backed by a **measurement** (benchmark numbers,
   `perf` counters, or asm). No "this is faster" without evidence.
@@ -61,8 +76,11 @@ Code & content guidelines:
 > A–G), kept for history. The book was since reorganised into thirteen Parts with 76 chapters and twelve
 > appendices (A–L), and on 2026-11-09 extended first to 81 chapters and thirteen appendices (A–M), then to 84 chapters and fourteen appendices (A–N), then — with a new Part XII (Beyond C++) — to 89 chapters in thirteen Parts, and then — with the design-pattern chapters — to 95 chapters in thirteen Parts and fifteen appendices (A–O), and then — with the modern-C++ depth chapters — to **98 chapters in thirteen Parts and sixteen appendices (A–P)**; **the authoritative current structure is `chapters/README.md`** (see Phase 3 under
 > *Status / Workflow* below), on 2026-11-10 (P3-6 batch B: the hardware/OS chapters) to 108 chapters in thirteen Parts and eighteen appendices (A–R), on 2026-11-10 (P3-6 batch C: the algorithms/data chapters) to 112 chapters in thirteen Parts and eighteen appendices (A–R), on 2026-11-10 (P3-6 batch D1: the OS/hardware depth chapters) to 114 chapters in thirteen Parts and nineteen appendices (A–S), and on 2026-11-10 (P3-6 batch D2: the trading-component, resilience, networking and numerics chapters) to **120 chapters in thirteen Parts and nineteen appendices (A–S)**. Do not renumber against this list. The **Appendices** entries (A–S)
-> at the end of the list are the exception: they cite the *current, post-reorg* chapter numbers,
-> because the appendices themselves were written (or re-pointed) against that numbering.
+> at the end of the list describe each appendix's scope; the chapter numbers inside them are those of the day each entry
+> was written (A–L: the Phase-3 numbering; M–S: the numbering of their insertion round) and are **not maintained** — the
+> current pointers are in each appendix's own header and in `chapters/README.md`. The whole block, and the dated insertion
+> records under *Status / Workflow*, are exempt from `tools/review/check_refs.py` for that reason; to translate one of
+> their numbers use `tools/review/renumber_history.py map N --chapters C`.
 
 ### Part I — Foundations & Methodology
 1. **The Latency Mindset** — latency vs throughput, tail latency, jitter, the
@@ -423,13 +441,13 @@ Code & content guidelines:
   kill-switch dry-run) gates as commands with expected values; T-0 arming, continuous
   re-verification, time-boxed re-arm after an intraday restart, disarm; the host fingerprint
   micro-suite; configuration as code and drift detection (with Appendix C.6); and the gate runner
-  as a script (current numbering: Ch. 46, 47, 55, 56, 60, 75, 78, 82, 83; Appendices C, E, J, K, L).
+  as a script (numbering when written: Ch. 46, 47, 55, 56, 60, 75, 78, 82, 83; Appendices C, E, J, K, L).
 - **Appendix N — Incident Diagnostics Bundle** (added 2026-11-09 with the debugging chapters) — the
   checklist and bounded collector behind Ch. 81's forensic method and Ch. 79's post-mortem: what makes
   a bundle alignable (clock anchors), attributable (build IDs, recorded flags, configuration hash,
   host fingerprint) and checkable (raw rings and sample windows with a manifest and checksums); the
   evidence per layer with the producing chapter; the ten-minute first look; retention and scrubbing
-  (current numbering: Ch. 5, 46, 60, 73–75, 77, 79–83; Appendices C, D, I, K, M).
+  (numbering when written: Ch. 5, 46, 60, 73–75, 77, 79–83; Appendices C, D, I, K, M).
 - **Appendix O — Hot-Path Anti-Pattern Catalogue** (added 2026-11-09 with the design-pattern chapters) —
   every chapter's §N.5/§N.6 *Pitfalls & anti-patterns* re-sorted by where the sin lives (allocation;
   dispatch/type erasure; control flow & memory ordering; sharing; queues/flow control/timers;
@@ -447,7 +465,7 @@ Code & content guidelines:
   strided loop in GCC, `-fno-strict-aliasing` 3.6× on an `int*`-bounded axpy in Clang,
   `-fno-delete-null-pointer-checks` +0.15 ns/call, `-ftrivial-auto-var-init` 0 where the buffer dies, full
   trapping UBSan 2.5–20× vs the overflow/bounds/shift/null subset 1.0–1.5×) → sanctioned replacement
-  (current numbering: Ch. 4, 12–14, 21, 23, 30, 32, 45, 60, 87; Appendices D, H, I).
+  (numbering when written: Ch. 4, 12–14, 21, 23, 30, 32, 45, 60, 87; Appendices D, H, I).
 - **Appendix Q — AMD Zen (EPYC & Ryzen) Companion** (added 2026-11-10 with the P3-6 batch-B hardware/OS
   chapters) — what changes from the Intel reference machine for a reader on AMD Zen 3/4/5, in Appendix A's
   what-changes form: CCD/IOD topology (deferring to Ch. 18), the per-CCD victim L3 and TLB geometry, op cache
@@ -455,13 +473,13 @@ Code & content guidelines:
   the Intel→Zen `perf` event map (`ls_dmnd_fills_from_sys`, `amd_l3`, `amd_df`, `PipelineL1/L2` in place of
   `--topdown`, IBS for `perf mem`/`c2c`, `rdpru`, uProf), what does not change in the memory model, the EPYC
   firmware knob names for every Appendix C.1 row, AMD QoS / no DDIO, and what to expect re-running the book's
-  measurements (current numbering: Ch. 2, 6–8, 12–14, 16–18, 33–38, 52, 54, 68, 74; Appendices A, C, D, R).
+  measurements (numbering when written: Ch. 2, 6–8, 12–14, 16–18, 33–38, 52, 54, 68, 74; Appendices A, C, D, R).
 - **Appendix R — x86 Generation Cheat Sheet** (added 2026-11-10 with the P3-6 batch-B chapters) — the
   reference machine's Ice Lake-SP beside Sapphire/Emerald/Granite Rapids and the client Raptor/Arrow Lake
   parts, and Zen 3 → Zen 5 EPYC/Ryzen: cores, clocks, caches, L3 latency, ROB/DSB/TLB, channels, lanes,
   SNC/NPS, licences, DDIO, C6 exit; Appendix E restated per generation in ns and cycles at each part's
   pinned clock (with the cross-domain core-to-core row Appendix E cannot have); the accelerator inventory
-  (AMX, DSA, IAA, QAT, DLB, AVX10, APX) and why each sits beside the hot path (current numbering: Ch. 7, 8,
+  (AMX, DSA, IAA, QAT, DLB, AVX10, APX) and why each sits beside the hot path (numbering when written: Ch. 7, 8,
   12–14, 16, 18, 34, 37, 54, 68, 78; Appendices D, E, L, Q).
 - **Appendix S — Trading Workloads in Virtual Machines** (added 2026-11-10 with the P3-6 batch-D1 chapters) —
   the adjacent tier that runs virtualised beside the bare-metal order path: where VM exits happen (EPT
@@ -469,7 +487,7 @@ Code & content guidelines:
   interrupts), `kvm-clock` vs the invariant TSC and PTP in a guest, the pinned-vCPU / huge-pages-on-both-levels /
   APICv / idle-polling libvirt recipe with the representative guest-vs-host `cyclictest` table, SR-IOV VF
   passthrough through VFIO vs `virtio-net`, and the guest's own checklist — measured in the test guest where
-  it could be (current numbering: Ch. 6, 17, 20, 52, 57, 59, 62, 73, 84, 93, 109; Appendices A, C, L, M).
+  it could be (numbering when written: Ch. 6, 17, 20, 52, 57, 59, 62, 73, 84, 93, 109; Appendices A, C, L, M).
 
 ## Status / Workflow
 - Phase 1 (done): TOC established above (64 chapters + 7 appendices A–G; since extended to 120
@@ -547,9 +565,21 @@ Code & content guidelines:
   The reorg was done by a scripted renumber + cross-reference remap (chapter numbers, `§N.M`
   section refs, part headers, file renames), followed by an editorial pass refreshing every moved
   chapter's framing/teasers and regenerating `chapters/README.md` from the chapter files.
-  A full consistency sweep (title/section numbering, teaser chaining N→N+1, cross-ref range,
-  README link resolution, no-hard-wrap) is clean. A PDF build toolchain lives in `tools/book-pdf/`
-  (pandoc + tectonic). Remaining work is *revision*: backfill real measured benchmark runs.
+  The three checks below are clean on the 120-chapter book (2026-11-10, work-queue item P4-2). A PDF build
+  toolchain lives in `tools/book-pdf/` (pandoc + tectonic); the full book builds to **2,188 pages** (2026-11-10,
+  Tectonic 0.15.0), with Parts I–XIII, chapters 1–120 and appendices A–S in order in its table of contents.
+- Phase 4 (open): **every work-queue item of the 2026-10-30 review is done except P4-1** — backfilling real
+  reference-machine runs into the §N.3 blocks (they are representative or VM-measured and labelled so; the consolidated
+  list of what needs the reference box is §11 of `review/2026-10-30-consistency-review-and-gap-analysis.md`). Work-queue
+  item 22 (the esoteric data-structures brainstorm, D01–D18 in `review/2026-11-03-data-structures-brainstorm.md`) is
+  **unscheduled**.
+- **The check workflow — run all three after any change; each exits 0 when clean:**
+  `python3 tools/review/sweep.py` (structure: Part headers, the two section shapes, teaser chains, README outline,
+  fences/placeholders/hard wraps, stated counts), `python3 tools/review/check_refs.py` (every `Ch.`/`§`/Appendix/Part/file
+  reference resolves — deterministic, the primary reference check) and `python3 tools/review/check_hints.py` (each
+  reference's topic hint fits its target; rows already read by a person are in `tools/review/hints-baseline.txt`, so only a
+  *new* low-evidence reference fails). `stale_crossrefs.py` is retired; its renumbering history lives on as
+  `tools/review/renumber_history.py`, whose `when FILE NEEDLE N…` dates a number by the commit that introduced it.
 - **2026-11-09 monitoring insertion (work-queue item P3-1):** five chapters were inserted with
   `tools/review/insert_chapter.py` (which renumbers files, headings, teasers, every `Ch.`/`§`/file
   cross-reference, the README outline, the preface and the Part ranges above, and appends a step to
@@ -776,6 +806,16 @@ Code & content guidelines:
   pointers. **Item P3-6 (work-queue item 19) is complete with this batch**: batches A, B, C, D1 and D2 delivered
   every row of §10.6–§10.12 that was scheduled; the remaining work on the new chapters is the Phase-4 backfill of
   reference-machine runs (every §N.3 in this batch is measured on the guest and labelled so).
+- **2026-11-10 final consistency pass (work-queue item P4-2):** no chapter was added or renumbered. New tools:
+  `tools/review/check_refs.py` (deterministic reference validator, with `--self-test`), `tools/review/check_hints.py`
+  (+ `hints-baseline.txt`), `tools/review/renumber_history.py` (replaces the retired `stale_crossrefs.py`); `sweep.py`
+  extended to the full structure contract; `insert_chapter.py` now continues a chapter list past an attached `§`.
+  Fixed in the book: 148 list items whose bare chapter number the insertion tool had left behind (Appendix O's *Where*
+  column), 70 more bare numbers it could not see (lists after a `§`, a fenced table in Ch. 113, Ch. 120's ledger),
+  21 external-book citations it had renumbered, 48 `Ch. N.M` spellings, 24 references that resolved to the wrong
+  chapter (PCIe cited as Ch. 85 sixteen times), stale counts in five chapters, seven README outline lines; Appendix O
+  gained rows for eleven chapters, Appendix F is alphabetical again. The PDF build needed three fixes in
+  `tools/book-pdf/` (memory, glyphs, TOC number width). The record, with what remains for Phase 4, is §11 of the review.
 - When generating or revising a chapter, confirm scope against `chapters/README.md` (the
   authoritative post-reorg structure; the TOC above is the historical 64-chapter drafting list
   and has no entries for the twelve chapters added in Phase 3) and keep cross-references to
@@ -815,8 +855,10 @@ reader can find which document discusses a given technique:
 ```
 
 The searchable sub-topics live as numbered sub-bullets under **§N.2 (Mental model)** and
-**§N.4 (Techniques)**; per-chapter §8 References / §9 Additional Reading are **not** listed in the
-index. Appendices use the same outline at one level (`A.1`, `A.2`, …). A short legend at the top
+**§N.4 (Techniques)**; per-chapter References / Additional Reading (§N.8–§N.9, or §N.7–§N.8 in an eight-section
+chapter) are **not** listed in the index. Every outline line **begins with the heading's own text** and may continue
+with a gloss for the searcher (`- 115.2.2 Driver dialects: the same drop, five names (`ixgbe`, `mlx5`, `sfc`)`);
+`sweep.py --fix-readme` regenerates any line that does not. Appendices use the same outline at one level (`A.1`, `A.2`, …). A short legend at the top
 of the file states the convention: a **linked** chapter title (`[N. Title](NN-slug.md)`) points at
 its file. (Drafting is complete, so the earlier "plain title = planned, not yet written" half of the
 convention is retired; every chapter and appendix is linked.) Drafting/revision status is tracked
@@ -836,8 +878,9 @@ change:
    removed chapter/appendix, a Part boundary, a revision milestone), update the Phase 2/3 status
    block under *Status / Workflow* — counts, Part ranges and the remaining-work note.
 3. **Consistency sweep of the new chapter:** confirm it opens with the Part header +
-   Prerequisites/Leads-into blockquote, follows the §1–§9 section structure, and ends with a
-   `*Next: Ch. NN — …*` teaser pointing at the next chapter.
+   Prerequisites/Leads-into blockquote, follows the nine-section structure (or the eight-section one without
+   *Verify the codegen*), and ends with a `*Next: Ch. NN — …*` teaser pointing at the next chapter — then run
+   `tools/review/sweep.py`, `tools/review/check_refs.py` and `tools/review/check_hints.py`; all three must exit 0.
 
 Treat this as part of "generating a chapter," not an optional follow-up — a chapter is not done
 until its README outline reflects its real contents and CLAUDE.md's progress line is current.
