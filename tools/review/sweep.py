@@ -72,8 +72,8 @@ for f in chap:
     # self-reference check: "Ch. N" where N == own number used as if other
     # hard-wrapped lines? (lines of prose < 100 chars ending mid-sentence) skip
     # reference-machine
-    if 7<=n<=15 and "6326" not in text: issues[f].append("Part II chapter without Xeon Gold 6326 mention")
-    if n==16 and "dual-socket" not in text.lower() and "2×" not in text and "2x" not in text.lower(): issues[f].append("NUMA chapter without dual-socket mention")
+    if 8<=n<=20 and n!=18 and "6326" not in text: issues[f].append("Part II chapter without Xeon Gold 6326 mention")
+    if n==18 and "dual-socket" not in text.lower() and "2×" not in text and "2x" not in text.lower(): issues[f].append("NUMA chapter without dual-socket mention")
 
 for f in apps:
     p=os.path.join(D,f); ls=lines_outside_fences(p); text="\n".join(l for _,l in ls)

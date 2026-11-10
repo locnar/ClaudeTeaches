@@ -4,7 +4,7 @@
 
 > **Prerequisites:** Part I (Ch. 1–7). You think in distributions (Ch. 1), can read PMU cache counters (Ch. 2 — `LLC-load-misses`, MPKI), benchmark honestly on a quiet, pinned, fixed-frequency box (Ch. 3, 6), and can read a hot loop in asm (Ch. 4). This chapter opens **Part II — CPU Microarchitecture** and is the foundation the rest of the part builds on.
 >
-> **Leads into:** Ch. 10 (data-oriented layout — AoS vs SoA) and Ch. 11 (object layout, alignment, padding) apply this directly; Ch. 12 (software prefetch & non-temporal stores) extends it; Ch. 17 (TLB & huge pages) and Ch. 18 (NUMA) handle translation and multi-socket effects. The false-sharing flip side of coherence is Ch. 42. Reference costs are consolidated in **Appendix E**.
+> **Leads into:** Ch. 9 (the DRAM subsystem — what the "~80 ns" at the bottom of §8.2.1 actually is: bimodal, loaded, shared by channel), Ch. 10 (data-oriented layout — AoS vs SoA) and Ch. 11 (object layout, alignment, padding) apply this directly; Ch. 12 (software prefetch & non-temporal stores) extends it; Ch. 17 (TLB & huge pages) and Ch. 18 (NUMA) handle translation and multi-socket effects. The false-sharing flip side of coherence is Ch. 42. Reference costs are consolidated in **Appendix E**.
 
 ---
 
@@ -241,4 +241,4 @@ The unifying idea: **make your access pattern predictable and contiguous**, and 
 
 ---
 
-*Next: Ch. 9 — The DRAM Subsystem Below L3.*
+*Next: Ch. 9 — The DRAM Subsystem Below L3, which opens the box at the bottom of this chapter's diagram: channels, ranks, bank groups and the row buffer that make an L3 miss bimodal (row hit vs conflict), the loaded-latency curve that lets a capture writer on another core slow *your* misses with no counter changing, refresh stalls in the tail, and HBM/CXL memory as CPU-less NUMA nodes to keep off the hot path.*

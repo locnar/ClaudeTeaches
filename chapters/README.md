@@ -119,7 +119,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 
 ## Part II — CPU Microarchitecture
 
-*The hardware reality under all the code — caches, pipelines, branches, the TLB, NUMA across and within the socket (chiplets, tiles and the core-to-core map), and time.*
+*The hardware reality under all the code — caches and the DRAM subsystem below them, pipelines, branches, the TLB, NUMA across and within the socket (chiplets, tiles and the core-to-core map), and time.*
 
 ### [8. The Memory Hierarchy & Caches](08-memory-hierarchy-and-caches.md)
 - 8.1 Why it matters: DRAM is ~55× an L1 hit, ~250 cycles away
@@ -136,12 +136,20 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 8.6 Exercises & checklist
 
 ### [9. The DRAM Subsystem Below L3](09-dram-subsystem-below-l3.md)
-- 9.1 Why it matters: TODO
-- 9.2 Mental model: TODO
-- 9.3 Measure it: TODO
+- 9.1 Why it matters: "~80 ns" is a distribution, and your neighbours move it
+- 9.2 Mental model
+  - 9.2.1 Below the L3: channels, DIMMs, ranks, bank groups, banks, rows
+  - 9.2.2 The row buffer: hit, miss, conflict — why the miss latency is bimodal
+  - 9.2.3 Loaded latency: Little's law at the memory controller
+  - 9.2.4 Refresh, ECC and patrol scrub: the periodic tail sources
+  - 9.2.5 HBM, CXL and memory you did not buy for latency
+- 9.3 Measure it: the per-miss distribution and the loaded-latency curve
 - 9.4 Techniques
-  - 9.4.1 TODO
-- 9.5 Pitfalls & anti-patterns: TODO
+  - 9.4.1 Own the channel: isolate the streamers from the hot socket's memory
+  - 9.4.2 Row locality: lay hot data out so misses hit open rows
+  - 9.4.3 Configure the memory for latency, not capacity
+  - 9.4.4 CPU-less memory: keep CXL and tiering off the hot path
+- 9.5 Pitfalls & anti-patterns: the miss that got slower with no counter changing
 - 9.6 Exercises & checklist
 
 ### [10. Cache-Aware & Data-Oriented Design](10-cache-aware-data-oriented-design.md)
@@ -265,6 +273,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
   - 18.2.1 Node locality and the interconnect
   - 18.2.2 First-touch allocation policy
   - 18.2.3 Nodes within a socket: SNC, NPS and the chiplet level (pointer to Ch. 19)
+  - 18.2.4 CPU-less nodes: CXL expanders, flat HBM and memory tiering
 - 18.3 Measure it: local vs remote DRAM latency with `numactl`
 - 18.4 Techniques
   - 18.4.1 Allocation policy and binding
