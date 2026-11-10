@@ -131,3 +131,7 @@ The rule Ch. 7 and Ch. 83 share: **a round trip to anything that is not the core
 - Ch. 7 (*Choosing & Clocking the Hot-Path CPU*) — how to turn these tables into a purchase; Ch. 19 (*Chiplets, Tiles & NUMA Within the Socket*) — the topology column measured; Ch. 58 (*Power Management & Frequency Determinism*) — the C-state and licence columns measured; Appendix E — the reference-machine table this appendix fans out; Appendix Q — the AMD-specific method notes.
 - Agner Fog, *The microarchitecture of Intel, AMD and VIA CPUs* — the per-generation core descriptions behind the ROB/dispatch/µop-cache rows, updated with each new part.
 - Hennessy & Patterson, *Computer Architecture: A Quantitative Approach* (6th ed.), ch. 2 and Appendix B — why the L3 row moves the way it does as caches grow and fabrics lengthen.
+
+---
+
+*Next: Appendix S — Trading Workloads in Virtual Machines, for the adjacent tier that does run virtualised beside the bare-metal order path: where VM exits happen (EPT walks, `cpuid`, `HLT`/`PAUSE`-loop exiting, MSRs), `kvm-clock` vs the invariant TSC, pinned vCPUs with huge pages on both levels and posted interrupts, SR-IOV VFs through VFIO, and the guest's own `cyclictest` — measured in the test guest.*

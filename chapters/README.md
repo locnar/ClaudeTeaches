@@ -1852,3 +1852,11 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - R.3 AMD: Zen 3 → Zen 4 → Zen 5 (EPYC and Ryzen) — the same columns per CCD generation, V-Cache parts, F-series clocks
 - R.4 Appendix E restated per generation — ns and cycles at each part's pinned clock, with the cross-domain core-to-core row Appendix E cannot have
 - R.5 On-die accelerators: beside the hot path, not on it — AMX, DSA, IAA, QAT, DLB, AVX10, APX
+
+### [Appendix S — Trading Workloads in Virtual Machines](appendix-S-trading-workloads-in-vms.md)
+- S.1 Where a VM belongs, and the question it has to answer
+- S.2 Where the exits are: EPT, MSRs, `cpuid`, `HLT` and `PAUSE`
+- S.3 Time in a guest: `kvm-clock` vs the invariant TSC
+- S.4 Making a guest quiet: pinning, huge pages, APICv, idle polling
+- S.5 SR-IOV, VFIO passthrough and what the guest's driver sees
+- S.6 Checklist — a VM with a latency budget
