@@ -469,33 +469,33 @@ Code & content guidelines:
   renumbered accordingly (the `## Table of Contents` prose above predates this reorg and reflects
   the original drafting order — **the authoritative current structure is `chapters/README.md`**).
   The thirteen Parts and their chapter ranges:
-  - **I — Foundations & Methodology** (1–6): mindset, profiling, benchmarking, reading asm,
-    debugging optimized code, system setup.
-  - **II — CPU Microarchitecture** (7–17).
-  - **III — Compile-Time & Language Mechanics** (18–25): compile-time mechanics, templates & zero-cost
+  - **I — Foundations & Methodology** (1–7): mindset, profiling, benchmarking, reading asm,
+    debugging optimized code, system setup, choosing & clocking the hot-path CPU (Ch. 7, added 2026-11-10 P3-6B).
+  - **II — CPU Microarchitecture** (8–18).
+  - **III — Compile-Time & Language Mechanics** (19–26): compile-time mechanics, templates & zero-cost
     abstractions (with concepts, §19.4.6), compile-time protocol decoders (Ch. 20, added 2026-11-09 P3-5), the cost
     of abstractions (with the calling convention and statics/TLS, §21.4.5–§21.4.6), the cost of modern idioms &
     strings without allocation (Ch. 22, P3-5), aliasing & type punning (with object lifetime / `start_lifetime_as`),
     the build toolchain, build systems & hermetic toolchains (Ch. 25, P3-5).
-  - **IV — Memory Management** (26–29).
-  - **V — Numerics & Data Parallelism** (30–32).
-  - **VI — Concurrency** (33–45): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
+  - **IV — Memory Management** (27–30).
+  - **V — Numerics & Data Parallelism** (31–33).
+  - **VI — Concurrency** (34–46): …the Disruptor, threading topologies & the hot loop (Ch. 41, added
     2026-11-09 P3-4), flow control/backpressure/conflation (Ch. 42, P3-4), coroutines, `std::execution`,
     correctness tooling.
-  - **VII — OS, Scheduling & Isolation** (46–53): context switching, timers & deadlines without jitter
+  - **VII — OS, Scheduling & Isolation** (47–54): context switching, timers & deadlines without jitter
     (Ch. 47, added 2026-11-09 P3-4), pinning, SMT, cache allocation (RDT), RT scheduling, hunting
     residual noise (Ch. 52, added 2026-11-09 P3-1), warming.
-  - **VIII — Kernel I/O, Sockets & Zero-Copy** (54–59): native I/O, io_uring, zero-copy fast path,
+  - **VIII — Kernel I/O, Sockets & Zero-Copy** (55–60): native I/O, io_uring, zero-copy fast path,
     IPC, socket tuning, advanced TCP.
-  - **IX — Market Data, NIC & Fabric** (60–68): decoding, reliable multicast, multicast membership &
+  - **IX — Market Data, NIC & Fabric** (61–69): decoding, reliable multicast, multicast membership &
     dark-feed detection (Ch. 59, added 2026-11-09), NIC, DDIO, flow steering, PTP, precise transmission, fabric.
-  - **X — Kernel Bypass, RDMA & Transport** (69–73): eBPF/XDP, bypass, RDMA, lossless Ethernet,
+  - **X — Kernel Bypass, RDMA & Transport** (70–74): eBPF/XDP, bypass, RDMA, lossless Ethernet,
     transport beyond TCP.
-  - **XI — Heterogeneous Computing & Hardware Acceleration** (74–78): PCIe, GPU, MPI, FPGA, SmartNICs.
+  - **XI — Heterogeneous Computing & Hardware Acceleration** (75–79): PCIe, GPU, MPI, FPGA, SmartNICs.
   - **XII — Beyond C++: Languages at the Latency Floor** (76–80, added 2026-11-09 P3-3): hand-written
     & inline assembly, Rust for the hot path, language interop & ABI boundaries, managed runtimes
     measured, choosing a language per latency tier (the Part's capstone).
-  - **XIII — Observability & Operations in Production** (84–104): logging, in-band latency tracing
+  - **XIII — Observability & Operations in Production** (85–105): logging, in-band latency tracing
     (Ch. 85, added 2026-11-09 P3-2), application telemetry (Ch. 86, P3-1), security, hot reload, process
     topology (with §89.4.7–§89.4.8 checkpointing and segment recovery, P3-6), the pre-trade risk gate &
     kill-switch path (Ch. 90, P3-4), idempotent order entry & order-state recovery (Ch. 91, P3-4), the
