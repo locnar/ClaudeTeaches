@@ -1136,7 +1136,7 @@ A book-length tutorial series on high-performance, low-latency software in **C++
 - 83.7 Exercises & checklist
 ## Part XIII — Observability & Operations in Production
 
-*Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology, the pre-trade risk gate and kill-switch, idempotent order entry and order-state recovery, crash handling, capture/replay, the sequencer and replicated consumers, latency-spike forensics, host and network health, and the end-to-end case study.*
+*Running the system: logging, in-band latency tracing and telemetry, security, hot reload, process topology (with checkpointing and segment recovery), the pre-trade risk gate and kill-switch, idempotent order entry and order-state recovery, the order-entry gateway and session layer, crash handling, capture/replay and line-rate wire capture with timing-faithful replay, the sequencer and replicated consumers, failover without split-brain, latency-spike forensics, host and network health, the engineering lifecycle — testing, performance gates in CI and the profile lifecycle, release engineering — and the end-to-end case study.*
 
 ### [84. Zero-Overhead Logging](84-zero-overhead-logging.md)
 - 84.1 Why it matters: logging must never stall the hot path

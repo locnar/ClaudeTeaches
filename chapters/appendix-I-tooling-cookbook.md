@@ -192,6 +192,19 @@ Inspecting and tuning the RX/TX path (Ch. 58, 60, 63, 64).
    sudo bpftrace -e 'tracepoint:skb:kfree_skb { @[args->reason, ksym(args->location)] = count(); }'   # drop REASON + location; arm BEFORE the session (text_poke IPIs)
    ethtool -m eth0 | grep -iE 'power|temperature'                     # optics DOM: rx/tx power vs the module's warning thresholds
    cat /sys/class/net/eth0/carrier_changes                            # link flaps since boot
+   # --- line-rate capture, replay and passive measurement (Ch. 95, Ch. 68 §68.4.4)
+   tcpdump -i eth0 -j adapter_unsynced --time-stamp-precision=nano -B 262144 -w open.pcapng 'udp and dst net 233.0.0.0/8'   # NIC hw stamps, ns, big buffer; -Z/-U as needed
+   tshark -r open.pcapng -q -z io,stat,0.001,'udp'                      # packets per ms: the burst's shape (gap histogram: -T fields -e frame.time_delta)
+   capinfos -c -u -y open.pcapng                                        # packet count, duration, average rate; the ISB drop counters: tshark -r f -Y pcapng.isb
+   cat /proc/net/packet                                                 # every AF_PACKET socket: RxRing/Drops columns = PACKET_STATISTICS (ring full → lossy capture)
+   ethtool -K eth0 gro off lro off rx-vlan-offload off                  # capture what was on the wire, not what the NIC coalesced/stripped (Ch. 95 §95.4.2)
+   ethtool -S eth0 | grep -iE 'drop|miss|fifo' > before; … ; diff before <(ethtool -S eth0 | grep -iE 'drop|miss|fifo')   # the per-session losslessness proof, NIC layer
+   tcpreplay -i eth1 --timer=nano -p 0 open.pcapng                      # best-effort nanosleep pacing (measure its gap error — Ch. 95 §95.3 — before trusting it)
+   tcpreplay -i eth1 -t open.pcapng                                     # as fast as possible: a THROUGHPUT test, not a timing one
+   # --- the order session's liveness timers (Ch. 59 §59.4.4, Ch. 92 §92.4.4)
+   ss -tio dst <venue> | grep -oE 'rto:[0-9.]+|backoff:[0-9]+|retrans:[0-9/]+|unacked:[0-9]+'   # is the venue silent? RTO doubling and backoff climbing = no ACKs
+   sysctl net.ipv4.tcp_retries2 net.ipv4.tcp_keepalive_time net.ipv4.tcp_syn_retries           # 15 (≈ 924 s), 7200 s, 6 (≈ 127 s) — the defaults a gateway must not rely on
+   iptables -I INPUT -i lo -p tcp --sport <peer-port> -j DROP           # dead-peer drill on loopback (Ch. 92 §92.3's tcpdetect); -D to remove
 ```
 
 **Interpreting:** the `ethtool -S ... drop` counters are the first thing to check after a market-open incident (Ch. 60) — non-zero RX drops mean the ring overflowed and you lost packets in hardware, which no software tuning downstream can recover — Ch. 100 §100.2 is the per-driver map of which counter means ring-full, port-FIFO (PCIe) or link error, and §100.4.2 the `kfree_skb` forensics for drops the counters don't explain. `ethtool -T`/`ptp4l`/`phc2sys` are the hardware-timestamp and clock-sync chain behind wire-to-wire measurement (Ch. 66, Appendix K.5).
